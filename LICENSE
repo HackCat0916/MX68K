@@ -1,0 +1,55 @@
+MX68K License (Non-Commercial Freeware)
+========================================
+
+Copyright (c) 2026 HackCat0916
+
+This software ("MX68K") is provided as freeware. Subject to the
+restrictions below, you are granted a non-exclusive, worldwide,
+royalty-free license to:
+
+  - Use this software for any personal, non-commercial purpose.
+  - Copy and redistribute the compiled binary distribution (the `.app` /
+    `.dmg` files published under "Releases") unmodified and free of charge.
+
+The following are NOT permitted without prior written permission from the
+copyright holder:
+
+  - Commercial use, in whole or in part, of this software or any portion
+    of it (including bundling it with, or using it to promote, a
+    commercial product or service).
+  - Selling, sublicensing, or otherwise charging a fee for this software
+    or any derivative of it.
+  - Redistribution of modified binaries.
+  - Reverse engineering, decompiling, or disassembling this software,
+    except to the extent such restriction is prohibited by applicable law.
+
+Third-Party Components
+-----------------------
+
+This software incorporates source code ported from XM6 (Copyright (C)
+2001-2006 ＰＩ．), which is licensed for non-commercial use only. See
+`NOTICE-THIRD-PARTY.md` for full attribution and license terms; that
+restriction applies to MX68K as a whole for as long as the ported code
+is included.
+
+This software also uses the following open-source components under their
+own respective licenses (see each upstream project for details):
+
+  - px68k        — https://github.com/hissorii/px68k
+  - c68k          — https://github.com/kenyahiro/c68k
+  - fmgen         — http://retropc.net/cisc/m88/ (by cisc)
+
+Sharp X68000 BIOS ROM files are NOT included with this software and are
+NOT covered by this license. Users must supply their own legally obtained
+copies.
+
+Disclaimer
+----------
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
