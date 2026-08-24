@@ -1,6 +1,6 @@
-# MX68K 使い方ガイド
+# MX68K 使い方ガイド / Usage Guide
 
-## 1. BIOSファイルの準備
+## 1. BIOSファイルの準備 / BIOS File Setup
 
 MX68Kの動作には、実機由来のX68000 BIOS ROMファイルが必要です（著作権の都合上、本リポジトリには含まれていません）。実機をお持ちの方は吸い出しツール等でご用意ください。最低限必要なのは`IPLROM.DAT`・`CGROM.DAT`の2つで、他は用途に応じた任意ファイルです。
 
@@ -14,7 +14,21 @@ MX68Kの動作には、実機由来のX68000 BIOS ROMファイルが必要です
 
 配置先: `~/Library/Application Support/MX68K/bios/`
 
-## 2. 初回起動
+**English:**
+
+MX68K requires original X68000 BIOS ROM files obtained from a real machine (they are not included in this repository due to copyright). Only `IPLROM.DAT`/`CGROM.DAT` are strictly required; the rest are optional depending on which features you use.
+
+| File | Description | Size | Required |
+|------|-------------|------|----------|
+| `IPLROM.DAT` | IPL ROM (Original ~ XVI) | 131,072 bytes | Yes |
+| `CGROM.DAT` | Character Generator ROM | 786,432 bytes | Yes |
+| `IPLROM30.DAT` | IPL ROM (X68030 mode) | 131,072 bytes | Optional |
+| `SCSIINROM.DAT` | Internal SCSI boot IPL ROM | 8,192 bytes | Optional (booting from internal SCSI) |
+| `SCSIEXROM.DAT` | External SCSI board (CZ-6BS1) boot IPL ROM | 8,192 bytes | Optional (booting from external SCSI) |
+
+Location: `~/Library/Application Support/MX68K/bios/`
+
+## 2. 初回起動 / First Launch
 
 1. `MX68K.app` を起動します。
 2. BIOSファイルが未設定の場合、設定画面が自動的に表示されます。「BIOS」タブでIPL-ROM/CG-ROMのパスを指定してください。
@@ -22,9 +36,17 @@ MX68Kの動作には、実機由来のX68000 BIOS ROMファイルが必要です
 
 初回はフロッピーディスクが何も挿入されていない状態で起動します。X68000本体だけが起動し、`SASI/SCSI IOCS`のみが動く状態（実機と同じ）になるため、Human68kを起動するには次の手順でディスクイメージをマウントしてください。
 
-## 3. ディスクイメージのマウント
+**English:**
 
-### フロッピーディスク（FDD0/FDD1）
+1. Launch `MX68K.app`.
+2. If the BIOS files are not yet configured, the settings screen opens automatically. Specify the IPL-ROM/CG-ROM paths under the "BIOS" tab.
+3. Once BIOS setup is complete, the main emulator screen appears and emulation starts.
+
+On first launch, no floppy disk is inserted. Only the X68000 hardware boots, with just `SASI/SCSI IOCS` running (identical to a real machine). To boot Human68k, mount a disk image using the steps below.
+
+## 3. ディスクイメージのマウント / Mounting Disk Images
+
+### フロッピーディスク（FDD0/FDD1） / Floppy Disks (FDD0/FDD1)
 
 以下のいずれかの方法でマウントできます。
 
@@ -36,7 +58,19 @@ MX68Kの動作には、実機由来のX68000 BIOS ROMファイルが必要です
 
 イジェクトはツールバーのイジェクトボタン、または File メニューから行えます。南京錠アイコンで書込み禁止（ライトプロテクト）の切り替えも可能です。
 
-### ハードディスク（SASI/SCSI）・MO・CD-ROM
+**English:**
+
+You can mount a floppy disk image in any of the following ways:
+
+- **Drag & Drop** — drop a disk image onto the emulator window (mounts to FDD0 if empty, otherwise FDD1)
+- **Toolbar** — use the folder icon at the top to choose a file
+- **File menu** — "FD Drive (FD0)" / "FD Drive (FD1)" → "Insert…"
+
+Supported formats: `.xdf` `.dim` `.d88` `.hdm` `.2hd` `.img` `.zip` (a selection sheet appears when mounting a zip containing multiple images).
+
+Eject via the toolbar's eject button or the File menu. The padlock icon toggles write protection.
+
+### ハードディスク（SASI/SCSI）・MO・CD-ROM / Hard Disks (SASI/SCSI), MO, CD-ROM
 
 これらは設定画面（⌘,）の各タブから設定します。メイン画面へのドラッグ&ドロップは受け付けません（実機の構造上、フロッピーとは別の仕組みのため）が、**各タブ内のディスク行へは直接ドラッグ&ドロップでマウントできます**。
 
@@ -49,13 +83,30 @@ MOおよびCD-ROMをゲスト側から利用するには、`SUSIE.X`等のサー
 
 新規の空FD/SASI HDD/SCSI HDD/MOイメージは、**Tools メニュー → Create Image** から作成できます（CD-ROMは読み取り専用メディアのため対象外です）。
 
-## 4. 基本操作
+**English:**
 
-### ツールバー・ステータスバー
+These are configured from the corresponding tabs in the settings window (⌘,). Drag & drop onto the main window is not supported for these (a real X68000 handles them through a different mechanism than floppies), but **you can drag & drop directly onto the disk row inside each settings tab**.
+
+| Tab | Contents |
+|---|---|
+| SASI | SASI HDDs (up to 8). Used on the Original ~ PRO generation machine configurations |
+| SCSI | Internal SCSI HDD, external SCSI, **MO drive (fixed ID5)**, **CD-ROM drive (fixed ID6, `.iso` image, Mode1 only)** |
+
+To use MO or CD-ROM from the guest side, a third-party SCSI device driver such as `SUSIE.X` must be present and resident on a guest disk (this matches real hardware — the genuine BIOS does not include a block-device driver for MO/CD-ROM). Both MO and CD-ROM support live media swap (insert/eject while running), but CD-ROM does not support audio tracks (CD-DA) or CD-boot.
+
+New blank FD/SASI HDD/SCSI HDD/MO images can be created from **Tools menu → Create Image** (CD-ROM is excluded, as it is a read-only medium).
+
+## 4. 基本操作 / Basic Operation
+
+### ツールバー・ステータスバー / Toolbar & Status Bar
 
 ウィンドウ上部にリセット（ハード/ソフト）・Interrupt（NMI相当）・FDDの各種操作ボタンがあります。下部のステータスバーには実行速度・CPUクロック・メモリ容量・FDD/HDDのアクセスランプ・TIMER-LEDなどが表示されます。
 
-### キーボードショートカット
+**English:**
+
+The top of the window has buttons for reset (hard/soft), Interrupt (NMI equivalent), and various FDD operations. The status bar at the bottom shows execution speed, CPU clock, memory size, FDD/HDD access lamps, the TIMER-LED, and more.
+
+### キーボードショートカット / Keyboard Shortcuts
 
 | 操作 | ショートカット |
 |------|------|
@@ -83,17 +134,53 @@ X68000本体はJIS配列キーボードを採用しているため、macOSのキ
 | COPY | F14 |
 | BREAK | F15 |
 
-### ゲームパッド
+**English:**
+
+| Action | Shortcut |
+|------|------|
+| Hard reset | ⌘R |
+| Soft reset | ⌘⇧R |
+| Interrupt (NMI) | ⌘⇧N |
+| Pause | ⌘P |
+| Toggle turbo | ⌘⇧T |
+| Screenshot | ⌘S (saved to `~/Pictures/MX68K/`, configurable) |
+| State save | ⌘⌥S |
+| State load | ⌘⌥O |
+| Open settings | ⌘, |
+| Toggle fullscreen | ^⌘F |
+| Display scale 1x / 1.5x / 2x | ⌘1 / ⌘2 / ⌘3 |
+| Software keyboard | ⌘⌥K |
+| Toggle mouse capture | ⌘⌥M |
+
+The X68000 uses a JIS keyboard layout, so some macOS keys map differently to X68000 keys. The main mappings are below (further individual remapping is available under the "Input" tab in settings):
+
+| X68000 Key | macOS Key |
+|-----------|-----------|
+| XF1–XF5 | F6–F10 |
+| HELP | F13 |
+| ROLL UP | Page Up (a separate key from HELP) |
+| COPY | F14 |
+| BREAK | F15 |
+
+### ゲームパッド / Gamepad
 
 設定画面の「Input」タブから、ポート1/ポート2へ接続するコントローラを個別に選択できます。標準2ボタンに加え、CPSF-MD（6ボタン）・マジカルパッド（4ボタン）のプロファイルにも対応しています。
 
-## 5. モニタパネル
+**English:**
+
+From the "Input" tab in settings, you can individually choose the controller connected to Port 1 / Port 2. In addition to the standard 2-button pad, CPSF-MD (6-button) and Magical Pad (4-button) profiles are supported.
+
+## 5. モニタパネル / Monitor Panels
 
 Monitor メニューから、CPU・CRTC・ビデオコントローラ・BG・スプライト・サウンド（OPMシンセサイザー含む）・パレット・入力状態など、18種類のモニタパネルを個別に開けます（System / Processor / Device / Video / Renderer の5グループに分類）。いずれも読み取り専用の観測用ウィンドウです。
 
-## 6. トラブルシューティング
+**English:**
 
-### 「開発元が未確認のため開けません」と表示される
+From the Monitor menu, you can open any of 18 monitor panels individually — CPU, CRTC, video controller, BG, sprite, sound (including an OPM synthesizer view), palette, input state, and more (organized into 5 groups: System / Processor / Device / Video / Renderer). All are read-only observation windows.
+
+## 6. トラブルシューティング / Troubleshooting
+
+### 「開発元が未確認のため開けません」と表示される / "Cannot be opened because the developer cannot be verified"
 
 本アプリはApple公証（notarization）を受けていません。以下のいずれかで起動できます。
 
@@ -101,10 +188,26 @@ Monitor メニューから、CPU・CRTC・ビデオコントローラ・BG・ス
 2. それでも開けない場合は、システム設定 →「プライバシーとセキュリティ」の最下部に表示される「このまま開く」ボタンを押す
 3. ターミナルで `xattr -cr /Applications/MX68K.app` を実行してから起動する
 
-### エミュレーションが起動しない・画面が真っ黒
+**English:**
+
+This app is not notarized by Apple. You can launch it using any of the following:
+
+1. **Right-click (or Control-click) `MX68K.app` → "Open"**
+2. If that doesn't work, go to System Settings → "Privacy & Security" and click "Open Anyway" near the bottom of the page
+3. Run `xattr -cr /Applications/MX68K.app` in Terminal, then launch it
+
+### エミュレーションが起動しない・画面が真っ黒 / Emulation doesn't start / the screen is black
 
 BIOSファイル（`IPLROM.DAT`/`CGROM.DAT`）が正しく配置・設定されているか、設定画面の「BIOS」タブで確認してください。
 
-### ディスクからHuman68kが起動しない
+**English:**
+
+Check that the BIOS files (`IPLROM.DAT`/`CGROM.DAT`) are correctly placed and configured, under the "BIOS" tab in settings.
+
+### ディスクからHuman68kが起動しない / Human68k doesn't boot from disk
 
 `human302.xdf`等、ブート可能なシステムディスクをFDD0にマウントしているか確認してください。HDD/SCSI起動の場合は、対応するタブでブート可能なイメージが正しいIDに設定されているか確認してください。
+
+**English:**
+
+Check that a bootable system disk (such as `human302.xdf`) is mounted in FDD0. For HDD/SCSI boot, check that a bootable image is set to the correct ID in the corresponding tab.
