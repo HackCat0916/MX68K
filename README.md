@@ -20,13 +20,14 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 - **px68kコア** — 実績のあるpx68kエミュレーションコアをベースに実機ソフトの動作を目指す
 - **Apple Silicon ネイティブ** — arm64アーキテクチャに最適化（M1/M2/M3/M4シリーズ対応）
 - **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
+- **拡張FDD対応（FD2/FD3）** — Fileメニューから2台の追加フロッピードライブが利用可能（設定画面のHardwareタブで有効化、既定は無効）
 - **ドラッグ&ドロップマウント** — ディスクイメージをウィンドウにドロップしてFDDマウント（**FD のみ** — HDD/SCSI/CD-ROM/MOイメージは各設定画面の該当行へD&D可）
 - **キーボード入力** — X68000のJISキーボードレイアウトに対応、キーリマップ設定・ソフトウェアキーボード対応
 - **ターボ / ノーウェイト** — 2x〜5x固定倍率、または上限無しの専用スレッド駆動ノーウェイトモード
 - **ゲームパッド対応** — 2ポート対応、複数ボタンプロファイル（Standard / CPSF-MD / マジカルパッド）
 - **ステートセーブ/ロード** — `*.mxstate`形式、個数無制限
 - **スクリーンショット** — PNG保存（保存先変更可）
-- **SASI / SCSI HDD** — SASI 8台・外付けSCSI/内蔵SCSI対応
+- **SASI / SCSI HDD** — SASI 8台・外付けSCSI/内蔵SCSI対応、イメージの誤挿入（SASI/SCSI取り違え）を検出
 - **MOドライブ** — SCSI ID5固定スロット、実行中のライブ媒体交換対応
 - **CD-ROM（ISO・Mode1）マウント** — SCSI ID6固定スロット（CD-DA・CDブートは非対応）
 - **Windrv** — Macのフォルダを共有ドライブとしてゲストからファイル読み書き
@@ -41,13 +42,14 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 - **px68k Core** — based on the proven px68k emulation core, aiming for compatibility with real X68000 software
 - **Apple Silicon Native** — optimized for arm64 (M1/M2/M3/M4 series)
 - **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, ISO, **ZIP** (FD, single/multi-image archives)
+- **Extended Floppy Drives (FD2/FD3)** — two additional floppy drives available from the File menu (enable in the Hardware settings tab, off by default)
 - **Drag & Drop Mounting** — drop a disk image onto the window to mount it as FDD (**FD only** — HDD/SCSI/CD-ROM/MO images can be dropped onto the corresponding row in each settings tab)
 - **Keyboard Input** — X68000 JIS keyboard layout support, key remapping, on-screen software keyboard
 - **Turbo / No-Wait** — fixed 2x–5x multipliers, or an uncapped dedicated-thread no-wait mode
 - **Gamepad Support** — 2 ports, multiple button profiles (Standard / CPSF-MD / Magical Pad)
 - **State Save / Load** — `*.mxstate` format, unlimited slots
 - **Screenshot** — saved as PNG (destination configurable)
-- **SASI / SCSI HDD** — up to 8 SASI drives, internal/external SCSI support
+- **SASI / SCSI HDD** — up to 8 SASI drives, internal/external SCSI support, detects HDD image misinsertion (SASI/SCSI format mismatch)
 - **MO Drive** — dedicated SCSI ID5 slot, live media swap while running
 - **CD-ROM (ISO / Mode1) Mount** — dedicated SCSI ID6 slot (CD-DA and CD-boot are not supported)
 - **Windrv** — share a Mac folder as a guest-accessible drive for file read/write
