@@ -172,11 +172,11 @@ From the "Input" tab in settings, you can individually choose the controller con
 
 ## 5. モニタパネル / Monitor Panels
 
-Monitor メニューから、CPU・CRTC・ビデオコントローラ・BG・スプライト・サウンド（OPMシンセサイザー含む）・パレット・入力状態など、18種類のモニタパネルを個別に開けます（System / Processor / Device / Video / Renderer の5グループに分類）。いずれも読み取り専用の観測用ウィンドウです。
+Monitor メニューから、CPU・CRTC・ビデオコントローラ・BG・スプライト・サウンド（OPMシンセサイザー含む）・パレット・入力状態・ストレージ・MIDI・RTCなど、21種類のモニタパネルを個別に開けます（System / Processor / Device / Sound / Peripherals / Video / Renderer の7グループに分類）。いずれも読み取り専用の観測用ウィンドウです。
 
 **English:**
 
-From the Monitor menu, you can open any of 18 monitor panels individually — CPU, CRTC, video controller, BG, sprite, sound (including an OPM synthesizer view), palette, input state, and more (organized into 5 groups: System / Processor / Device / Video / Renderer). All are read-only observation windows.
+From the Monitor menu, you can open any of 21 monitor panels individually — CPU, CRTC, video controller, BG, sprite, sound (including an OPM synthesizer view), palette, input state, storage, MIDI, RTC, and more (organized into 7 groups: System / Processor / Device / Sound / Peripherals / Video / Renderer). All are read-only observation windows.
 
 ## 6. トラブルシューティング / Troubleshooting
 
