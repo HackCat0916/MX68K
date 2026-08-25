@@ -33,7 +33,7 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 - **Windrv** — Macのフォルダを共有ドライブとしてゲストからファイル読み書き
 - **走査線エフェクト** — CRTディスプレイ風の表示効果をオン/オフ切替
 - **拡張ボード** — MIDI（CZ-6BM1相当）・Mercury Unit（MK-MU1相当）
-- **18種のモニタパネル** — CPU/CRTC/ビデオコントローラ/BG/サウンド/パレット/入力/スプライト/OPMシンセサイザー等（System/Processor/Device/Video/Rendererの5グループに整理）
+- **21種のモニタパネル** — CPU/CRTC/ビデオコントローラ/BG/サウンド/パレット/入力/ストレージ/MIDI/RTC/スプライト/OPMシンセサイザー等（System/Processor/Device/Sound/Peripherals/Video/Rendererの7グループに整理）
 - **多言語対応** — 日本語/英語切り替え対応
 
 **English:**
@@ -55,7 +55,7 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 - **Windrv** — share a Mac folder as a guest-accessible drive for file read/write
 - **Scanline Effect** — toggleable CRT-style display effect
 - **Extension Boards** — MIDI (CZ-6BM1 equivalent), Mercury Unit (MK-MU1 equivalent)
-- **18 Monitor Panels** — CPU/CRTC/video controller/BG/sound/palette/input/sprite/OPM synthesizer, etc. (organized into 5 groups: System/Processor/Device/Video/Renderer)
+- **21 Monitor Panels** — CPU/CRTC/video controller/BG/sound/palette/input/storage/MIDI/RTC/sprite/OPM synthesizer, etc. (organized into 7 groups: System/Processor/Device/Sound/Peripherals/Video/Renderer)
 - **Localization** — switchable Japanese/English UI
 
 ---
