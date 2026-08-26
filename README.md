@@ -27,6 +27,7 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 - **ゲームパッド対応** — 2ポート対応、複数ボタンプロファイル（Standard / CPSF-MD / マジカルパッド）
 - **ステートセーブ/ロード** — `*.mxstate`形式、個数無制限
 - **スクリーンショット** — PNG保存（保存先変更可）
+- **動画録画** — H.264(映像)+AAC(音声)/mp4録画、解像度モードが切り替わってもライブ表示と同じ見た目で記録（保存先変更可、録画中はTurbo/No-Waitを禁止）
 - **SASI / SCSI HDD** — SASI 8台・外付けSCSI/内蔵SCSI対応、イメージの誤挿入（SASI/SCSI取り違え）を検出
 - **MOドライブ** — SCSI ID5固定スロット、実行中のライブ媒体交換対応
 - **CD-ROM（ISO・Mode1）マウント** — SCSI ID6固定スロット（CD-DA・CDブートは非対応）
@@ -49,6 +50,7 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 - **Gamepad Support** — 2 ports, multiple button profiles (Standard / CPSF-MD / Magical Pad)
 - **State Save / Load** — `*.mxstate` format, unlimited slots
 - **Screenshot** — saved as PNG (destination configurable)
+- **Video Recording** — H.264(video)+AAC(audio)/mp4 recording, matches the live display even when the resolution mode changes (destination configurable, Turbo/No-Wait disabled while recording)
 - **SASI / SCSI HDD** — up to 8 SASI drives, internal/external SCSI support, detects HDD image misinsertion (SASI/SCSI format mismatch)
 - **MO Drive** — dedicated SCSI ID5 slot, live media swap while running
 - **CD-ROM (ISO / Mode1) Mount** — dedicated SCSI ID6 slot (CD-DA and CD-boot are not supported)

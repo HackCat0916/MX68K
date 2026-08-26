@@ -116,6 +116,7 @@ The top of the window has buttons for reset (hard/soft), Interrupt (NMI equivale
 | 一時停止 | ⌘P |
 | ターボ切替 | ⌘⇧T |
 | スクリーンショット | ⌘S（保存先: `~/Pictures/MX68K/`、設定変更可） |
+| 動画録画 開始/停止 | ショートカットなし、Emulatorメニューから（保存先: `~/Movies/MX68K/`、設定変更可。録画中はターボ/ノーウェイト不可） |
 | ステートセーブ | ⌘⌥S |
 | ステートロード | ⌘⌥O |
 | 設定を開く | ⌘, |
@@ -144,6 +145,7 @@ X68000本体はJIS配列キーボードを採用しているため、macOSのキ
 | Pause | ⌘P |
 | Toggle turbo | ⌘⇧T |
 | Screenshot | ⌘S (saved to `~/Pictures/MX68K/`, configurable) |
+| Start/Stop Recording | No shortcut, from the Emulator menu (saved to `~/Movies/MX68K/`, configurable; Turbo/No-Wait disabled while recording) |
 | State save | ⌘⌥S |
 | State load | ⌘⌥O |
 | Open settings | ⌘, |
