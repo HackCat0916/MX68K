@@ -211,7 +211,7 @@ modified versions are prohibited. See [LICENSE](LICENSE) for details.
 ## 謝辞 / Acknowledgements
 
 - [px68k](https://github.com/hissorii/px68k) by hissorii — X68000エミュレータコア / X68000 emulator core
-- [c68k](https://github.com/kenyahiro/c68k) by kenyahiro — MC68000 CPUエミュレータ（ARM64フォーク） / MC68000 CPU emulator (ARM64 fork)
+- [c68k](https://github.com/kenyahiro/px68k/tree/master/m68000/c68k) by kenyahiro — MC68000 CPUエミュレータ（kenyahiro氏のpx68kフォーク内、ARM64対応） / MC68000 CPU emulator (from kenyahiro's px68k fork, ARM64-compatible)
 - [fmgen](http://retropc.net/cisc/m88/) by cisc — FM音源生成ライブラリ / FM sound generator library
 
 ---
