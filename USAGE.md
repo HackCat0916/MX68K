@@ -1,4 +1,77 @@
+<!--
+  このファイルは公開リポジトリ（github.com/HackCat0916/MX68K）に
+  `USAGE.md` として置く使い方ガイドの下書き。README_public.md と同様、
+  開発者向けの内部設計への言及はしない前提で書く。ソースコード一式を
+  公開する方針(2026-09)のため、ビルド方法(macOS/iOS)も含む。
+
+  README.md/README_public.md の機能一覧を更新した場合、本ファイルの
+  対応箇所（メニュー構成・ショートカット等）も同時に確認すること。
+
+  各節は「日本語 → English」の順で併記する(2026-08-24追加)。
+-->
+
 # MX68K 使い方ガイド / Usage Guide
+
+## 0. ビルド方法 / Building from Source
+
+### macOS
+
+1. `MX68K/MX68K.xcodeproj` をXcodeで開き、`MX68K`スキームを選択して実行(⌘R)します。
+   コマンドラインの場合: `xcodebuild -project MX68K/MX68K.xcodeproj -scheme MX68K -destination 'platform=macOS'`
+2. 必要環境: macOS 13.0以降・Xcode 15.0以降。
+
+### iOS
+
+1. `MX68K-iOS`スキームを選択し、シミュレータまたは実機を実行先に指定して実行(⌘R)します。
+2. **実機へインストールする場合**（App Store・Apple Developer Program加入いずれも不要）:
+   - iPhone/iPadをUSB（またはWi-Fi）でMacに接続します。
+   - Xcodeの「Signing & Capabilities」タブで、Teamに自分のApple ID（無料の
+     Personal Team。Xcode → Settings → Accountsで未サインインの場合は
+     ここでサインインすると自動的に作成されます）を選択します。
+   - 実行先に接続した実機を選び、⌘Rでビルド・署名・インストールします。
+   - 初回起動時はiOS側で「信頼されていない開発者」として拒否されます。
+     設定 → 一般 → VPNとデバイス管理 で自分のApple IDを選び「信頼」を
+     タップしてください。
+   - **無料アカウントの署名は7日間で失効します。** 失効後は再度Xcodeから
+     実行し直せば再署名されます（Apple側の制約で、MX68K固有の制限では
+     ありません）。
+3. BIOSファイルの配置: iOS版はファイルシステムへ直接コピーする代わりに、
+   起動時の設定画面（またはメニューの「Settings」）の「BIOS」タブから
+   Filesアプリ経由でIPLROM.DAT/CGROM.DAT等を選択します。選択したファイルは
+   アプリ内のストレージへ自動的にコピーされます。
+4. 必要環境: iOS 16.0以降、Xcode 15.0以降。
+
+**English:**
+
+### macOS
+
+1. Open `MX68K/MX68K.xcodeproj` in Xcode, select the `MX68K` scheme, and
+   run it (⌘R). Command line: `xcodebuild -project MX68K/MX68K.xcodeproj -scheme MX68K -destination 'platform=macOS'`
+2. Requirements: macOS 13.0+, Xcode 15.0+.
+
+### iOS
+
+1. Select the `MX68K-iOS` scheme, pick a Simulator or a connected device as
+   the run destination, and run it (⌘R).
+2. **Installing on a real device** (no App Store or paid Apple Developer
+   Program membership required):
+   - Connect your iPhone/iPad to your Mac via USB (or Wi-Fi).
+   - Under Xcode's "Signing & Capabilities" tab, set Team to your own Apple
+     ID (a free "Personal Team" — sign in under Xcode → Settings → Accounts
+     first if you haven't; Xcode creates the Personal Team automatically).
+   - Select your connected device as the run destination and run (⌘R) —
+     Xcode builds, signs, and installs the app.
+   - On first launch, iOS will refuse to run the app as an "Untrusted
+     Developer". Go to Settings → General → VPN & Device Management, select
+     your Apple ID, and tap "Trust".
+   - **Free-account signatures expire after 7 days.** After that, just run
+     from Xcode again to re-sign — this is an Apple platform limitation, not
+     specific to MX68K.
+3. BIOS files: instead of copying files directly into the filesystem, the
+   iOS build's Settings screen (shown on first launch, or from the menu) has
+   a "BIOS" tab that opens the Files app to pick `IPLROM.DAT`/`CGROM.DAT`
+   etc. — selected files are copied into the app's own storage automatically.
+4. Requirements: iOS 16.0+, Xcode 15.0+.
 
 ## 1. BIOSファイルの準備 / BIOS File Setup
 
@@ -116,7 +189,6 @@ The top of the window has buttons for reset (hard/soft), Interrupt (NMI equivale
 | 一時停止 | ⌘P |
 | ターボ切替 | ⌘⇧T |
 | スクリーンショット | ⌘S（保存先: `~/Pictures/MX68K/`、設定変更可） |
-| 動画録画 開始/停止 | ショートカットなし、Emulatorメニューから（保存先: `~/Movies/MX68K/`、設定変更可。録画中はターボ/ノーウェイト不可） |
 | ステートセーブ | ⌘⌥S |
 | ステートロード | ⌘⌥O |
 | 設定を開く | ⌘, |
@@ -145,7 +217,6 @@ X68000本体はJIS配列キーボードを採用しているため、macOSのキ
 | Pause | ⌘P |
 | Toggle turbo | ⌘⇧T |
 | Screenshot | ⌘S (saved to `~/Pictures/MX68K/`, configurable) |
-| Start/Stop Recording | No shortcut, from the Emulator menu (saved to `~/Movies/MX68K/`, configurable; Turbo/No-Wait disabled while recording) |
 | State save | ⌘⌥S |
 | State load | ⌘⌥O |
 | Open settings | ⌘, |

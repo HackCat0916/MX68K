@@ -1,0 +1,684 @@
+# 分類: A
+# 出典リポジトリ: MPX68K https://github.com/YosAwed/MPX68K
+#   (該当ファイル: "X68000 Shared/px68k/x68k/crtc_timing.c" / "crtc_timing.h" /
+#    "crtc.c" / "crtc.h" / "mfp.c" / "sysport.c")
+# 参照コミットハッシュ:
+#   - merge commit: 0d096dab8048e64f0e850f35c500e9e746929347
+#     (PR#26 "Derive the per-field cycle budget from CRTC registers", merged 2026-08-19)
+#   - PR head:      eaeb194428505c9f209da79e26974bec40fbcddd
+#   (本サイクルで `gh pr diff 26` に加え、crtc_timing.c/h の**全文**を
+#    `gh api repos/YosAwed/MPX68K/contents/...?ref=0d096dab...` で取得して字面照合済み。
+#    PR#26 の diff は crtc_timing.c/h に対しては差分のみを含む——両ファイルは
+#    PR#26 以前から MPX68K に存在するため、全文取得が必須だった。)
+#
+# 参考情報(副次、「参照実装」としてではなく設計裏付けとして引用):
+#   px68k-libretro 個人フォーク uraraworks/px68k-libretro (emscripten ブランチ、
+#   本流 libretro/px68k-libretro ではない) merge aab8032af7602b8dbfc7f04c5a206559f0f7d7b4
+#   投稿者 renatus-novus-x。CRTC_MIN/MAX_FRAME_CLOCKS (30Hz-130Hz クランプ) の
+#   一次情報源としてのみ参照。同フォークの実装自体は簡易版(状態を持たない
+#   毎フィールド再計算)であり、本パッチが採用したのは MPX68K の高精度版(分数保持)。
+#
+# 対象ファイル:行範囲:
+#   - Core/px68k/x68k/crtc_timing.h  (新規ファイル、151行)
+#   - Core/px68k/x68k/crtc_timing.c  (新規ファイル、199行)
+#   - Core/px68k/x68k/crtc.c:10-11   (include 追加: crtc_timing.h / sysport.h)
+#   - Core/px68k/x68k/crtc.c:48付近  (CRTC_UpdateHSyncClock() / CRTC_GetFrameClocks() 新設)
+#   - Core/px68k/x68k/crtc.c:201付近 (CRTC_Init 内、分数状態のリセット初期化)
+#   - Core/px68k/x68k/crtc.c:271付近 (CRTC_Write16 case 0x00/0x01 = R00、呼出し**追加**)
+#   - Core/px68k/x68k/crtc.c:296     (CRTC_Write16 case 0x08/0x09 = R04、直接計算を**置換**)
+#   - Core/px68k/x68k/crtc.c:346     (CRTC_Write16 case 0x29   = R20、直接計算を**置換**)
+#   - Core/px68k/x68k/crtc.h:24付近  (新規2関数の宣言追加)
+#   - Core/px68k/x68k/mfp.c:175-179  (MFP_Read 内、case 0x01 = GPIP、HSYNC位置判定)
+#   - Core/px68k/x68k/sysport.c:8,44 (crtc.h include / HRL ビット書込みフック)
+# 理由(1行): D-65 — MXの垂直リフレッシュレートが CRTC レジスタ(R00/R04/R20/HRL)に
+#   追従せず R20 bit4 のみの固定2値(180310/162707サイクル)だった問題を、
+#   実機同様「ラスタ周期は水平タイミングだけで決まる」モデルへ置換する。
+# 由来サイクル: P641
+#
+# ---------------------------------------------------------------------------
+# ★P639 を吸収済み (SUPERSEDED)
+# ---------------------------------------------------------------------------
+# Patches/Core/p639_zero_division_guard.patch (未適用) の内容は**本パッチに
+# 全て含まれる**。P639 は取り下げ済みで、単独適用は不要かつ不可(同一箇所を
+# 触るため衝突する)。内訳:
+#   (1) crtc.c のゼロガード式 `/(VLINE_TOTAL?VLINE_TOTAL:1)` は、本パッチが
+#       新設する CRTC_UpdateHSyncClock() の**退避経路(else 側)に内包**された。
+#       通常経路はそもそも VLINE_TOTAL で除算しないため、ゼロ除算の余地が無い。
+#   (2) mfp.c のブロックスコープ化 + htotal ゼロガードは、P639 と**字面完全一致**で
+#       そのまま含まれる(コメントのみ和文化)。
+#
+# ---------------------------------------------------------------------------
+# 適用範囲 / 併用が必須な非 Core 変更
+# ---------------------------------------------------------------------------
+# 本パッチ**単独では効果が観測できない**。CRTC_GetFrameClocks() を呼ぶのは
+# Bridge 側であり、以下は同一 P641 コミットに含まれる(Core 外なので通常編集):
+#   - Bridge/EmulatorBridge.c : mx68k_run_frame() の clk_total 算出を
+#     CRTC_GetFrameClocks() ベースへ / mx68k_get_vsync_hz() をフレーム実測値ベースへ
+#   - MX68K/App/Services/EmulatorEngine.swift : maxCatchUpFrames を連続値前提へ
+#   - MX68K/MX68K.xcodeproj/project.pbxproj : crtc_timing.c/h をビルド対象へ追加
+# ★このため pbxproj は crtc_timing.c を参照する。**本パッチを適用しないと
+#   ビルドが失敗する**(ファイルが存在しないため)。適用順は問わないが、
+#   ビルド前に必ず本パッチを適用すること。
+#
+# ---------------------------------------------------------------------------
+# MPX68K原文との差異(意図的、ロジックは verbatim)
+# ---------------------------------------------------------------------------
+#  (a) 型: MPX 側は win32api シム型 BYTE/WORD/DWORD。MX の Core は stdint 化
+#      済みで、これらの別名は Core/px68k/win32api/windows.h:15-36 の**コメント
+#      ブロック内**にあり定義されていない(grep 確認済み)。したがって
+#      uint8_t/uint16_t/uint32_t へ機械的に置換した。幅は同一
+#      (unsigned char / unsigned short / unsigned int)で意味変化は無い。
+#      HSYNC_CLK 代入も MX 既存宣言に合わせ (int) ではなく (int32_t)。
+#  (b) ZeroMemory(): MX に該当マクロが存在しない(Core 全体で grep 0件)ため
+#      memset(..., 0, sizeof(*x)) へ置換。
+#  (c) 分数状態 CrtcFieldClock の置き場所: MPX は x11/winx68k.cpp に
+#      `static CrtcFieldClock FieldClock10M` を持ち WinX68k_Reset() で
+#      CrtcFieldClock_Init() を呼ぶ。MX には x11/ が存在せずフレームループが
+#      Bridge 側にあるため、状態を crtc.c の static とし、初期化は
+#      リセット経路が必ず通る CRTC_Init() で行う。初期値は MPX と同じ
+#      (VSYNC_HIGH, 567)。CRTC_Init() 時点では VLINE_TOTAL がまだ確定して
+#      いないため 567 を直値で与えている(MPX は WinX68k_Reset() 内で
+#      VLINE_TOTAL=567 を代入した直後に呼ぶので実質同値)。
+#  (d) MPX の WinX68k_FieldCycles10M()(x11 層の static 関数)に相当するものを、
+#      Core 側の公開関数 CRTC_GetFrameClocks(int32_t *active_vline_total) として
+#      crtc.c に置いた。ロジックは MPX と同一で、px68k-libretro 個人フォーク由来の
+#      30Hz-130Hz クランプを追加してある。
+#  (e) CRTC_Write16 のケース構造: MX の書込みハンドラはバイト単位の CRTC_Write()
+#      ではなく 16bit 版 CRTC_Write16() が本体(CRTC_Write は CRTC_Write16 への
+#      委譲)。case ラベルの番号規約(CRTC_Regs[2n]/[2n+1] が Rn)は MPX と一致
+#      しているため、呼出し挿入位置は MPX PR#26 と一対一に対応する。
+#  (f) コメントは日本語(既存 MX/px68k コードの様式に合わせた)。
+#
+# ---------------------------------------------------------------------------
+# 参照実装の状況
+# ---------------------------------------------------------------------------
+#   px68k本家                : 同一の設計負債を保持(未修正)
+#   px68k-libretro 本流      : 未確認(本サイクルでは調査していない)
+#   px68k-libretro 個人フォーク: 修正あり(簡易版) — 参考情報
+#   MPX68K (PR#26)           : **修正あり、高精度版(本パッチの採用元)**
+#                              外部検証ツール crtc60hz で 55.45Hz -> 60.00Hz の
+#                              改善を実測確認済み。
+# CLAUDE.md Class A 条件2 に基づき、本流への正規マージを持つ参照実装は
+# MPX68K のみである旨をここに明記する。
+#
+# ---------------------------------------------------------------------------
+# 挙動への影響
+# ---------------------------------------------------------------------------
+# 標準モード(768x512/31kHz 等)では新方式の算出値と旧固定値がほぼ一致する
+# (MPX68K PR#26 コミット本文: 新方式 180315.5 サイクル vs 旧定数 180310 サイクル、
+# 差 0.003%)。影響が顕著に出るのは CRTC レジスタを実機同様に操作するデモ・
+# 特殊表示モード・ベンチマークソフト等。
+# 回帰リスク: HSYNC_CLK の意味が変わるため、mfp.c 経由のラスタ割込判定
+# (GPIP HSYNC 位置)が最大の回帰面。ラスタ割込を多用するタイトル・15kHz モード・
+# 音声同期を hands-on で確認すること(P641_plan.md テスト計画4)。
+# ---------------------------------------------------------------------------
+
+diff --git a/Core/px68k/x68k/crtc_timing.h b/Core/px68k/x68k/crtc_timing.h
+new file mode 100644
+--- /dev/null
++++ b/Core/px68k/x68k/crtc_timing.h
+@@ -0,0 +1,151 @@
++// ---------------------------------------------------------------------------------------
++//  CRTC_TIMING.H - Pure CRTC timing model (no side effects)
++// ---------------------------------------------------------------------------------------
++//
++// Derives the scan geometry and clock timing that the real CRTC would
++// produce from the raw register file (CRTC_Regs layout: register N is
++// stored big-endian at bytes [2N]=high, [2N+1]=low) plus the HRL bit of
++// system port $E8E007.
++//
++// This model has no side effects and touches no emulator globals, so it can
++// be computed speculatively (pending timing), compared against the legacy
++// fixed-frame values (VSYNC_HIGH / VSYNC_NORM split by VLINE_TOTAL), shown
++// in a debug monitor, and unit-tested on the host.
++//
++// It is the first step of the CRTC rework:
++//   raw registers -> pending timing -> active timing snapshot -> scheduler.
++// Nothing in the emulator behaves differently until a caller starts feeding
++// these values into the frame loop.
++//
++// MX68K port note (P641): the MPX68K original is written against the
++// win32api shim types BYTE/WORD/DWORD. MX's Core was converted to <stdint.h>
++// and those aliases are commented out in Core/px68k/win32api/windows.h, so
++// this copy uses uint8_t/uint16_t/uint32_t. The widths are identical
++// (unsigned char / unsigned short / unsigned int) -- no semantic change.
++
++#ifndef PX68K_CRTC_TIMING_H
++#define PX68K_CRTC_TIMING_H
++
++#include "common.h"
++
++// Oscillators on the X68000 mainboard (Hz).
++// The dot clock is one of these divided by a small ratio selected by
++// R20 bit4 (HF), R20 bits1-0 (HRES) and the HRL bit ($E8E007 bit1).
++// Frequencies and the selection table follow XEiJ's CRTC analysis
++// (https://stdkmd.net/xeij/, CRT_DEFAULT_FREQS = {38863632, 69551900,
++// 50349800}), independently re-implemented here.
++#define CRTC_OSC_15K_HZ     38863632UL  // 15.98kHz-group modes
++#define CRTC_OSC_31K_HZ     69551900UL  // 31.5kHz-group modes
++#define CRTC_OSC_VGA_HZ     50349800UL  // VGA-timing modes (later models)
++
++// Scan structure, decided by HF (R20 bit4) and VRES (R20 bits3-2):
++//   HF=1, VRES=1 -> NORMAL      one raster per display line
++//   HF=1, VRES=0 -> DOUBLE      raster duplication: each display line is
++//                               scanned twice (512 rasters show 256 lines)
++//   HF=0, VRES=0 -> SLIT        15kHz 256-line scan; on the CRT each raster
++//                               leaves an unlit slit line below it
++//   VRES > HF    -> INTERLACE   two alternating fields per frame
++// DOUBLE_EXCEPT_SP is the hardware quirk where raster duplication applies
++// to text/graphics but the sprite unit keeps 512-line addressing. Deciding
++// it needs sprite-controller state, which this register-only model does not
++// see: the model reports DOUBLE, and a caller that knows the sprite setup
++// may refine it. (XEiJ: crtNormal / crtSlit / crtDuplication /
++// crtDupExceptSp / crtInterlace.)
++typedef enum {
++    CRTC_SCAN_NORMAL = 0,
++    CRTC_SCAN_SLIT,
++    CRTC_SCAN_DOUBLE,
++    CRTC_SCAN_DOUBLE_EXCEPT_SP,
++    CRTC_SCAN_INTERLACE
++} CrtcScanMode;
++
++typedef struct {
++    // Horizontal geometry, in character columns (1 column = 8 dots).
++    // The displayed columns are [h_disp_start, h_disp_end).
++    int h_total;        // columns per raster incl. blanking: R00 + 1
++    int h_sync_end;     // end of horizontal sync pulse:      R01 + 1
++    int h_disp_start;   // first displayed column:            R02
++    int h_disp_end;     // one past last displayed column:    R03
++
++    // Vertical geometry, in rasters. Note the hardware convention differs
++    // from horizontal: R06 is the last back-porch raster, so the displayed
++    // rasters are [v_disp_first, v_disp_end] == [R06+1, R07] inclusive.
++    // v_disp_start keeps the raw R06 value because the legacy emulator
++    // (CRTC_VSTART and the vline loop in winx68k.cpp) treats [R06, R07) as
++    // the display window -- one raster early. Schedulers must use
++    // v_disp_first/v_disp_end, not the legacy window.
++    int v_total;        // rasters per field incl. blanking:  R04 + 1
++    int v_sync_end;     // end of vertical sync pulse:        R05 + 1
++    int v_disp_start;   // raw R06 (legacy display-window start)
++    int v_disp_first;   // first displayed raster:            R06 + 1
++    int v_disp_end;     // last displayed raster:             R07
++
++    // Mode bits
++    int hf;             // R20 bit4:    0 = 15.98kHz group, 1 = 31.5kHz group
++    int hres;           // R20 bits1-0: horizontal resolution select
++    int vres;           // R20 bits3-2: vertical resolution select
++    int hrl;            // $E8E007 bit1
++    CrtcScanMode scan_mode;
++
++    // Legacy CRTC_VStep value as crtc.c computes it from (R20 & 0x14):
++    // 1 = double-read, 2 = normal, 4 = interlace. Kept for comparison with
++    // the current implementation. For HF=1 with VRES>=2 the legacy decode
++    // says double-read but the hardware actually interlaces (see
++    // scan_mode); the legacy renderer is known-wrong there.
++    int v_step;
++
++    // Dot clock as an exact rational: osc_hz / clock_div
++    uint32_t osc_hz;
++    int clock_div;
++
++    // Logical display size in dots (what the renderer must produce).
++    // height follows the hardware scan structure: raster count halved for
++    // DOUBLE, doubled for INTERLACE, unchanged for NORMAL/SLIT.
++    int width;
++    int height;
++
++    // Convenience frequencies for monitors and tests. v_freq_hz is the
++    // field rate (equal to the frame rate except in interlaced modes).
++    // The scheduler must use the exact rationals, not these doubles.
++    double dot_clock_hz;
++    double h_freq_hz;
++    double v_freq_hz;
++
++    // Nonzero when the register combination describes a scannable frame:
++    //   - displayed width is 1..128 columns and fits inside h_total
++    //   - the vertical registers keep XEiJ's strict ordering
++    //     R05 < R06 < R07 < R04 (sync + back porch end before the
++    //     display, non-empty display window, front porch remains)
++    // When zero, the CRTC should stop scanning; the CPU keeps running.
++    int valid;
++} CrtcTiming;
++
++// Active field clock used by the execution scheduler. A guest programs the
++// CRTC one byte at a time, so the raw register set can be transiently invalid.
++// In that interval the hardware keeps running from the last complete setup;
++// this state preserves its exact cycle fraction and nonzero raster count.
++typedef struct {
++    unsigned long long numerator;
++    unsigned long long denominator;
++    unsigned long long remainder;
++    int vline_total;
++} CrtcFieldClock;
++
++// Compute the timing implied by a 48-byte CRTC register file and the HRL
++// bit. Pure function: never reads or writes emulator state.
++void CrtcTiming_FromRegs(const uint8_t regs[48], int hrl, CrtcTiming *out);
++
++// CPU cycles per raster / per field for a cpu_hz-clocked CPU, as an exact
++// reduced fraction num/den. Accumulating num and carrying at den avoids
++// long-run clock drift; callers wanting a plain number can divide.
++void CrtcTiming_CyclesPerRaster(const CrtcTiming *t, uint32_t cpu_hz,
++    unsigned long long *num, unsigned long long *den);
++void CrtcTiming_CyclesPerField(const CrtcTiming *t, uint32_t cpu_hz,
++    unsigned long long *num, unsigned long long *den);
++
++void CrtcFieldClock_Init(CrtcFieldClock *clock, int fallback_cycles,
++    int fallback_vline_total);
++int CrtcFieldClock_Next(CrtcFieldClock *clock, const CrtcTiming *timing,
++    uint32_t cpu_hz, int current_vline_total, int *active_vline_total);
++
++#endif
+diff --git a/Core/px68k/x68k/crtc_timing.c b/Core/px68k/x68k/crtc_timing.c
+new file mode 100644
+--- /dev/null
++++ b/Core/px68k/x68k/crtc_timing.c
+@@ -0,0 +1,199 @@
++// ---------------------------------------------------------------------------------------
++//  CRTC_TIMING.C - Pure CRTC timing model (no side effects)
++// ---------------------------------------------------------------------------------------
++//
++// MX68K port note (P641): verbatim from MPX68K (YosAwed/MPX68K, merge
++// 0d096dab8048e64f0e850f35c500e9e746929347) apart from two mechanical
++// adaptations, both documented in Patches/Core/p641_crtc_dynamic_timing.patch:
++//   - BYTE/WORD/DWORD -> uint8_t/uint16_t/uint32_t (MX's Core is all-stdint;
++//     the win32api aliases are commented out in win32api/windows.h)
++//   - ZeroMemory()    -> memset(..., 0, ...)      (no such macro in MX)
++
++#include "crtc_timing.h"
++
++// Register N is stored big-endian at bytes [2N] / [2N+1] (see CRTC_Write).
++static uint16_t reg_word(const uint8_t *regs, int n)
++{
++    return (uint16_t)(((uint16_t)regs[n * 2] << 8) | regs[n * 2 + 1]);
++}
++
++static unsigned long long gcd_ull(unsigned long long a, unsigned long long b)
++{
++    while (b) {
++        unsigned long long t = a % b;
++        a = b;
++        b = t;
++    }
++    return a;
++}
++
++void CrtcTiming_FromRegs(const uint8_t regs[48], int hrl, CrtcTiming *out)
++{
++    // Dot clock selection, indexed by HRL<<3 | HF<<2 | HRES.
++    // Values follow the measured hardware table (cf. XEiJ CRTC notes):
++    //   HF=0 (15.98kHz group): 38.863632MHz / {8,4,8,8}, HRL ignored
++    //   HF=1 (31.5kHz group):  69.551900MHz / {6,3,2}, HRES=3 -> 50.3498MHz / 2
++    //                          HRL=1 changes /6 -> /8 and /3 -> /4
++    static const uint32_t osc_hz[3] = {
++        CRTC_OSC_15K_HZ, CRTC_OSC_31K_HZ, CRTC_OSC_VGA_HZ
++    };
++    static const uint8_t osc_sel[16] = {
++        0, 0, 0, 0,  1, 1, 1, 2,    // HRL=0
++        0, 0, 0, 0,  1, 1, 1, 2     // HRL=1
++    };
++    static const uint8_t div_sel[16] = {
++        8, 4, 8, 8,  6, 3, 2, 2,    // HRL=0
++        8, 4, 8, 8,  8, 4, 2, 2     // HRL=1
++    };
++
++    uint8_t r20 = (uint8_t)(reg_word(regs, 20) & 0xff);
++    int idx;
++    int disp_cols;
++    int disp_rasters;
++
++    memset(out, 0, sizeof(*out));
++
++    // R00-R03 are 8-bit counters, R04-R07 are 10-bit counters.
++    out->h_total      = (reg_word(regs, 0) & 0xff) + 1;
++    out->h_sync_end   = (reg_word(regs, 1) & 0xff) + 1;
++    out->h_disp_start = reg_word(regs, 2) & 0xff;
++    out->h_disp_end   = reg_word(regs, 3) & 0xff;
++
++    out->v_total      = (reg_word(regs, 4) & 0x3ff) + 1;
++    out->v_sync_end   = (reg_word(regs, 5) & 0x3ff) + 1;
++    out->v_disp_start = reg_word(regs, 6) & 0x3ff;
++    out->v_disp_first = out->v_disp_start + 1;
++    out->v_disp_end   = reg_word(regs, 7) & 0x3ff;
++
++    out->hf   = (r20 >> 4) & 1;
++    out->vres = (r20 >> 2) & 3;
++    out->hres = r20 & 3;
++    out->hrl  = hrl ? 1 : 0;
++
++    idx = (out->hrl << 3) | (out->hf << 2) | out->hres;
++    out->osc_hz    = osc_hz[osc_sel[idx]];
++    out->clock_div = div_sel[idx];
++
++    // Scan structure (XEiJ: crtInterlace = HF+1 <= VRES, crtDuplication =
++    // HF==1 && VRES==0, crtSlit = HF==0 && VRES==0, otherwise normal).
++    // DOUBLE_EXCEPT_SP needs sprite-controller state and is never returned
++    // by this register-only model.
++    if (out->vres > out->hf)
++        out->scan_mode = CRTC_SCAN_INTERLACE;
++    else if (out->hf && out->vres == 0)
++        out->scan_mode = CRTC_SCAN_DOUBLE;
++    else if (!out->hf && out->vres == 0)
++        out->scan_mode = CRTC_SCAN_SLIT;
++    else
++        out->scan_mode = CRTC_SCAN_NORMAL;
++
++    // Legacy CRTC_VStep decode of (R20 & 0x14), kept verbatim from crtc.c
++    // for comparison. Diverges from scan_mode for HF=1 && VRES>=2 (legacy
++    // treats it as double-read; the hardware interlaces).
++    if ((r20 & 0x14) == 0x10)
++        out->v_step = 1;
++    else if ((r20 & 0x14) == 0x04)
++        out->v_step = 4;
++    else
++        out->v_step = 2;
++
++    disp_cols = out->h_disp_end - out->h_disp_start;
++    out->width = disp_cols > 0 ? disp_cols * 8 : 0;
++
++    // Displayed rasters are [R06+1, R07] inclusive: R07 - R06 rasters.
++    disp_rasters = out->v_disp_end - out->v_disp_start;
++    if (disp_rasters < 0)
++        disp_rasters = 0;
++    switch (out->scan_mode) {
++    case CRTC_SCAN_DOUBLE:
++        out->height = disp_rasters / 2;
++        break;
++    case CRTC_SCAN_INTERLACE:
++        out->height = disp_rasters * 2;
++        break;
++    default:
++        out->height = disp_rasters;
++        break;
++    }
++
++    out->dot_clock_hz = (double)out->osc_hz / out->clock_div;
++    out->h_freq_hz = out->dot_clock_hz / (8.0 * out->h_total);
++    out->v_freq_hz = out->h_freq_hz / out->v_total;
++
++    // The CRTC line buffer holds 128 columns (1024 dots); wider settings
++    // cannot be scanned. Vertically XEiJ requires the strict ordering
++    // R05 < R06 < R07 < R04: sync + back porch end before the display,
++    // the display window is non-empty, and a front porch remains.
++    out->valid = (disp_cols > 0) && (disp_cols <= 128) &&
++                 (out->h_disp_end <= out->h_total) &&
++                 (out->v_sync_end - 1 < out->v_disp_start) &&
++                 (out->v_disp_end > out->v_disp_start) &&
++                 (out->v_disp_end < out->v_total - 1);
++}
++
++// cycles/raster = cpu_hz * (8 * h_total * clock_div / osc_hz) seconds
++void CrtcTiming_CyclesPerRaster(const CrtcTiming *t, uint32_t cpu_hz,
++    unsigned long long *num, unsigned long long *den)
++{
++    unsigned long long n = (unsigned long long)cpu_hz * 8ULL *
++                           (unsigned long long)t->h_total *
++                           (unsigned long long)t->clock_div;
++    unsigned long long d = t->osc_hz;
++    unsigned long long g = gcd_ull(n, d);
++
++    if (g == 0)
++        g = 1;
++    *num = n / g;
++    *den = d / g;
++}
++
++void CrtcTiming_CyclesPerField(const CrtcTiming *t, uint32_t cpu_hz,
++    unsigned long long *num, unsigned long long *den)
++{
++    unsigned long long n, d, g;
++
++    CrtcTiming_CyclesPerRaster(t, cpu_hz, &n, &d);
++    n *= (unsigned long long)t->v_total;
++    g = gcd_ull(n, d);
++    if (g == 0)
++        g = 1;
++    *num = n / g;
++    *den = d / g;
++}
++
++void CrtcFieldClock_Init(CrtcFieldClock *clock, int fallback_cycles,
++    int fallback_vline_total)
++{
++    memset(clock, 0, sizeof(*clock));
++    clock->numerator = fallback_cycles > 0 ?
++        (unsigned long long)fallback_cycles : 1ULL;
++    clock->denominator = 1;
++    clock->vline_total = fallback_vline_total > 0 ? fallback_vline_total : 1;
++}
++
++int CrtcFieldClock_Next(CrtcFieldClock *clock, const CrtcTiming *timing,
++    uint32_t cpu_hz, int current_vline_total, int *active_vline_total)
++{
++    unsigned long long num, den, acc;
++
++    if (clock->denominator == 0)
++        CrtcFieldClock_Init(clock, 1, 1);
++
++    if (timing->valid && current_vline_total > 0) {
++        CrtcTiming_CyclesPerField(timing, cpu_hz, &num, &den);
++        if (den != 0 && num != 0) {
++            // A remainder is expressed in units of its denominator. It
++            // cannot be carried unchanged into a different video mode.
++            if (num != clock->numerator || den != clock->denominator)
++                clock->remainder = 0;
++            clock->numerator = num;
++            clock->denominator = den;
++            clock->vline_total = current_vline_total;
++        }
++    }
++
++    acc = clock->numerator + clock->remainder;
++    clock->remainder = acc % clock->denominator;
++    *active_vline_total = clock->vline_total;
++    return (int)(acc / clock->denominator);
++}
+diff --git a/Core/px68k/x68k/crtc.c b/Core/px68k/x68k/crtc.c
+--- a/Core/px68k/x68k/crtc.c
++++ b/Core/px68k/x68k/crtc.c
+@@ -10,6 +10,8 @@
+ #include	"bg.h"
+ #include	"m68000.h"
+ #include	"crtc.h"
++#include	"crtc_timing.h"
++#include	"sysport.h"
+ 
+ 
+ static uint16_t FastClearMask[16] = {
+@@ -46,7 +48,80 @@
+ 
+ 	//extern int VID_MODE, CHANGEAV_TIMING;
+ 
++
+ // -----------------------------------------------------------------------
++//   1ラスタあたりのCPUクロック数（名目10MHz単位）／1フィールドの予算
++// -----------------------------------------------------------------------
++// 旧実装は「固定フレーム長 / VLINE_TOTAL」だった。フレーム長が固定なので
++// 垂直レジスタを増やすと1ラスタが短くなって打ち消し合い、垂直設定が実時間の
++// ラスタ周期に届かなかった（525ライン60Hz設定では真値317に対し344＝約8%誤差。
++// mfp.cのGPIP水平位置がこの値から求まるためゲストから見える誤差になる）。
++//
++// ラスタ周期は物理的に水平タイミング（R00とドットクロック＝R20・HRL）だけで
++// 決まり、垂直レジスタには依存しない。フレーム全体のvalid判定で門を作ると、
++// レジスタを順に書き換える途中で一時的に不正となり古い値が残ってしまうため、
++// ここでは水平パラメータのみを見る（h_totalは常に1以上）。
++
++#define CRTC_TIMING_CLOCK		10000000UL	/* px68k系の名目10MHzタイムベース */
++
++/* 異常なゲスト設定でCPU/音声スケジューリング経路がオーバーフローしないための
++ * フレームクロック・クランプ域（30Hz〜130Hz相当）。値は px68k-libretro 個人
++ * フォーク（uraraworks/px68k-libretro, emscripten）crtc.c の
++ * CRTC_MIN/MAX_FRAME_CLOCKS と同一。 */
++#define CRTC_MIN_FRAME_CLOCKS	(10000000L / 130L)
++#define CRTC_MAX_FRAME_CLOCKS	(10000000L / 30L)
++
++/* MPX68K は winx68k.cpp（x11層）に static CrtcFieldClock FieldClock10M を置く。
++ * MXには x11/ が無くフレームループが Bridge 側にあるため、状態はここ crtc.c に
++ * 置き、CRTC_GetFrameClocks() 経由で Bridge から利用する。 */
++static CrtcFieldClock CRTC_FieldClock10M;
++
++void CRTC_UpdateHSyncClock(void)
++{
++	CrtcTiming t;
++	unsigned long long num, den;
++
++	CrtcTiming_FromRegs(CRTC_Regs, (SysPort[4] >> 1) & 1, &t);
++	CrtcTiming_CyclesPerRaster(&t, CRTC_TIMING_CLOCK, &num, &den);
++	if (den && (num / den) > 0)
++		HSYNC_CLK = (int32_t)(num / den);
++	else	// 退避経路：ドットクロックが異常なときだけ従来式に戻す
++		HSYNC_CLK = ((CRTC_Regs[0x29]&0x10)?VSYNC_HIGH:VSYNC_NORM)/(VLINE_TOTAL?VLINE_TOTAL:1);
++}
++
++/* 1フィールド分のCPUクロック予算（名目10MHz単位）を返す。呼び出し側の
++ * クロック倍率スケーリングは呼び出し側で行う。分数（numerator/denominator/
++ * remainder）を保持するため、**1フレームにつき1回だけ**呼ぶこと——呼ぶたびに
++ * 端数が進む。active_vline_total には「その予算に対応する走査線数」を返す
++ * （レジスタ書換え途中で一時的に不正な組合せになった場合は直前の完全な設定の
++ * 値を維持する。MPX68K の WinX68k_FieldCycles10M() と同じ設計）。 */
++int32_t CRTC_GetFrameClocks(int32_t *active_vline_total)
++{
++	CrtcTiming t;
++	int active = 0;
++	int clocks;
++
++	CrtcTiming_FromRegs(CRTC_Regs, (SysPort[4] >> 1) & 1, &t);
++	if (CRTC_FieldClock10M.denominator == 0) {
++		CrtcFieldClock_Init(&CRTC_FieldClock10M,
++			(CRTC_Regs[0x29] & 0x10) ? VSYNC_HIGH : VSYNC_NORM,
++			(VLINE_TOTAL > 0) ? (int)VLINE_TOTAL : 567);
++	}
++	clocks = CrtcFieldClock_Next(&CRTC_FieldClock10M, &t,
++		CRTC_TIMING_CLOCK, (int)VLINE_TOTAL, &active);
++
++	if (clocks < CRTC_MIN_FRAME_CLOCKS)
++		clocks = CRTC_MIN_FRAME_CLOCKS;
++	else if (clocks > CRTC_MAX_FRAME_CLOCKS)
++		clocks = CRTC_MAX_FRAME_CLOCKS;
++
++	if (active_vline_total)
++		*active_vline_total = (active > 0) ? (int32_t)active : 567;
++	return (int32_t)clocks;
++}
++
++
++// -----------------------------------------------------------------------
+ //   らすたーこぴー
+ // -----------------------------------------------------------------------
+ void CRTC_RasterCopy(void)
+@@ -201,6 +276,13 @@
+ 	TextScrollX = 0, TextScrollY = 0;
+ 	memset(GrphScrollX, 0, sizeof(GrphScrollX));
+ 	memset(GrphScrollY, 0, sizeof(GrphScrollY));
++	/* P641: ハードリセットで分数状態（remainder）を確実にゼロクリアし、
++	 * 前セッションの端数を持ち越さない。MPX68K は WinX68k_Reset() で
++	 * VLINE_TOTAL=567 を設定した直後に CrtcFieldClock_Init(&FieldClock10M,
++	 * VSYNC_HIGH, VLINE_TOTAL) を呼ぶ。MXには x11/winx68k.cpp が無く
++	 * リセット経路が CRTC_Init() を通るため、ここで同じ初期値を与える
++	 * （VLINE_TOTAL はこの時点でまだ確定していないので 567 を直に書く）。 */
++	CrtcFieldClock_Init(&CRTC_FieldClock10M, VSYNC_HIGH, 567);
+ }
+ 
+ uint8_t FASTCALL CRTC_Read(uint32_t adr)
+@@ -269,6 +351,9 @@
+ 			CRTC_Regs[0x00] &= 0x00;//not use
+ 		case 0x01:
+ 			HLINE_TOTAL = (((uint16_t)CRTC_Regs[0]<<8)+CRTC_Regs[1]) * 8;
++			// P641: R00 (h_total) はラスタ周期そのもの。旧式の固定フレーム長／
++			// VLINE_TOTAL はこれを完全に無視していた。
++			CRTC_UpdateHSyncClock();
+ 			break;
+ 		case 0x02:
+ 			CRTC_Regs[0x02] &= 0x00;//not use
+@@ -293,7 +378,7 @@
+ 			CRTC_Regs[0x08] &= 0x03;
+ 		case 0x09:
+ 			VLINE_TOTAL = (((uint16_t)CRTC_Regs[8]<<8)+CRTC_Regs[9]);
+-			HSYNC_CLK = ((CRTC_Regs[0x29]&0x10)?VSYNC_HIGH:VSYNC_NORM)/VLINE_TOTAL;
++			CRTC_UpdateHSyncClock();
+ 			break;
+ 		case 0x0a:
+ 			CRTC_Regs[0x0a] &= 0x03;
+@@ -343,7 +428,7 @@
+ 			//break;
+ 		case 0x29:
+ 			CRTC_Regs[0x29] &= 0x1f;
+-			HSYNC_CLK = ((CRTC_Regs[0x29]&0x10)?VSYNC_HIGH:VSYNC_NORM)/VLINE_TOTAL;
++			CRTC_UpdateHSyncClock();
+ 			VID_MODE = !!(CRTC_Regs[0x29]&0x10);
+ 			if(CRTC_VEND>CRTC_VSTART){ TextDotY = CRTC_VEND-CRTC_VSTART; }//設定途中対策
+ 			if ((CRTC_Regs[0x29]&0x14)==0x10)
+diff --git a/Core/px68k/x68k/crtc.h b/Core/px68k/x68k/crtc.h
+--- a/Core/px68k/x68k/crtc.h
++++ b/Core/px68k/x68k/crtc.h
+@@ -23,6 +23,17 @@
+ extern	uint8_t		CRTC_VStep;
+ extern  int32_t		HSYNC_CLK;
+ 
++/* P641: 現在のCRTCレジスタから HSYNC_CLK（1ラスタあたりのCPUクロック数、
++ * 名目10MHz単位）を再計算する。R00・R04・R20 または HRL ビットを変更した
++ * 直後に呼ぶこと。 */
++void CRTC_UpdateHSyncClock(void);
++
++/* P641: 1フィールド分のCPUクロック予算（名目10MHz単位）を返す。分数状態を
++ * 進めるため 1フレームにつき1回だけ呼ぶこと。active_vline_total には
++ * その予算に対応する走査線数（レジスタ書換え途中は直前の完全な設定の値）を
++ * 返す。NULL 可。 */
++int32_t CRTC_GetFrameClocks(int32_t *active_vline_total);
++
+ extern	uint32_t	GrphScrollX[];
+ extern	uint32_t	GrphScrollY[];
+ 
+diff --git a/Core/px68k/x68k/mfp.c b/Core/px68k/x68k/mfp.c
+--- a/Core/px68k/x68k/mfp.c
++++ b/Core/px68k/x68k/mfp.c
+@@ -172,11 +172,17 @@
+ 			ret |= 0x10;
+ 		}
+ 
+-		int32_t hpos = (int32_t)(ICount%HSYNC_CLK);//H-SYNC
+-		if ( (hpos>=((int32_t)CRTC_Regs[5]*HSYNC_CLK/CRTC_Regs[1]))&&(hpos<((int32_t)CRTC_Regs[7]*HSYNC_CLK/CRTC_Regs[1])) )
+-			ret &= 0x7f;
+-		else
+-			ret |= 0x80;
++		// CRTC_Regs[1] は R00 の下位バイトで、R00 = 0x100 のような合法な
++		// 書込みで 0 になりうる。そのときは 1 ラスタ分でスケールし、
++		// ゼロ除算を避ける。HSYNC_CLK は常に正。
++		{
++			int32_t htotal = CRTC_Regs[1] ? CRTC_Regs[1] : 1;
++			int32_t hpos = (int32_t)(ICount%HSYNC_CLK);//H-SYNC
++			if ( (hpos>=((int32_t)CRTC_Regs[5]*HSYNC_CLK/htotal))&&(hpos<((int32_t)CRTC_Regs[7]*HSYNC_CLK/htotal)) )
++				ret &= 0x7f;
++			else
++				ret |= 0x80;
++		}
+ 
+ 		if (x68k_vline!=CRTC_IntLine)//ラスタ割込 1:要求なし
+ 		{
+diff --git a/Core/px68k/x68k/sysport.c b/Core/px68k/x68k/sysport.c
+--- a/Core/px68k/x68k/sysport.c
++++ b/Core/px68k/x68k/sysport.c
+@@ -6,6 +6,7 @@
+ #include "prop.h"
+ #include "sysport.h"
+ #include "palette.h"
++#include "crtc.h"
+ 
+ uint8_t	SysPort[7];
+ 
+@@ -42,7 +43,14 @@
+ 		SysPort[3] = data & 0x1f;
+ 		break;
+ 	case 0x07:
+-		SysPort[4] = data & 0x0e;
++		/* P641: bit1 = HRL。ドットクロック分周比が変わるのでラスタ周期を
++		 * 再計算する（MPX68K PR#26 sysport.c と同型）。 */
++		if ((SysPort[4] ^ data) & 0x02) {
++			SysPort[4] = data & 0x0e;
++			CRTC_UpdateHSyncClock();
++		} else {
++			SysPort[4] = data & 0x0e;
++		}
+ 		break;
+ 	case 0x0d:
+ 		SysPort[5] = data;

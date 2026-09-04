@@ -1,0 +1,189 @@
+# P686: FDC のドライブ台数を実機仕様準拠へ(Class B: 参照実装に既存修正なし)
+#
+# 分類: B(ハードウェア仕様準拠修正——参照実装に既存修正なし)
+# 一次資料: X68000 テクニカルデータブック 印刷 p.157 (PDF p.169) 5-5 (3)「強制 READY 機能の
+#   利用法」——「2. FDC に "RECALIBRATE" コマンドを送る(FDD1~4、4 台とも)。3. FDC に
+#   "SENSE INTERRUPT STATUS" コマンドを送る。4. リザルトステータス(ST0)の D4 ビット(EC)を
+#   チェックする。EC="0" ……接続 OK / EC="1" ……接続されていない(または電源が入っていない)。」
+#   および 印刷 p.154 (PDF p.166) 5-4 (3)「ドライブコントロール(Out)」——D0/D1/D2/D3 が
+#   それぞれドライブ 0/1/2/3 のオプション信号有効化マスク。補強: 印刷 p.156 (PDF p.168)
+#   5-5 (1)「D0~D3 でオプション信号を動作させるドライブを指定し、OUT します」/ (2)「この一連の
+#   操作をドライブ 0~3 まで行い、ホスト側は各ドライブの状態を把握します」。
+#   (P686 Fix Plan 執筆時に PDF 該当ページを画像として直接確認。記憶からの引用ではない)
+# 実測根拠: [runtime log] T-1(smoke gate、標準起動シーケンス、パッチ未適用・トグル OFF、
+#   2026-08-24)の [P686-FDCDRV] 出力と、その帰属の裏取りに使った [P509-FDCST3] 生ログ
+#   (Bridge/m68000_bridge.c の既存 $E94003 read トレース、[P686-FDCDRV] の帰属ロジックとは
+#   独立)の両方で確認済み。[P686-FDCDRV] f=900: recal[none,d0,d1,d2,d3]=0,1,1,1,1 /
+#   st0ec1[..]=0,0,0,1,1 / ctrlnib[0..15] のうち index4(D2 ビット)=21件・index8(D3 ビット)=21件
+#   （いずれも 0 件ではない）。
+#   [P509-FDCST3] 生ログを US フィールド(st0&7)と $E94007 ミラーで突き合わせて確定した
+#   SenseIntStatus 応答 1 バイト目(終端ポーリングの 0x80 で上書きされる前の値):
+#     d0(us=0) ST0=0x24 (bit4 EC=0 → fdc.c:272 「FD あり、ドライブあり」分岐)
+#     d1(us=1) ST0=0x25 (bit4 EC=0 → 同上)
+#     d2(us=2) ST0=0x56 (bit4 EC=1 → fdc.c:274 「ドライブなし」分岐、予測どおり)
+#     d3(us=3) ST0=0x57 (bit4 EC=1 → 同上)
+#   予測(0x50 系 = bit6 AT|bit4 EC)と実測(0x56/0x57 = us&7 base|0x50)が一致。
+#   R-1(recal[d2]>=1 かつ EC=1)・R-2(ctrlnib に D2/D3 ビットが立つ書込みが≥1件)とも
+#   T-1 の標準起動データのみで充足したため、T-2(専用 hands-on)はユーザーの判断により
+#   本サイクルでは省略(2026-08-24 承認)。調査の詳細は `.mx68k_cycles/P686_probe_inv.md` 相当
+#   （オーケストレーターとの往復ログ）を参照。
+# 上流欠陥同定: px68k 系列の共通祖先(WinX68k)由来。Recalibrate の drv<2 固定は
+#   px68k本家 74ddbb3 / px68k-libretro 617574f / MPX68K f59c07d が同一行を共有。
+#   XM6 は独立系統だが CompleteSeek で同じくドライブ 2/3 へ無条件 EC を設定する。
+# 同系先例: 同一ファイル内 fdc.c:117-120 FDC_SetForceReady(int32_t n) —— Bridge が
+#   Core の公開 setter を呼んで file-static な構成値を設定する既存パターン。本パッチの
+#   FDC_SetDriveCount() はこれと同型・同じ命名規則。
+# 参照実装調査(修正不在の証明):
+#   - px68k本家 (/Volumes/WD 8TB HDD/Develop/px68k, pinned 74ddbb3): x68k/fdc.c:287 に同一欠陥
+#   - px68k-libretro (/Volumes/WD 8TB HDD/Develop/px68k-libretro, pinned 617574f): x68k/fdc.c:287 に同一欠陥
+#   - MPX68K (github.com/YosAwed/MPX68K, pinned f59c07d): X68000 Shared/px68k/x68k/fdc.c:328 に同一欠陥
+#   - XM6 mainline (ローカル配布ソース、git 管理外のためピン止め不能): vm/fdc.cpp:827-835
+#     FDC::CompleteSeek に同一欠陥。ただし ReadByte/WriteByte case 2 (:424-439/:562-577) は
+#     DCR 下位 4bit をループ処理しており $E94005 側のみ部分的に 4 台対応(C++ の別クラス構造の
+#     ため verbatim 移植不可)。★ユーザーが実際に動かしているのは XM6 TypeG(別派生)である。
+# Bridge代替検討: 却下理由 = fdc 構造体が fdc.c:86 の file-static で Bridge から不可視。
+#   代替案(結果フェーズ読み出しの横取りによる ST0 書き換え)は P509 FDC コマンドミラーの
+#   既知の限界(WriteData データフェーズ追随不能、Bridge/m68000_bridge.c:615)に依存し脆い。
+# 対象ファイル:行範囲: Core/px68k/x68k/fdc.h:11-12 / Core/px68k/x68k/fdc.c:86-121, :263-277, :463-467, :518-530
+#   (いずれも適用前の MX の行番号)
+# 由来サイクル: P686
+#
+# 適用方法: git apply Patches/Core/p686_fdc_drive_count.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#
+# 併用が必須の Bridge 側変更: あり。Bridge/EmulatorBridge.c が FDC_Init() 直後の 2 箇所
+#   (mx68k_init / mx68k_reset_hard)で FDC_SetDriveCount() を呼ぶ。★本パッチを適用しない
+#   状態でその呼び出しを有効にするとビルドが失敗する(未定義シンボル)。P686 の Step 6-0
+#   では T-1/T-2 の実行時証拠を取るため、この呼び出しを一時的にコメントアウトしてある。
+#
+# 挙動の同一性(Code Review 重点確認箇所): fdc_drives==2 のとき、下記 2 つのループは
+#   d=0,1 の 2 回のみ回り、展開すると元の 2 つの if 文とビット単位で同一である。
+#   したがってトグル OFF(既定)ではパッチ適用の有無にかかわらず挙動が完全に同一。
+#
+--- a/Core/px68k/x68k/fdc.h
++++ b/Core/px68k/x68k/fdc.h
+@@ -6,10 +6,12 @@
+ void FDC_Init(void);
+ uint8_t FASTCALL FDC_Read(uint32_t adr);
+ void FASTCALL FDC_Write(uint32_t adr, uint8_t data);
+ int16_t FDC_Flush(void);
+ void FDC_EPhaseEnd(void);
+ void FDC_SetForceReady(int32_t n);
++/* P686 (D-70): 模擬する FDD 接続台数(2 = 外付けユニット非装着 / 4 = 装着)。 */
++void FDC_SetDriveCount(int32_t n);
+ int32_t FDC_IsDataReady(void);
+ 
+ #endif //_winx68k_fdc
+ 
+--- a/Core/px68k/x68k/fdc.c
++++ b/Core/px68k/x68k/fdc.c
+@@ -82,13 +82,19 @@
+ 	uint8_t DataBuf[0x8000];
+ 	uint8_t ScanBuf[0x8000];
+ } FDC;
+ 
+ static FDC fdc;
+ 
++/* P686 (D-70): 模擬する FDD 接続台数。実機の「外付け FDD ユニットが接続されているか」に
++ * 対応する構成値であってゲスト状態ではないため、意図的に FDC 構造体の外に置く
++ * ——FDC_Init() の memset(&fdc, ...) で巻き戻さないこと自体が要件。
++ * 既定 2 = 実機内蔵の標準台数(外付け未装着)。 */
++static int32_t fdc_drives = 2;
+ 
++
+ #define US(p) (p->us&3)
+ #define HD(p) ((p->us>>2)&1)
+ #define SK(p) ((p->us>>5)&1)
+ #define MF(p) ((p->us>>6)&1)
+ #define MT(p) ((p->us>>7)&1)
+ 
+@@ -117,12 +123,20 @@
+ void FDC_SetForceReady(int32_t n)
+ {
+ 	fdc.ready = n;
+ }
+ 
+ 
++/* P686 (D-70): Bridge から接続台数を設定する。値は {2, 4} にクランプする
++ * ——誤った値が渡っても中間状態を作らず、必ずどちらかの既知構成に落ちる。 */
++void FDC_SetDriveCount(int32_t n)
++{
++	fdc_drives = (n >= 4) ? 4 : 2;
++}
++
++
+ static void FDC_SetInt(void)
+ {
+ 	IOC_IntStat |= 0x80;
+ 	if ( IOC_IntStat&4 ) IRQH_Int(1, &FDC_Int);
+ }
+ 
+@@ -265,13 +279,13 @@
+ 		break;
+ 	case 7:		// Recalibrate
+ 		fdc.st0 = prm1->us&7;
+ 		fdc.cyl = 0;
+ 		if ( (!FDD_IsReady(fdc.drv))&&(!fdc.ready) ) {
+ 			fdc.st0 |= 0x48;		// FDなし
+-		} else if ( (fdc.drv>=0)&&(fdc.drv<2) ) {
++		} else if ( (fdc.drv>=0)&&(fdc.drv<fdc_drives) ) {
+ 			fdc.st0 |= 0x20;		// FDあり、ドライブあり
+ 		} else {
+ 			fdc.st0 |= 0x50;		// ドライブなし
+ 		}
+ 		FDC_SetInt();
+ 		break;
+@@ -459,14 +473,19 @@
+ 			ret = fdc.RspBuf[fdc.rdptr++];
+ 			fdc.rdnum--;
+ 		}
+ 		break;
+ 	case 0x05:
+ 		ret = 0x00;
+-		if ( (fdc.ctrl&1)&&(FDD_IsReady(0)) ) ret = 0x80;
+-		if ( (fdc.ctrl&2)&&(FDD_IsReady(1)) ) ret = 0x80;
++		{	/* P686 (D-70): D0-D3 = ドライブ 0-3 のオプション信号マスク
++			 * (テクニカルデータブック 印刷 p.154 5-4(3) / p.156 5-5(1)(2))。 */
++			int32_t d;
++			for ( d=0; d<fdc_drives; d++ ) {
++				if ( (fdc.ctrl&(1<<d))&&(FDD_IsReady(d)) ) ret = 0x80;
++			}
++		}
+ 		break;
+ 	case 0x07:
+ 		break;
+ 	default:
+ 		break;
+ 	}
+@@ -513,22 +532,22 @@
+ 				if ( (fdc.cmd==17)||(fdc.cmd==25)||(fdc.cmd==29) ) fdc.st2 |= 8;
+ 				FDC_ExecCmd();
+ 			}
+ 		}
+ 		break;
+ 	case 0x05:
+-		if ( (fdc.ctrl&0x01)&&(!(data&0x01)) ) {	// Drive0 control (Down edge)
+-			if ( fdc.ctrl&0x20 ) FDD_EjectFD(0);
+-			FDD_SetEMask(0, (fdc.ctrl&0x40)?1:0);
+-			FDD_SetBlink(0, (fdc.ctrl&0x80)?1:0);
++		{	/* P686 (D-70): 同上。1->0 の立下がりエッジ検出は原実装のまま。 */
++			int32_t d;
++			for ( d=0; d<fdc_drives; d++ ) {
++				if ( (fdc.ctrl&(1<<d))&&(!(data&(1<<d))) ) {	// Down edge
++					if ( fdc.ctrl&0x20 ) FDD_EjectFD(d);
++					FDD_SetEMask(d, (fdc.ctrl&0x40)?1:0);
++					FDD_SetBlink(d, (fdc.ctrl&0x80)?1:0);
++				}
++			}
+ 		}
+-		if ( (fdc.ctrl&0x02)&&(!(data&0x02)) ) {	// Drive1 control (Down edge)
+-			if ( fdc.ctrl&0x20 ) FDD_EjectFD(1);
+-			FDD_SetEMask(1, (fdc.ctrl&0x40)?1:0);
+-			FDD_SetBlink(1, (fdc.ctrl&0x80)?1:0);
+-		}
+ 		fdc.ctrl = data;
+ 		break;
+ 	case 0x07:
+ 		fdc.drv = (data&0x80)?(data&3):(-1);
+ 		FDD_SetAccess(fdc.drv);
+ 		break;

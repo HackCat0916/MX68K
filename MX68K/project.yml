@@ -1,0 +1,62 @@
+name: MX68K
+targets:
+  MX68K:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - path: App
+      - path: ../Bridge
+      - path: ../Core/px68k
+        compilerFlags:
+          - -DX68K_MACOS=1
+          - -DTARGET_OS_MAC=1
+          - -fno-strict-aliasing
+        excludes:
+          - "**/midi_win.c"
+          - "**/midi_fluid.c"
+          - "**/m68000m.c"
+      - path: ../Core/c68k
+        compilerFlags:
+          - -DX68K_MACOS=1
+          - -DTARGET_OS_MAC=1
+          - -fno-strict-aliasing
+      - path: Resources
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: ../Bridge/MX68K-Bridging-Header.h
+        PRODUCT_BUNDLE_IDENTIFIER: com.mx68k.emulator
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Resources/MX68K.entitlements
+        SWIFT_VERSION: "5.9"
+        GCC_C_LANGUAGE_STANDARD: c17
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/..
+          - $(SRCROOT)/../Core
+          - $(SRCROOT)/../Core/c68k
+          - $(SRCROOT)/../Core/px68k
+          - $(SRCROOT)/../Core/px68k/win32api
+          - $(SRCROOT)/../Core/px68k/x68k
+          - $(SRCROOT)/../Core/px68k/fmgen
+          - $(SRCROOT)/../Core/px68k/m68000
+      configs:
+        debug:
+          OTHER_CFLAGS: [-DDEBUG=1, -g, -O0]
+          SWIFT_OPTIMIZATION_LEVEL: -Onone
+        release:
+          OTHER_CFLAGS: [-O2]
+          SWIFT_OPTIMIZATION_LEVEL: -O
+    dependencies:
+      - sdk: CoreAudio.framework
+      - sdk: AVFoundation.framework
+      - sdk: Metal.framework
+      - sdk: MetalKit.framework
+      - sdk: GameController.framework
+      - sdk: Carbon.framework
+      - sdk: AudioToolbox.framework
+      - sdk: libc++.tbd
+    info:
+      path: Resources/Info.plist

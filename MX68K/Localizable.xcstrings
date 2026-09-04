@@ -1,0 +1,4896 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Failed to extract the archive": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アーカイブの展開に失敗しました"
+          }
+        }
+      }
+    },
+    "Mount": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウント"
+          }
+        }
+      }
+    },
+    "No disk image found in the archive": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アーカイブ内にディスクイメージが見つかりません"
+          }
+        }
+      }
+    },
+    "Select a disk image": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ディスクイメージを選択"
+          }
+        }
+      }
+    },
+    "The archive contains multiple disk images. Choose the one to mount.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アーカイブに複数のディスクイメージが含まれています。マウントするものを選択してください。"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定"
+          }
+        }
+      }
+    },
+    "Settings…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定…"
+          }
+        }
+      }
+    },
+    "Sprite": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スプライト"
+          }
+        }
+      }
+    },
+    "Sprite Table Map": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スプライトテーブルマップ"
+          }
+        }
+      }
+    },
+    "Renderer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レンダラ"
+          }
+        }
+      }
+    },
+    "Software Keyboard": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ソフトウェアキーボード"
+          }
+        }
+      }
+    },
+    "BG Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BGビューア"
+          }
+        }
+      }
+    },
+    "Sprite Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スプライトビューア"
+          }
+        }
+      }
+    },
+    "Sprite Table Map Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スプライトテーブルマップビューア"
+          }
+        }
+      }
+    },
+    "Renderer Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "レンダラビューア"
+          }
+        }
+      }
+    },
+    "Capture Mouse": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウスキャプチャ"
+          }
+        }
+      }
+    },
+    "Release Mouse Capture": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウスキャプチャ解除"
+          }
+        }
+      }
+    },
+    "CRTC Status": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CRTC ステータス"
+          }
+        }
+      }
+    },
+    "CRTC Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CRTCビューア"
+          }
+        }
+      }
+    },
+    "Performance": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パフォーマンス"
+          }
+        }
+      }
+    },
+    "Performance Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パフォーマンスビューア"
+          }
+        }
+      }
+    },
+    "Peripherals": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "周辺機器"
+          }
+        }
+      }
+    },
+    "Video Controller": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ビデオコントローラ"
+          }
+        }
+      }
+    },
+    "Video Controller Status": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ビデオコントローラ ステータス"
+          }
+        }
+      }
+    },
+    "Video Controller Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ビデオコントローラビューア"
+          }
+        }
+      }
+    },
+    "%@: File not found": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: ファイルが見つかりません"
+          }
+        }
+      }
+    },
+    "Enable gamepad": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲームパッドを有効にする"
+          }
+        }
+      }
+    },
+    "Use a connected controller as the X68000 joystick (port 1). D-pad and left stick move; A = trigger 1, B = trigger 2.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接続されたコントローラをX68000のジョイスティック(1P)として使用します。十字キー/左スティックで移動、Aボタン=トリガー1、Bボタン=トリガー2。"
+          }
+        }
+      }
+    },
+    "Up to two controllers are assigned to JOY1 and JOY2 in the order they connect.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コントローラは接続された順に JOY1 → JOY2 の 2 台まで割り当てられます(3 台目以降は無視)。"
+          }
+        }
+      }
+    },
+    "Choose which connected controller is assigned to each port. A newly connected controller is auto-assigned to the first free port; you can always override it here.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "どのコントローラをどちらのポートに割り当てるかを選択します。新しく接続されたコントローラは空いている最も小さい番号のポートへ自動割当されますが、ここでいつでも変更できます。"
+          }
+        }
+      }
+    },
+    "Port 1 (JOY1)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ポート1 (JOY1)"
+          }
+        }
+      }
+    },
+    "Port 2 (JOY2)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ポート2 (JOY2)"
+          }
+        }
+      }
+    },
+    "Port 1 (JOY1): %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ポート1 (JOY1): %@"
+          }
+        }
+      }
+    },
+    "Port 2 (JOY2): %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ポート2 (JOY2): %@"
+          }
+        }
+      }
+    },
+    "Swap Ports": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "入れ替え"
+          }
+        }
+      }
+    },
+    "Not connected": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未接続"
+          }
+        }
+      }
+    },
+    "%@: Invalid size (expected: %lld bytes, actual: %lld bytes)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: サイズが不正 (期待: %lld bytes, 実際: %lld bytes)"
+          }
+        }
+      }
+    },
+    "%@: OK (%lld bytes)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: 正常 (%lld bytes)"
+          }
+        }
+      }
+    },
+    "(empty)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(空)"
+          }
+        }
+      }
+    },
+    "(no image)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(イメージなし)"
+          }
+        }
+      }
+    },
+    "Absolute (follow host cursor)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "絶対(ホストカーソルに追従)"
+          }
+        }
+      }
+    },
+    "Absolute follows the host cursor position (recommended). Relative sends movement deltas (sensitivity slider active).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "絶対はホストのカーソル位置に追従します(推奨)。相対は移動量を送ります(感度スライダ有効)。"
+          }
+        }
+      }
+    },
+    "Apply": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "適用"
+          }
+        }
+      }
+    },
+    "Audio": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サウンド"
+          }
+        }
+      }
+    },
+    "BIOS ROM Paths": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BIOS ROM パス"
+          }
+        }
+      }
+    },
+    "Browse...": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "参照..."
+          }
+        }
+      }
+    },
+    "CPU / Register Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU / レジスタビューア"
+          }
+        }
+      }
+    },
+    "CPU / Registers": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU / レジスタ"
+          }
+        }
+      }
+    },
+    "CPU Status": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU ステータス"
+          }
+        }
+      }
+    },
+    "CPU: %lldMHz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU: %lldMHz"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャンセル"
+          }
+        }
+      }
+    },
+    "Change…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "変更…"
+          }
+        }
+      }
+    },
+    "Clock": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クロック"
+          }
+        }
+      }
+    },
+    "Clock: %lldMHz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クロック: %lldMHz"
+          }
+        }
+      }
+    },
+    "Default (~/Pictures/MX68K)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デフォルト (~/Pictures/MX68K)"
+          }
+        }
+      }
+    },
+    "Display Language": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表示言語"
+          }
+        }
+      }
+    },
+    "Eject": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取り出し"
+          }
+        }
+      }
+    },
+    "Eject FDD%lld": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FDD%lld を取り出し"
+          }
+        }
+      }
+    },
+    "Emulator": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エミュレータ"
+          }
+        }
+      }
+    },
+    "Enable mouse emulation": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウスエミュレーションを有効にする"
+          }
+        }
+      }
+    },
+    "Extension": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張"
+          }
+        }
+      }
+    },
+    "Fast FD Access": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD アクセス高速化"
+          }
+        }
+      }
+    },
+    "Shortens the emulated seek/read/write waits to a fixed 64 µs, matching XM6's floppy disk speed-up option. Applies immediately.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "シーク・読込・書込のエミュレーション待ち時間を 64µs 固定へ短縮します(XM6 の「フロッピーディスク高速化」相当)。設定は即座に反映されます。"
+          }
+        }
+      }
+    },
+    "Touch Controls": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タッチ操作"
+          }
+        }
+      }
+    },
+    "Virtual Pad Opacity": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仮想パッドの不透明度"
+          }
+        }
+      }
+    },
+    "Sets how visible the on-screen joystick overlay is. Applies immediately.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画面上に重ねて表示される仮想ジョイスティックの見えやすさを設定します。設定は即座に反映されます。"
+          }
+        }
+      }
+    },
+    "Trigger Button Size": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "トリガーボタンの大きさ"
+          }
+        }
+      }
+    },
+    "Small": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小"
+          }
+        }
+      }
+    },
+    "Medium": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "中"
+          }
+        }
+      }
+    },
+    "Large": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "大"
+          }
+        }
+      }
+    },
+    "Adjusts the size of the TRIG1/TRIG2 buttons. Applies immediately.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TRIG1/TRIG2 ボタンの大きさを変更します。設定は即座に反映されます。"
+          }
+        }
+      }
+    },
+    "Auto-fire A": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連射 A"
+          }
+        }
+      }
+    },
+    "Auto-fire B": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連射 B"
+          }
+        }
+      }
+    },
+    "Rapid-fires the A/B buttons while held. Applies immediately.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A/B ボタンを押している間、連射します。設定は即座に反映されます。"
+          }
+        }
+      }
+    },
+    "Soft Keyboard Opacity": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ソフトキーボードの不透明度"
+          }
+        }
+      }
+    },
+    "Sets how visible the on-screen keyboard is. Applies immediately.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "画面上に重ねて表示されるソフトキーボードの見えやすさを設定します。設定は即座に反映されます。"
+          }
+        }
+      }
+    },
+    "⚠ Leave this off for titles whose copy protection depends on real floppy rotation timing — they may behave differently when it is on.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ フロッピーディスクの実回転タイミングに依存するコピープロテクトを持つタイトルでは、ON にすると動作が変わることがあります。その場合は OFF のままにしてください。"
+          }
+        }
+      }
+    },
+    "FPU Enabled": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FPU 有効"
+          }
+        }
+      }
+    },
+    "FPU: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FPU: %@"
+          }
+        }
+      }
+    },
+    "Failed to load state.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートの読込に失敗しました。"
+          }
+        }
+      }
+    },
+    "Failed to save state.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートの保存に失敗しました。"
+          }
+        }
+      }
+    },
+    "Full Screen": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フルスクリーン"
+          }
+        }
+      }
+    },
+    "Gamepad": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲームパッド"
+          }
+        }
+      }
+    },
+    "Gamepad support is not implemented yet.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲームパッドは未対応です。"
+          }
+        }
+      }
+    },
+    "General": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一般"
+          }
+        }
+      }
+    },
+    "HDD changes take effect immediately on the next disk access — no reset needed.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDD の変更は次回のディスクアクセスから即座に反映されます(リセット不要)。"
+          }
+        }
+      }
+    },
+    "SCSIINROM is not yet functional (reserved for future built-in SCSI support).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSIINROMは現時点では未機能です(将来の内蔵SCSI対応のために予約)。"
+          }
+        }
+      }
+    },
+    "HDD image ejected (takes effect immediately)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDD イメージを取り外しました(即座に反映)"
+          }
+        }
+      }
+    },
+    "HDD eject failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDD イメージの取り外しに失敗しました"
+          }
+        }
+      }
+    },
+    "HDD image mount failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDD イメージのマウントに失敗しました"
+          }
+        }
+      }
+    },
+    "HDD image set: %@ (takes effect immediately)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDD イメージを設定しました: %@(即座に反映)"
+          }
+        }
+      }
+    },
+    "HDD image size does not match a valid SASI capacity (10/20/40MB)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDD イメージのサイズが SASI の容量(10/20/40MB)と一致しません"
+          }
+        }
+      }
+    },
+    "This image may be SCSI-formatted (X68SCSI1 identifier detected). Try inserting it into a SCSI slot.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このイメージは SCSI 用にフォーマットされている可能性があります(X68SCSI1 識別子を検出)。SCSI スロットへの挿入をお試しください。"
+          }
+        }
+      }
+    },
+    "Hard Disk (SASI .hdf)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハードディスク"
+          }
+        }
+      }
+    },
+    "Hard Reset": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハードリセット"
+          }
+        }
+      }
+    },
+    "Hardware": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハードウェア"
+          }
+        }
+      }
+    },
+    "Input": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "入力"
+          }
+        }
+      }
+    },
+    "Keyboard": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キーボード"
+          }
+        }
+      }
+    },
+    "Load State…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートを読込…"
+          }
+        }
+      }
+    },
+    "MEM: %lldMB": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリ: %lldMB"
+          }
+        }
+      }
+    },
+    "Machine Configuration": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "機種設定"
+          }
+        }
+      }
+    },
+    "Machine Type": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "機種"
+          }
+        }
+      }
+    },
+    "Machine: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "機種: %@"
+          }
+        }
+      }
+    },
+    "Memory": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリ"
+          }
+        }
+      }
+    },
+    "Memory Map": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリマップ"
+          }
+        }
+      }
+    },
+    "Memory Map Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリマップビューア"
+          }
+        }
+      }
+    },
+    "Memory Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリビューア"
+          }
+        }
+      }
+    },
+    "Mercury Unit (high-quality ADPCM)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mercury Unit (高品質ADPCM)"
+          }
+        }
+      }
+    },
+    "Monitor": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "モニタ"
+          }
+        }
+      }
+    },
+    "Mouse": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウス"
+          }
+        }
+      }
+    },
+    "Mouse Mode": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウスモード"
+          }
+        }
+      }
+    },
+    "Mouse Capture: ON": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウスキャプチャ: ON"
+          }
+        }
+      }
+    },
+    "Mouse Capture: OFF": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウスキャプチャ: OFF"
+          }
+        }
+      }
+    },
+    "Interrupt": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "インタラプト"
+          }
+        }
+      }
+    },
+    "No": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "なし"
+          }
+        }
+      }
+    },
+    "None": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "なし"
+          }
+        }
+      }
+    },
+    "Not a file — drop a disk image file.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ファイルではありません — ディスクイメージファイルをドロップしてください。"
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "Only .hdf images can be dropped here.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": ".hdf イメージのみドロップできます。"
+          }
+        }
+      }
+    },
+    "Pause": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一時停止"
+          }
+        }
+      }
+    },
+    "Power": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "電源"
+          }
+        }
+      }
+    },
+    "Quit App": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリを終了"
+          }
+        }
+      }
+    },
+    "Relative (send movement)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相対(移動量を送る)"
+          }
+        }
+      }
+    },
+    "Reset": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リセット"
+          }
+        }
+      }
+    },
+    "Reset (Hard)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リセット (ハード)"
+          }
+        }
+      }
+    },
+    "Reset (Soft)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リセット (ソフト)"
+          }
+        }
+      }
+    },
+    "Reset to Default": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デフォルトに戻す"
+          }
+        }
+      }
+    },
+    "Sample Rate": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サンプリングレート"
+          }
+        }
+      }
+    },
+    "Save State…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートを保存…"
+          }
+        }
+      }
+    },
+    "SASI Model (Initial – EXPERT II)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SASI搭載機 (初代〜EXPERT II)"
+          }
+        }
+      }
+    },
+    "SCSI Model (SUPER – XVI)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSI搭載機 (SUPER〜XVI)"
+          }
+        }
+      }
+    },
+    "SCSI image size is out of the valid range": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSI イメージのサイズが有効範囲外です"
+          }
+        }
+      }
+    },
+    "Screenshot": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スクリーンショット"
+          }
+        }
+      }
+    },
+    "Screenshot Folder": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スクリーンショット保存先"
+          }
+        }
+      }
+    },
+    "Screenshot failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スクリーンショットの保存に失敗しました"
+          }
+        }
+      }
+    },
+    "Screenshot saved: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スクリーンショットを保存しました: %@"
+          }
+        }
+      }
+    },
+    "Select disk image for FDD%lld": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FDD%lld のディスクイメージを選択"
+          }
+        }
+      }
+    },
+    "Select…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択…"
+          }
+        }
+      }
+    },
+    "Remap Keys…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キーの割り当てを変更…"
+          }
+        }
+      }
+    },
+    "Assign a different host key to any X68000 key.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "X68000の各キーに、任意のホストキーを割り当てます。"
+          }
+        }
+      }
+    },
+    "Remap Keyboard": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キーボードの割り当て"
+          }
+        }
+      }
+    },
+    "Choose which host key sends each X68000 key. SHIFT, CTRL and CAPS are not listed: macOS reports them as modifier flags, so they cannot be remapped here.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "X68000の各キーをどのホストキーから送出するかを選びます。SHIFT・CTRL・CAPSは一覧にありません — macOS がこれらを修飾キー(modifier flags)として報告するため、ここでは変更できません。"
+          }
+        }
+      }
+    },
+    "Press a key…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キーを押してください…"
+          }
+        }
+      }
+    },
+    "Unassigned": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未割当"
+          }
+        }
+      }
+    },
+    "Change": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "変更"
+          }
+        }
+      }
+    },
+    "Reset All": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてリセット"
+          }
+        }
+      }
+    },
+    "Send arrow keys as numeric keypad": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カーソルキーをテンキーとして送る"
+          }
+        }
+      }
+    },
+    "Sensitivity": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "感度"
+          }
+        }
+      }
+    },
+    "Soft Reset": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ソフトリセット"
+          }
+        }
+      }
+    },
+    "Some games use the numeric keypad for movement. Enable this to use the arrow keys instead.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲームによってはテンキーが移動キーです。有効にするとカーソルキーで代替できます。"
+          }
+        }
+      }
+    },
+    "Sound Enabled": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サウンド有効"
+          }
+        }
+      }
+    },
+    "Sound Settings": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サウンド設定"
+          }
+        }
+      }
+    },
+    "State loaded: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートを読込みました: %@"
+          }
+        }
+      }
+    },
+    "State saved: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートを保存しました: %@"
+          }
+        }
+      }
+    },
+    "System": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システム"
+          }
+        }
+      }
+    },
+    "The current state will be lost. Execute a hard reset?": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在の状態は失われます。ハードリセットを実行しますか？"
+          }
+        }
+      }
+    },
+    "Unknown": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不明"
+          }
+        }
+      }
+    },
+    "Validation": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "検証"
+          }
+        }
+      }
+    },
+    "Window Scale 1.5x": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1.5 倍 (1.5x)"
+          }
+        }
+      }
+    },
+    "Window Scale 1x": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実寸 (1x)"
+          }
+        }
+      }
+    },
+    "Window Scale 2x": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2 倍 (2x)"
+          }
+        }
+      }
+    },
+    "Write-protect FDD%lld. Turning it ON takes effect immediately, even on an inserted disk. To turn it OFF, eject and re-insert the disk to apply.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FDD%lld のライトプロテクト。ONは挿入中のディスクにも即座に反映されます。OFFにする場合は、一旦イジェクトして再挿入すると反映されます。"
+          }
+        }
+      }
+    },
+    "Yes": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "あり"
+          }
+        }
+      }
+    },
+    "※ Requires compatible ROM; not implemented (settings saved only)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ 要対応ROM・未実装（設定のみ保存）"
+          }
+        }
+      }
+    },
+    "⏸ PAUSED": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⏸ 一時停止"
+          }
+        }
+      }
+    },
+    "⚠ Takes effect after pressing Apply and then performing a hard reset (⌘R).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 「適用」を押した後、ハードリセット(⌘R)で反映されます。"
+          }
+        }
+      }
+    },
+    "Clock speed applies after pressing Apply — no hard reset needed.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クロック速度は「適用」を押すと反映されます(ハードリセット不要)"
+          }
+        }
+      }
+    },
+    "表示フィルタ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Display Filter"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表示フィルタ"
+          }
+        }
+      }
+    },
+    "表示フィルタの説明": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Smooth = blends dither (default) / Sharp = crisp dots"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スムーズ=ディザを平滑化(既定)/ くっきり=ドット強調"
+          }
+        }
+      }
+    },
+    "表示フィルタ・くっきり": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sharp"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "くっきり"
+          }
+        }
+      }
+    },
+    "表示フィルタ・スムーズ": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Smooth"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スムーズ"
+          }
+        }
+      }
+    },
+    "走査線エフェクト": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scanline Effect"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "走査線エフェクト"
+          }
+        }
+      }
+    },
+    "BG Status": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BGステータス"
+          }
+        }
+      }
+    },
+    "Sprite List": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スプライトリスト"
+          }
+        }
+      }
+    },
+    "Preview": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プレビュー"
+          }
+        }
+      }
+    },
+    "(no frame)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(フレームなし)"
+          }
+        }
+      }
+    },
+    "Active Sprites: %lld": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "稼働中スプライト数: %lld"
+          }
+        }
+      }
+    },
+    "Memory Switch": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリスイッチ"
+          }
+        }
+      }
+    },
+    "Auto-update memory switches": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリスイッチ自動更新"
+          }
+        }
+      }
+    },
+    "On hard reset, update the SRAM memory switches ($ED005A and $ED006F/70/71) to match the current machine and SASI disk configuration (matches XM6). $ED005A is the SASI drive-index limit: leave this off and a cleared SRAM keeps $ED005A at 0, so no SASI disk is recognized at all. Turn off to leave your SRAM untouched. Note: values previously written by guest software (SWITCH.X etc.) may be overwritten. ⚠ The toggle itself takes effect after pressing Apply and then performing a hard reset (⌘R).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハードリセット時に、SRAM のメモリスイッチ($ED005A および $ED006F/70/71)を現在の機種・SASI ディスク構成に合わせて更新します(XM6 と同じ挙動)。$ED005A は SASI ドライブ index の上限値で、オフのままにすると SRAM をクリアした後も $ED005A が 0 のままとなり、SASI ディスクが一切認識されません。オフにすると SRAM には一切書き込みません。※ゲストソフト(SWITCH.X 等)が書いた値が上書きされる場合があります。 ⚠ このトグル自体は「適用」を押した後、ハードリセット(⌘R)で反映されます。"
+          }
+        }
+      }
+    },
+    "Sound Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サウンドビューア"
+          }
+        }
+      }
+    },
+    "OPM Synthesizer Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPMシンセサイザービューア"
+          }
+        }
+      }
+    },
+    "OPM Synthesizer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPMシンセサイザー"
+          }
+        }
+      }
+    },
+    "OPM Synthesizer (YM2151 FM 8ch)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPM シンセサイザー (YM2151 FM 8ch)"
+          }
+        }
+      }
+    },
+    "Text Plane Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "テキストプレーンビューア"
+          }
+        }
+      }
+    },
+    "BG Page Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BGページビューア"
+          }
+        }
+      }
+    },
+    "Graphics Page Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グラフィックページビューア"
+          }
+        }
+      }
+    },
+    "BG+Sprite Composite Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BG+スプライト合成ビューア"
+          }
+        }
+      }
+    },
+    "Sound": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サウンド"
+          }
+        }
+      }
+    },
+    "Text Plane": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "テキストプレーン"
+          }
+        }
+      }
+    },
+    "BG Page": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BGページ"
+          }
+        }
+      }
+    },
+    "Graphics Page": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グラフィックページ"
+          }
+        }
+      }
+    },
+    "BG+Sprite Composite": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BG+スプライト合成"
+          }
+        }
+      }
+    },
+    "Page": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ページ"
+          }
+        }
+      }
+    },
+    "Page 0": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ページ0"
+          }
+        }
+      }
+    },
+    "Page 1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ページ1"
+          }
+        }
+      }
+    },
+    "BG0": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BG0"
+          }
+        }
+      }
+    },
+    "BG1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BG1"
+          }
+        }
+      }
+    },
+    "ADPCM (MSM6258)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ADPCM (MSM6258)"
+          }
+        }
+      }
+    },
+    "OPM (YM2151 FM 8ch)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPM (YM2151 FM 8ch)"
+          }
+        }
+      }
+    },
+    "Mercury OPN (YMF288)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mercury OPN (YMF288)"
+          }
+        }
+      }
+    },
+    "Status: PLAYING": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステータス: 再生中"
+          }
+        }
+      }
+    },
+    "Status: STOPPED": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステータス: 停止"
+          }
+        }
+      }
+    },
+    "Peak Level": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ピークレベル"
+          }
+        }
+      }
+    },
+    "Execution Granularity": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実行粒度"
+          }
+        }
+      }
+    },
+    "Capacity": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "容量"
+          }
+        }
+      }
+    },
+    "Clear SRAM…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SRAM クリア…"
+          }
+        }
+      }
+    },
+    "Clear SRAM": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SRAM クリア"
+          }
+        }
+      }
+    },
+    "Clear": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クリア"
+          }
+        }
+      }
+    },
+    "This will erase all SRAM settings. This cannot be undone. Continue?": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべての SRAM 設定が消去されます。この操作は取り消せません。続行しますか？"
+          }
+        }
+      }
+    },
+    "16 KB (standard)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "16 KB (標準)"
+          }
+        }
+      }
+    },
+    "64 KB (mod)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "64 KB (改造)"
+          }
+        }
+      }
+    },
+    "Resets all battery-backed SRAM settings (machine type flags, memory switches, boot device) to factory defaults (ROM built-in defaults) — equivalent to removing the backup battery on real hardware. Takes effect after a reset.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バッテリバックアップ SRAM の設定(機種フラグ、メモリスイッチ、起動デバイス)をすべて工場出荷時設定(ROM 内蔵既定値)へ戻します — 実機でバックアップ電池を外すのと同等です。リセット後に反映されます。"
+          }
+        }
+      }
+    },
+    "Close": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "閉じる"
+          }
+        }
+      }
+    },
+    "Reset Command": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リセットコマンド"
+          }
+        }
+      }
+    },
+    "LA (MT-32)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LA音源 (MT-32)"
+          }
+        }
+      }
+    },
+    "GM": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GM音源"
+          }
+        }
+      }
+    },
+    "GS": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GS音源"
+          }
+        }
+      }
+    },
+    "XG": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "XG音源"
+          }
+        }
+      }
+    },
+    "Output Device": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出力デバイス"
+          }
+        }
+      }
+    },
+    "Input Device": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "入力デバイス"
+          }
+        }
+      }
+    },
+    "22050 Hz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "22050 Hz"
+          }
+        }
+      }
+    },
+    "44100 Hz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "44100 Hz"
+          }
+        }
+      }
+    },
+    "Mercury Unit (16-bit linear PCM)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mercury Unit (16bit リニアPCM)"
+          }
+        }
+      }
+    },
+    "MIDI Board (CZ-6BM1)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIDI ボード (CZ-6BM1)"
+          }
+        }
+      }
+    },
+    "Send Reset on Init": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "初期化時にリセット送信"
+          }
+        }
+      }
+    },
+    "Output Delay: %lld ms": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出力遅延: %lld ms"
+          }
+        }
+      }
+    },
+    "12 MHz (ACE mod)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "12 MHz (ACE改造)"
+          }
+        }
+      }
+    },
+    "15 MHz (PRO mod)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "15 MHz (PRO改造)"
+          }
+        }
+      }
+    },
+    "17 MHz (EXPERT mod)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "17 MHz (EXPERT改造)"
+          }
+        }
+      }
+    },
+    "20 MHz (Lucky!)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "20 MHz (Lucky!)"
+          }
+        }
+      }
+    },
+    "24 MHz (RedZone)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "24 MHz (RedZone)"
+          }
+        }
+      }
+    },
+    "Button profile (Port 1)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボタンプロファイル (ポート1)"
+          }
+        }
+      }
+    },
+    "Button profile (Port 2)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボタンプロファイル (ポート2)"
+          }
+        }
+      }
+    },
+    "Standard (2 buttons)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "標準2ボタン"
+          }
+        }
+      }
+    },
+    "CPSF-MD (6 buttons)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPSF-MD (6ボタン)"
+          }
+        }
+      }
+    },
+    "Magical Pad (4 buttons)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マジカルパッド (4ボタン)"
+          }
+        }
+      }
+    },
+    "Some titles shipped with a multi-button pad (Street Fighter II' with CPSF-MD, Fatal Fury 2 with the Magical Pad). These read extra buttons through the strobe line. Leave this on Standard unless the game supports one of them.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多ボタンパッドが同梱されていたタイトルがあります(ストリートファイターII' = CPSF-MD、餓狼伝説2 = マジカルパッド)。これらはストローブ線経由で追加ボタンを読み取ります。対応ゲーム以外では「標準2ボタン」のままにしてください。"
+          }
+        }
+      }
+    },
+    "Remap Gamepad Buttons": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲームパッドのボタン割り当てを変更"
+          }
+        }
+      }
+    },
+    "Remap Buttons… (Port 1)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボタン割り当てを変更… (ポート1)"
+          }
+        }
+      }
+    },
+    "Remap Buttons… (Port 2)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボタン割り当てを変更… (ポート2)"
+          }
+        }
+      }
+    },
+    "Choose which controller button drives each X68000 function. The list follows the button profile selected for this port; change the profile first if you want the extra buttons.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "どのコントローラーボタンをX68000側のどの機能に割り当てるか選びます。一覧はこのポートのボタンプロファイルに従います。追加ボタンを使うには、先にプロファイルを変更してください。"
+          }
+        }
+      }
+    },
+    "Assign a different controller button to each X68000 function. The list of functions follows the button profile selected above.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コントローラーの各ボタンをX68000側の機能に割り当てます。一覧の機能は上のボタンプロファイル選択に従います。"
+          }
+        }
+      }
+    },
+    "Base (all profiles)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "基本(全プロファイル共通)"
+          }
+        }
+      }
+    },
+    "Extra buttons": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "追加ボタン"
+          }
+        }
+      }
+    },
+    "Other (MODE / START)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "その他(MODE・START)"
+          }
+        }
+      }
+    },
+    "ADPCM Volume": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ADPCM音量"
+          }
+        }
+      }
+    },
+    "OPM (FM) Volume": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPM (FM) 音量"
+          }
+        }
+      }
+    },
+    "Palette": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パレット"
+          }
+        }
+      }
+    },
+    "Palette Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パレットビューア"
+          }
+        }
+      }
+    },
+    "Input Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "入力ビューア"
+          }
+        }
+      }
+    },
+    "Text / BG / Sprite (TextPal32)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "テキスト/BG/スプライト (TextPal32)"
+          }
+        }
+      }
+    },
+    "Graphics (GrphPal32)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グラフィック (GrphPal32)"
+          }
+        }
+      }
+    },
+    "Contrast: %lld / 15": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コントラスト: %lld / 15"
+          }
+        }
+      }
+    },
+    "Port %lld (JOY%lld)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ポート%lld (JOY%lld)"
+          }
+        }
+      }
+    },
+    "Controller: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コントローラ: %@"
+          }
+        }
+      }
+    },
+    "Profile: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロファイル: %@"
+          }
+        }
+      }
+    },
+    "Capture": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャプチャ"
+          }
+        }
+      }
+    },
+    "Mode: ": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "モード: "
+          }
+        }
+      }
+    },
+    "Gamepad: ": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲームパッド: "
+          }
+        }
+      }
+    },
+    "Absolute": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "絶対"
+          }
+        }
+      }
+    },
+    "Relative": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相対"
+          }
+        }
+      }
+    },
+    "Left": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "左"
+          }
+        }
+      }
+    },
+    "Right": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "右"
+          }
+        }
+      }
+    },
+    "Up": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上"
+          }
+        }
+      }
+    },
+    "Down": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下"
+          }
+        }
+      }
+    },
+    "TRIG1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボタン1"
+          }
+        }
+      }
+    },
+    "TRIG2": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボタン2"
+          }
+        }
+      }
+    },
+    "Enabled": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有効"
+          }
+        }
+      }
+    },
+    "Sensitivity: %.2f": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "感度: %.2f"
+          }
+        }
+      }
+    },
+    "Connected Controllers (%lld)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接続中のコントローラ (%lld)"
+          }
+        }
+      }
+    },
+    "Audio Buffer (CoreAudio)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "オーディオバッファ (CoreAudio)"
+          }
+        }
+      }
+    },
+    "Callbacks:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コールバック数:"
+          }
+        }
+      }
+    },
+    "Underruns:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アンダーラン数:"
+          }
+        }
+      }
+    },
+    "Zero-filled:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゼロ埋め:"
+          }
+        }
+      }
+    },
+    "%llu samples": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%llu サンプル"
+          }
+        }
+      }
+    },
+    "Turbo": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターボ"
+          }
+        }
+      }
+    },
+    "Turbo Target": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターボ倍率"
+          }
+        }
+      }
+    },
+    "Turbo: OFF": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターボ: OFF"
+          }
+        }
+      }
+    },
+    "Turbo: ON (%lldx)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターボ: ON (%lld倍速)"
+          }
+        }
+      }
+    },
+    "Turbo: ON (No Wait)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターボ: ON (ノーウェイト)"
+          }
+        }
+      }
+    },
+    "No Wait": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ノーウェイト"
+          }
+        }
+      }
+    },
+    "“No Wait” runs as fast as the host CPU allows, with no multiplier cap. It keeps one CPU core fully busy, and the display may tear.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「ノーウェイト」は倍率の上限なしで、ホスト CPU が許す限り高速に実行します。CPU コアを 1 つ占有し、表示にティアリング(画面の上下が別フレームになる現象)が起こることがあります。"
+          }
+        }
+      }
+    },
+    "2x": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "2倍速"
+          }
+        }
+      }
+    },
+    "3x": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3倍速"
+          }
+        }
+      }
+    },
+    "4x": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4倍速"
+          }
+        }
+      }
+    },
+    "5x": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5倍速"
+          }
+        }
+      }
+    },
+    "Runs the emulator faster than real time. Toggle it from the Emulator menu (⌘⇧T). Sound is muted while turbo is on.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エミュレータを実時間より速く動作させます。切替は「エミュレータ」メニュー(⌘⇧T)から行います。ターボ中は音声がミュートされます。"
+          }
+        }
+      }
+    },
+    "Failed to create the blank disk image.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空ディスクイメージの作成に失敗しました。"
+          }
+        }
+      }
+    },
+    "Size": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サイズ"
+          }
+        }
+      }
+    },
+    "Size (MB)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サイズ (MB)"
+          }
+        }
+      }
+    },
+    "Blank image created: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空イメージを作成しました: %@"
+          }
+        }
+      }
+    },
+    "Size must be between 10 and 4095 MB.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サイズは 10〜4095 MB の範囲で指定してください。"
+          }
+        }
+      }
+    },
+    "Processor": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "プロセッサ"
+          }
+        }
+      }
+    },
+    "Device": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デバイス"
+          }
+        }
+      }
+    },
+    "Video": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ビデオ"
+          }
+        }
+      }
+    },
+    "Tools": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ツール"
+          }
+        }
+      }
+    },
+    "Create Image": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "イメージ作成"
+          }
+        }
+      }
+    },
+    "Floppy Disk Image…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フロッピーディスクイメージ…"
+          }
+        }
+      }
+    },
+    "SASI Hard Disk Image…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SASIハードディスクイメージ…"
+          }
+        }
+      }
+    },
+    "SCSI Hard Disk Image…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSIハードディスクイメージ…"
+          }
+        }
+      }
+    },
+    "Create Floppy Disk Image": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フロッピーディスクイメージの作成"
+          }
+        }
+      }
+    },
+    "Create SASI Hard Disk Image": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SASIハードディスクイメージの作成"
+          }
+        }
+      }
+    },
+    "Create SCSI Hard Disk Image": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSIハードディスクイメージの作成"
+          }
+        }
+      }
+    },
+    "Create…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作成…"
+          }
+        }
+      }
+    },
+    "After creating": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作成後"
+          }
+        }
+      }
+    },
+    "Do not insert": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "挿入しない"
+          }
+        }
+      }
+    },
+    "Insert into FDD0": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FDD0へ挿入"
+          }
+        }
+      }
+    },
+    "Insert into FDD1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FDD1へ挿入"
+          }
+        }
+      }
+    },
+    "Creates an unformatted (physical-format-only) 2HD floppy image (1,261,568 bytes). Format it with FORMAT.X on the guest before use.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未フォーマット(物理フォーマットのみ)の2HDフロッピーイメージ(1,261,568バイト)を作成します。使用前にゲスト側の FORMAT.X でフォーマットしてください。"
+          }
+        }
+      }
+    },
+    "Creates an unformatted (physical-format-only) SASI hard disk image. Mount it from the SASI settings tab, then format it with FORMAT.X on the guest.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未フォーマット(物理フォーマットのみ)のSASIハードディスクイメージを作成します。SASI設定タブでマウントしてから、ゲスト側のFORMAT.Xでフォーマットしてください。"
+          }
+        }
+      }
+    },
+    "Creates an unformatted (physical-format-only) SCSI hard disk image, 10–4095 MB. Mount it from the SCSI settings tab, then format it with SXFORMAT on the guest.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未フォーマット(物理フォーマットのみ)のSCSIハードディスクイメージ(10〜4095MB)を作成します。SCSI設定タブでマウントしてから、ゲスト側のSXFORMATでフォーマットしてください。"
+          }
+        }
+      }
+    },
+    "Speed-up Options": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高速化オプション"
+          }
+        }
+      }
+    },
+    "Speed:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "速度:"
+          }
+        }
+      }
+    },
+    "⚠ Expands internal battery-backed SRAM from the standard 16 KB to 64 KB, matching the real-hardware modification. The upper 48 KB is stored separately in sram_ext.dat. Takes effect after pressing Apply and then performing a hard reset (⌘R).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 内蔵バッテリバックアップSRAMを標準16KBから64KBへ拡張します(実機の改造相当)。上位48KBはsram_ext.datに別途保存されます。「適用」を押した後、ハードリセット(⌘R)で反映されます。"
+          }
+        }
+      }
+    },
+    "Master Volume": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全体音量"
+          }
+        }
+      }
+    },
+    "⚠ Sample rate takes effect at next launch": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ サンプリングレートは次回起動時に反映されます"
+          }
+        }
+      }
+    },
+    "⚠ Supports PCM 2ch + FM (YMF288) 6ch + SSG 3ch. FM and SSG can be inspected in the Sound Monitor. Takes effect after pressing Apply and then performing a hard reset (⌘R).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ PCM 2ch + FM (YMF288) 6ch + SSG 3chに対応します。FMとSSGはSound Monitorで確認できます。「適用」を押した後、ハードリセット(⌘R)で反映されます。"
+          }
+        }
+      }
+    },
+    "⚠ Wiring is complete, but neither real PCM nor real FM sound has been verified — no compatible software has been obtained yet.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 配線は完了していますが、対応ソフト未入手のため実 PCM 音・実 FM 音とも未検証です。"
+          }
+        }
+      }
+    },
+    "⚠ Cannot be installed together with the Mercury Unit — both use interrupt level 4. Disable the Mercury Unit first.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ Mercury Unit と同じ割込みレベル(4)のため同時装着できません。先に Mercury Unit を無効にしてください。"
+          }
+        }
+      }
+    },
+    "⚠ Both MIDI output and input are supported. Board detection and recognition by game/music drivers are confirmed, but sound output on a real MIDI instrument has not been verified.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 入出力とも対応しています。ボードの検出とゲーム/音楽ドライバからの認識は確認済みですが、実 MIDI 楽器での音出力は未検証です。"
+          }
+        }
+      }
+    },
+    "⚠ For reference: XM6 defaults to 84 ms (28 ms in the TypeG build). 0 = no delay (the MX68K default).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 参考値: XM6 の既定は 84 ms(TypeG 版は 28 ms)。0 = 遅延なし(MX68K の既定)。"
+          }
+        }
+      }
+    },
+    "⚠ No MIDI destination is available on this Mac. Enable the IAC Driver in Audio MIDI Setup, or connect a MIDI interface.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ この Mac に MIDI 出力先がありません。「Audio MIDI 設定」で IAC ドライバを有効にするか、MIDI インターフェースを接続してください。"
+          }
+        }
+      }
+    },
+    "⚠ No MIDI devices detected. Reopen this tab after a hard reset (⌘R) and the list will be refreshed.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ MIDI デバイスが見つかりません。ハードリセット(⌘R)後にこの画面を開き直すと一覧が更新されます。"
+          }
+        }
+      }
+    },
+    "SCSI Mode": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSI利用方法"
+          }
+        }
+      }
+    },
+    "Not installed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "装着しない"
+          }
+        }
+      }
+    },
+    "Internal": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内蔵タイプ"
+          }
+        }
+      }
+    },
+    "External board (CZ-6BS1)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外付けボード(CZ-6BS1)"
+          }
+        }
+      }
+    },
+    "This machine uses the internal SCSI interface. Disk changes take effect after pressing Apply and then performing a hard reset (⌘R). To boot from SCSI, load SCSIINROM in the BIOS tab.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この機種は内蔵SCSIインターフェースを使用します。ディスクの変更は「適用」を押した後、ハードリセット(⌘R)で反映されます。SCSIから起動するには、BIOSタブでSCSIINROMを読み込んでください。"
+          }
+        }
+      }
+    },
+    "This is a SASI machine. Choose “External board” to use disks on an external SCSI board (CZ-6BS1). Mounting and ejecting take effect immediately. SCSIEXROM must be loaded in the BIOS tab.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SASI搭載機です。「外付けボード」を選ぶと外付けSCSI(CZ-6BS1)のディスクを利用できます。マウント/イジェクトは即時反映されます。BIOS タブで SCSIEXROM のロードが必要です。"
+          }
+        }
+      }
+    },
+    "⚠ A machine type change takes effect after pressing Apply and then performing a hard reset (⌘R) — until then the choices above stay as they are.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 機種の切替は「適用」を押した後、ハードリセット(⌘R)で反映されます — それまで上の選択可否は変わりません。"
+          }
+        }
+      }
+    },
+    "The memory switch auto-update setting is shared with the SASI tab.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリスイッチ自動更新は SASI タブの設定を共有します。"
+          }
+        }
+      }
+    },
+    "SCSI Devices (ID0-6)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSIデバイス (ID0-6)"
+          }
+        }
+      }
+    },
+    "Mounting and ejecting take effect immediately, on the next disk access.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウント/イジェクトは次回のディスクアクセスで即時反映されます。"
+          }
+        }
+      }
+    },
+    "⚠ Disabled on SCSI machines — internal SASI is not wired. Switch Machine Type to SASI, click Apply, and then perform a hard reset (⌘R) to use these.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ SCSI機種では無効です(内蔵SASIは未配線)。機種をSASIへ切り替えて「適用」を押した後、ハードリセット(⌘R)することで使用できます。"
+          }
+        }
+      }
+    },
+    "⚠ Changes take effect at next launch.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 変更は次回起動時に反映されます"
+          }
+        }
+      }
+    },
+    "Tab": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タブ"
+          }
+        }
+      }
+    },
+    "Windrv": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Windrv"
+          }
+        }
+      }
+    },
+    "Mac Folder Sharing (Windrv)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Macフォルダ共有 (Windrv)"
+          }
+        }
+      }
+    },
+    "Share a Mac folder with the guest": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Macのフォルダをゲストと共有する"
+          }
+        }
+      }
+    },
+    "Folder": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダ"
+          }
+        }
+      }
+    },
+    "(no folder selected)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(フォルダ未選択)"
+          }
+        }
+      }
+    },
+    "Status": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "状態"
+          }
+        }
+      }
+    },
+    "Wired": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配線"
+          }
+        }
+      }
+    },
+    "Installed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "装着済み"
+          }
+        }
+      }
+    },
+    "⚠ The selected folder and everything inside it — including all subfolders — becomes readable by software running on the emulated X68000. Only pick a folder whose contents you are comfortable exposing to the guest.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 選択したフォルダとその中身(サブフォルダを含むすべて)は、エミュレートされたX68000上で動作するソフトウェアから読み取り可能になります。ゲストに公開しても差し支えない内容のフォルダだけを選んでください。"
+          }
+        }
+      }
+    },
+    "Takes effect after pressing Apply and then performing a hard reset (⌘R). The guest also needs the WindrvXM.SYS driver loaded from its CONFIG.SYS; the drive letter is assigned by Human68k in CONFIG.SYS device order, not by MX68K.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "反映には「適用」を押した後にハードリセット(⌘R)が必要です。またゲスト側のCONFIG.SYSでWindrvXM.SYSドライバが組み込まれている必要があります。ドライブレターはCONFIG.SYSのデバイス登録順にHuman68kが割り当てるもので、MX68Kが決めるものではありません。"
+          }
+        }
+      }
+    },
+    "Shows whether the shared folder is actually wired into the running machine. This stays \"Not installed\" until a hard reset (⌘R) is performed, and also if the selected folder no longer exists.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共有フォルダが実際に動作中のマシンへ配線されているかを表示します。ハードリセット(⌘R)を実行するまで、また選択したフォルダが存在しなくなった場合も「未装着」のままになります。"
+          }
+        }
+      }
+    },
+    "Allow the guest to modify files (write access)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲストによるファイルの変更を許可する(書き込みアクセス)"
+          }
+        }
+      }
+    },
+    "⚠ With write access enabled, software running on the emulated X68000 can create, overwrite, rename and delete files and folders inside the shared folder — including files it did not create. A buggy or malicious guest program can destroy data this way, and there is no undo. Leave this off unless you specifically need to save files from the guest to your Mac. Changes are confined to the shared folder; nothing outside it can be reached.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 書き込みを許可すると、エミュレートされたX68000上で動作するソフトウェアが、共有フォルダ内のファイル・フォルダを作成・上書き・改名・削除できるようになります(そのソフト自身が作成したものに限りません)。不具合のあるプログラムや悪意のあるプログラムによってデータが失われる可能性があり、元に戻す手段はありません。ゲストからMacへファイルを保存する必要がある場合以外はオフのままにしてください。変更の影響は共有フォルダ内に限定され、その外へは到達できません。"
+          }
+        }
+      }
+    },
+    "Access": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アクセス"
+          }
+        }
+      }
+    },
+    "Read / Write": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み書き"
+          }
+        }
+      }
+    },
+    "Read-only": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み取り専用"
+          }
+        }
+      }
+    },
+    "MO image set: %@ (takes effect after a hard reset ⌘R)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO イメージを設定しました: %@(ハードリセット ⌘R 後に反映)"
+          }
+        }
+      }
+    },
+    "MO image size must be exactly 128, 230, 540 or 640 MB": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO イメージのサイズは 128 / 230 / 540 / 640MB のいずれかちょうどである必要があります"
+          }
+        }
+      }
+    },
+    "MO image mount failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO イメージの装着に失敗しました"
+          }
+        }
+      }
+    },
+    "MO image ejected (takes effect after a hard reset ⌘R)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO イメージを取り外しました(ハードリセット ⌘R 後に反映)"
+          }
+        }
+      }
+    },
+    "MO image inserted: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO イメージを挿入しました: %@"
+          }
+        }
+      }
+    },
+    "MO image ejected": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO イメージを取り出しました"
+          }
+        }
+      }
+    },
+    "MO eject failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO イメージの取り出しに失敗しました"
+          }
+        }
+      }
+    },
+    "The guest has locked the MO drive — eject it from the guest first": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲストが MO ドライブをロックしています — 先にゲスト側で取り出してください"
+          }
+        }
+      }
+    },
+    "Insert after creating": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作成後に挿入する"
+          }
+        }
+      }
+    },
+    "MO Drive (ID5)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO ドライブ(ID5)"
+          }
+        }
+      }
+    },
+    "⚠ SCSI ID5 is occupied by a hard disk image. Eject the SCSI5 image above to use the MO drive.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ SCSI ID5 はハードディスクイメージに占有されています。MO ドライブを使うには、上の SCSI5 のイメージを取り外してください。"
+          }
+        }
+      }
+    },
+    "⚠ Takes effect after pressing Apply and then performing a hard reset (⌘R). Media cannot be swapped while running.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 適用(Apply)を押したうえでハードリセット(⌘R)を行うと反映されます。動作中にメディアを交換することはできません。"
+          }
+        }
+      }
+    },
+    "A resident SCSI device driver such as SUSIE.X must be loaded on the guest (e.g. SUSIE -ID5 @:) for the MO drive to appear as a drive letter — the real X68000 works the same way. MX68K does not bundle such a driver.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO ドライブがドライブ名として現れるには、ゲスト側に SUSIE.X 等の常駐 SCSI デバイスドライバを読み込ませる必要があります(例: SUSIE -ID5 @:)——実機の X68000 も同じ仕様です。MX68K はこのドライバを同梱していません。"
+          }
+        }
+      }
+    },
+    "SCSI ID5 is occupied by a hard disk image.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSI ID5 はハードディスクイメージに占有されています。"
+          }
+        }
+      }
+    },
+    "Create MO Disk Image": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO ディスクイメージの作成"
+          }
+        }
+      }
+    },
+    "Creates an MO disk image (128 / 230 / 540 / 640 MB — only these exact sizes are recognized). Mount it in the SCSI settings tab. With “None” the image is unformatted, so format it on the guest with an MO formatter (e.g. FIM.X). With “IBM format” a FAT16 super-floppy filesystem is written, so the image can be used as-is without formatting on the guest — useful for 640 MB, which the guest-side MO formatter does not support. The SHARP (bootable) format is not supported.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO ディスクイメージを作成します(128 / 230 / 540 / 640MB——これらちょうどのサイズのみが認識されます)。SCSI 設定タブで装着してください。「なし」を選ぶと未フォーマットになるため、ゲスト側の MO フォーマッタ(FIM.X 等)でフォーマットしてください。「IBM フォーマット」を選ぶと FAT16 スーパーフロッピー形式で書き込まれるため、ゲスト側でのフォーマット作業なしにそのまま使用できます——ゲスト側の MO フォーマッタが非対応の 640MB で特に有用です。SHARP フォーマット(起動可能)には対応していません。"
+          }
+        }
+      }
+    },
+    "IBM format": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IBM フォーマット"
+          }
+        }
+      }
+    },
+    "Logical format": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "論理フォーマット"
+          }
+        }
+      }
+    },
+    "MO Disk Image…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO ディスクイメージ…"
+          }
+        }
+      }
+    },
+    "FD Drive (FD0)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD ドライブ (FD0)"
+          }
+        }
+      }
+    },
+    "FD Drive (FD1)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD ドライブ (FD1)"
+          }
+        }
+      }
+    },
+    "FD Drive (FD2)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD ドライブ (FD2)"
+          }
+        }
+      }
+    },
+    "FD Drive (FD3)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD ドライブ (FD3)"
+          }
+        }
+      }
+    },
+    "MO Drive": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MO ドライブ"
+          }
+        }
+      }
+    },
+    "Insert…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "挿入…"
+          }
+        }
+      }
+    },
+    "Insert (Write-Protected)…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "挿入(書込禁止)…"
+          }
+        }
+      }
+    },
+    "CD-ROM Drive": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM ドライブ"
+          }
+        }
+      }
+    },
+    "CD-ROM Drive (ID6)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM ドライブ(ID6)"
+          }
+        }
+      }
+    },
+    "CD-ROM image inserted: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM イメージを挿入しました: %@"
+          }
+        }
+      }
+    },
+    "CD-ROM image set: %@ (takes effect after a hard reset ⌘R)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM イメージを設定しました: %@(ハードリセット ⌘R で反映)"
+          }
+        }
+      }
+    },
+    "Not a valid CD-ROM image (must be a multiple of the 2048-byte or 2352-byte sector size)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM イメージとして不正です(2048 バイトまたは 2352 バイトのセクタサイズの倍数である必要があります)"
+          }
+        }
+      }
+    },
+    "The guest has locked the CD-ROM drive — eject it from the guest first": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ゲストが CD-ROM ドライブをロックしています — 先にゲスト側で取り出してください"
+          }
+        }
+      }
+    },
+    "CD-ROM image mount failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM イメージの装着に失敗しました"
+          }
+        }
+      }
+    },
+    "CD-ROM image ejected": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM イメージを取り出しました"
+          }
+        }
+      }
+    },
+    "CD-ROM image ejected (takes effect after a hard reset ⌘R)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM イメージを取り出しました(ハードリセット ⌘R で反映)"
+          }
+        }
+      }
+    },
+    "CD-ROM eject failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM の取り出しに失敗しました"
+          }
+        }
+      }
+    },
+    "SCSI ID6 is occupied by a hard disk image.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSI ID6 はハードディスクイメージに占有されています。"
+          }
+        }
+      }
+    },
+    "⚠ SCSI ID6 is occupied by a hard disk image. Eject the SCSI6 image above to use the CD-ROM drive.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ SCSI ID6 はハードディスクイメージに占有されています。CD-ROM ドライブを使うには、上の SCSI6 のイメージを取り出してください。"
+          }
+        }
+      }
+    },
+    "⚠ The first mount takes effect after pressing Apply and then performing a hard reset (⌘R). Once the drive is attached, discs can be swapped while running.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 最初の装着は「適用」を押したあとハードリセット(⌘R)で反映されます。ドライブが装着済みになれば、実行中でもディスクを交換できます。"
+          }
+        }
+      }
+    },
+    "A resident SCSI device driver such as SUSIE.X must be loaded on the guest (e.g. SUSIE -ID6 @:) for the CD-ROM drive to appear as a drive letter — the real X68000 works the same way. MX68K does not bundle such a driver.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM ドライブがドライブレターとして現れるには、ゲスト側で SUSIE.X などの常駐 SCSI デバイスドライバを読み込む必要があります(例: SUSIE -ID6 @:)。実機の X68000 も同様です。MX68K はそうしたドライバを同梱していません。"
+          }
+        }
+      }
+    },
+    "Data (Mode1) tracks only: ISO images with 2048-byte sectors and MODE1/2352 RAW images are supported. CD-DA audio playback and booting from CD are not supported.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "データ(Mode1)トラックのみ対応です。2048 バイトセクタの ISO イメージと MODE1/2352 の RAW イメージを扱えます。CD-DA(音声)の再生と CD からの起動には対応していません。"
+          }
+        }
+      }
+    },
+    "CD-ROM media is always write-protected — this cannot be changed.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CD-ROM 媒体は常に書き込み禁止です — 変更できません。"
+          }
+        }
+      }
+    },
+    "External FDD Unit (drives 2 and 3)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外付け FDD ユニット(ドライブ 2 / 3)"
+          }
+        }
+      }
+    },
+    "Adds two more floppy drives, as an external FDD unit does on real hardware. When it is off, Human68k shows no C:/D: drive — matching a machine with nothing attached.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実機の外付け FDD ユニットと同じく、フロッピードライブを 2 台追加します。OFF のときは Human68k に C: / D: ドライブが現れません(外付けを何も接続していない実機と同じ状態)。"
+          }
+        }
+      }
+    },
+    "Storage": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ストレージ"
+          }
+        }
+      }
+    },
+    "Storage Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ストレージビューア"
+          }
+        }
+      }
+    },
+    "Storage Status": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ストレージ状態"
+          }
+        }
+      }
+    },
+    "Busy:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ビジー:"
+          }
+        }
+      }
+    },
+    "SASI (internal, 8 units)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SASI(内蔵、8ユニット)"
+          }
+        }
+      }
+    },
+    "(not wired — machine type mismatch)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(未配線 — 機種不一致)"
+          }
+        }
+      }
+    },
+    "SCSI (ID0-6)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSI(ID0-6)"
+          }
+        }
+      }
+    },
+    "Pending ⌘R": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘R待ち"
+          }
+        }
+      }
+    },
+    "live:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実状態:"
+          }
+        }
+      }
+    },
+    "config:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定値:"
+          }
+        }
+      }
+    },
+    "ready": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メディア有り"
+          }
+        }
+      }
+    },
+    "no media": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メディア無し"
+          }
+        }
+      }
+    },
+    "(none)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(なし)"
+          }
+        }
+      }
+    },
+    "MIDI Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIDIビューア"
+          }
+        }
+      }
+    },
+    "MIDI": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIDI"
+          }
+        }
+      }
+    },
+    "MIDI Status": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIDI状態"
+          }
+        }
+      }
+    },
+    "Wired:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "配線:"
+          }
+        }
+      }
+    },
+    "Board (CZ-6BM1 / YM3802 $EAFA00)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ボード(CZ-6BM1 / YM3802 $EAFA00)"
+          }
+        }
+      }
+    },
+    "(not installed — enable it in Settings → Audio)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(未装着 — 設定→サウンドで有効にしてください)"
+          }
+        }
+      }
+    },
+    "(configured but not wired — press ⌘R for a hard reset)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(設定済みですが未配線 — ⌘Rでハードリセットしてください)"
+          }
+        }
+      }
+    },
+    "TX (guest → device)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TX(ゲスト→機器)"
+          }
+        }
+      }
+    },
+    "RX (device → guest)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RX(機器→ゲスト)"
+          }
+        }
+      }
+    },
+    "(messages = CoreMIDI packets; one packet may carry several MIDI messages)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(messages はCoreMIDIパケット数。1パケットに複数のMIDIメッセージが載ることがあります)"
+          }
+        }
+      }
+    },
+    "⚠ Rx FIFO disabled by the guest (R35 bit0 = 0) — incoming bytes are not counted.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ ゲストが受信FIFOを無効にしています(R35 bit0 = 0)— 受信バイトは計上されません。"
+          }
+        }
+      }
+    },
+    "YM3802 registers": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YM3802レジスタ"
+          }
+        }
+      }
+    },
+    "(index %lld out of range)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "(インデックス%lldは範囲外)"
+          }
+        }
+      }
+    },
+    "RTC Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RTCビューア"
+          }
+        }
+      }
+    },
+    "RTC": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RTC"
+          }
+        }
+      }
+    },
+    "RTC Status (RP5C15 $E8A000)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RTC状態(RP5C15 $E8A000)"
+          }
+        }
+      }
+    },
+    "Bank:": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バンク:"
+          }
+        }
+      }
+    },
+    "Date / time": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日時"
+          }
+        }
+      }
+    },
+    "⚠ These 7 values are a snapshot of the HOST system clock, not emulated guest state. The chip keeps no date/time counter of its own: every guest read of a date/time register is answered from the host clock, and anything the guest writes there is stored but never read back.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ この7項目はホスト(Mac)の時計のスナップショットであり、エミュレートされたゲスト内部の状態ではありません。このチップは独自の日時カウンタを持たず、ゲストが日時レジスタを読む度にホストの時計から値を算出して返します。ゲストが日時レジスタへ書いた値は保存されるだけで、読み出しには一切反映されません。"
+          }
+        }
+      }
+    },
+    "Clock output & mode": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "クロック出力・モード"
+          }
+        }
+      }
+    },
+    "Alarm registers": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アラームレジスタ"
+          }
+        }
+      }
+    },
+    "Leap-year counter": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "うるう年カウンタ"
+          }
+        }
+      }
+    },
+    "⚠ This register is effectively write-only. The guest's written value is stored, but a read never returns it — the chip recomputes (host year − 1980) mod 4 every time. The two values above can therefore disagree, and that is not a defect.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ このレジスタは実質的に書込み専用です。ゲストが書いた値は保存されますが、読み出しでは返されません — チップは読み出しの度に(ホストの年 − 1980) mod 4 を再計算します。したがって上の2つの値は食い違うことがありますが、それは不具合ではありません。"
+          }
+        }
+      }
+    },
+    "Bank / test / alarm output control": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バンク / テスト / ALARM出力制御"
+          }
+        }
+      }
+    },
+    "always lit (too fast to see)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "常時点灯(速すぎて点滅は目視不可)"
+          }
+        }
+      }
+    },
+    "16 Hz blink": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "16Hz点滅"
+          }
+        }
+      }
+    },
+    "1 Hz blink": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1Hz点滅"
+          }
+        }
+      }
+    },
+    "1/60 Hz (30s on / 30s off)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1/60Hz(30秒点灯 / 30秒消灯)"
+          }
+        }
+      }
+    },
+    "held low (lamp off)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L固定(消灯)"
+          }
+        }
+      }
+    },
+    "Sun": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日"
+          }
+        }
+      }
+    },
+    "Mon": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "月"
+          }
+        }
+      }
+    },
+    "Tue": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "火"
+          }
+        }
+      }
+    },
+    "Wed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "水"
+          }
+        }
+      }
+    },
+    "Thu": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "木"
+          }
+        }
+      }
+    },
+    "Fri": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "金"
+          }
+        }
+      }
+    },
+    "Sat": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "土"
+          }
+        }
+      }
+    },
+    "Keyboard Lock LEDs": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キーボード ロック LED"
+          }
+        }
+      }
+    },
+    "かな": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "かな"
+          }
+        }
+      }
+    },
+    "ローマ字": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ローマ字"
+          }
+        }
+      }
+    },
+    "コード入力": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コード入力"
+          }
+        }
+      }
+    },
+    "CAPS": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CAPS"
+          }
+        }
+      }
+    },
+    "INS": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "INS"
+          }
+        }
+      }
+    },
+    "ひらがな": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ひらがな"
+          }
+        }
+      }
+    },
+    "全角": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全角"
+          }
+        }
+      }
+    },
+    "負論理: ビットが 0 のとき点灯(緑)。ソフトウェアキーボードの LED 表示と同じ生値を見ている": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "負論理: ビットが 0 のとき点灯(緑)。ソフトウェアキーボードの LED 表示と同じ生値を見ている"
+          }
+        }
+      }
+    },
+    "Start Recording": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画開始"
+          }
+        }
+      }
+    },
+    "Stop Recording": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画停止"
+          }
+        }
+      }
+    },
+    "Recording": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画中"
+          }
+        }
+      }
+    },
+    "Recording started: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画を開始しました: %@"
+          }
+        }
+      }
+    },
+    "Recording saved: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画を保存しました: %@"
+          }
+        }
+      }
+    },
+    "Recording failed to start": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画を開始できませんでした"
+          }
+        }
+      }
+    },
+    "Recording failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画の保存に失敗しました"
+          }
+        }
+      }
+    },
+    "Cannot start recording while Turbo is on. Turn Turbo off first.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターボ実行中は録画を開始できません。先にターボをOFFにしてください。"
+          }
+        }
+      }
+    },
+    "Turbo is unavailable while recording. Stop recording first.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画中はターボを使用できません。先に録画を停止してください。"
+          }
+        }
+      }
+    },
+    "Video Recording Folder": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "録画保存先"
+          }
+        }
+      }
+    },
+    "Default (~/Movies/MX68K)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デフォルト (~/Movies/MX68K)"
+          }
+        }
+      }
+    },
+    "About MX68K": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MX68K について"
+          }
+        }
+      }
+    },
+    "Could not access the selected file": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選択されたファイルにアクセスできませんでした"
+          }
+        }
+      }
+    },
+    "Mounted, but this may not be remembered after the app restarts": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マウントしましたが、アプリを再起動すると記憶されていない可能性があります"
+          }
+        }
+      }
+    },
+    "SCSI image mount failed": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSI イメージのマウントに失敗しました"
+          }
+        }
+      }
+    },
+    "⚠ Disabled on SCSI machines — internal SASI is not wired. Switch Machine Type to SASI, tap Apply, and then tap Hard Reset to use these.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ SCSI機種では無効です(内蔵SASIは未配線)。機種をSASIへ切り替えて「適用」をタップした後、Hard Resetをタップすることで使用できます。"
+          }
+        }
+      }
+    },
+    "On hard reset, update the SRAM memory switches ($ED005A and $ED006F/70/71) to match the current machine and SASI disk configuration (matches XM6). $ED005A is the SASI drive-index limit: leave this off and a cleared SRAM keeps $ED005A at 0, so no SASI disk is recognized at all. Turn off to leave your SRAM untouched. Note: values previously written by guest software (SWITCH.X etc.) may be overwritten. ⚠ The toggle itself takes effect after pressing Apply and then tapping Hard Reset.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハードリセット時に、SRAM のメモリスイッチ($ED005A および $ED006F/70/71)を現在の機種・SASI ディスク構成に合わせて更新します(XM6 と同じ挙動)。$ED005A は SASI ドライブ index の上限値で、オフのままにすると SRAM をクリアした後も $ED005A が 0 のままとなり、SASI ディスクが一切認識されません。オフにすると SRAM には一切書き込みません。※ゲストソフト(SWITCH.X 等)が書いた値が上書きされる場合があります。 ⚠ このトグル自体は「適用」を押した後、Hard Resetをタップすることで反映されます。"
+          }
+        }
+      }
+    },
+    "This machine uses the internal SCSI interface. Disk changes take effect after pressing Apply and then tapping Hard Reset. To boot from SCSI, load SCSIINROM in the BIOS tab.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この機種は内蔵SCSIインターフェースを使用します。ディスクの変更は「適用」を押した後、Hard Resetをタップすることで反映されます。SCSIから起動するには、BIOSタブでSCSIINROMを読み込んでください。"
+          }
+        }
+      }
+    },
+    "⚠ A machine type change takes effect after pressing Apply and then tapping Hard Reset — until then the choices above stay as they are.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 機種の切替は「適用」を押した後、Hard Resetをタップすることで反映されます — それまで上の選択可否は変わりません。"
+          }
+        }
+      }
+    },
+    "⚠ Takes effect after pressing Apply and then tapping Hard Reset.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 「適用」を押した後、Hard Resetをタップすることで反映されます。"
+          }
+        }
+      }
+    },
+    "⚠ Takes effect after pressing Apply and then tapping Hard Reset. Media cannot be swapped while running.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 適用(Apply)を押したうえでHard Resetをタップすると反映されます。動作中にメディアを交換することはできません。"
+          }
+        }
+      }
+    },
+    "⚠ The first mount takes effect after pressing Apply and then tapping Hard Reset. Once the drive is attached, discs can be swapped while running.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 最初の装着は「適用」を押したあとHard Resetをタップすることで反映されます。ドライブが装着済みになれば、実行中でもディスクを交換できます。"
+          }
+        }
+      }
+    },
+    "This state file was saved by an older, incompatible version of MX68K and cannot be loaded.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このステートファイルは互換性のない旧バージョンのMX68Kで保存されたため、読み込めません。"
+          }
+        }
+      }
+    },
+    "This state file does not match the current memory size setting.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このステートファイルは現在のメモリサイズ設定と一致しません。"
+          }
+        }
+      }
+    },
+    "Could not read or write the state file.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートファイルの読み書きができませんでした。"
+          }
+        }
+      }
+    },
+    "This state file is corrupted or invalid.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このステートファイルは壊れているか、正しい形式ではありません。"
+          }
+        }
+      }
+    },
+    "State operation did not complete (emulation stopped or paused).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステート操作が完了しませんでした(エミュレーションが停止または一時停止しています)。"
+          }
+        }
+      }
+    },
+    "State": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステート"
+          }
+        }
+      }
+    },
+    "Save State": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートを保存"
+          }
+        }
+      }
+    },
+    "Load State": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートを読込"
+          }
+        }
+      }
+    },
+    "No saved states": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存されたステートはありません"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

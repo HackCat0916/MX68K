@@ -1,0 +1,158 @@
+# P657: CRTC ラスタコピーの実行タイミングを実機準拠へ修正(Class A: verbatim 移植)
+#
+# 分類: A
+# 参照リポジトリ : px68k-libretro (uraraworks フォーク)
+#                  https://github.com/uraraworks/px68k-libretro
+# 参照PR         : #2 「CRTCラスタコピーの実行タイミングを修正」
+#                  branch: fix/crtc-raster-copy-timing
+# 参照コミット   : cd88e2ea3337777062117a14daea56e3b18953f4 (merge commit)
+#                  merged at 2026-08-20T12:28:08Z
+#
+# 検証コマンドと生出力(.mx68k_cycles/P657_pr2_reference.md に記録済のものを転記):
+#   $ gh pr view 2 --repo uraraworks/px68k-libretro \
+#       --json state,mergedAt,mergeCommit,headRefName,title,url
+#   {"headRefName":"fix/crtc-raster-copy-timing",
+#    "mergeCommit":{"oid":"cd88e2ea3337777062117a14daea56e3b18953f4"},
+#    "mergedAt":"2026-08-20T12:28:08Z","state":"MERGED",
+#    "title":"CRTCラスタコピーの実行タイミングを修正",
+#    "url":"https://github.com/uraraworks/px68k-libretro/pull/2"}
+#
+# 対象ファイル/行域(適用前の MX の行番号):
+#   Core/px68k/x68k/crtc.c:127-152   CRTC_RasterCopy() を static 化 + no-op 条件追加
+#   Core/px68k/x68k/crtc.c:152 直後  CRTC_HorizontalFrontPorch() 新設
+#   Core/px68k/x68k/crtc.c:273-286   CRTC_Init() に CRTC_Mode / CRTC_FastClr /
+#                                    CRTC_FastClrLine / CRTC_FastClrMask の初期化を追加
+#   Core/px68k/x68k/crtc.c:515-529   $2C/$2D 書込み時の即時 CRTC_RasterCopy() を削除
+#   Core/px68k/x68k/crtc.c:534-552   $E80481 書込み時の即時 CRTC_RasterCopy() を削除
+#   Core/px68k/x68k/crtc.h:42        CRTC_RasterCopy() の公開を CRTC_HorizontalFrontPorch() へ置換
+#
+# 一行理由: 実機のラスタコピーは指示時点で即時転送されず、次の水平同期期間中に
+#           転送される(テクニカルデータブック p.33 / Inside X68000 p.207)。
+#           px68k 系統(本家/libretro r-type/MPX/MX)はすべて即時実行の同一祖先由来で、
+#           PR#2 を持つのは uraraworks フォークのみ(Class A 条件2、単一参照実装)。
+#
+# 参照実装の横断確認(Class A 条件2): px68k本家(HEAD=74ddbb3)・
+#   px68k-libretro r-type(HEAD=617574f)・MPX68K(HEAD=42fc340) はいずれも
+#   即時実行のまま(= 同一欠陥を共有)。修正を持つのは uraraworks フォークのみ。
+#
+# サイクル: P657
+# 適用方法: git apply Patches/Core/p657_crtc_raster_copy_timing.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#
+# 併用が必須の Bridge 側変更(同一コミット): Bridge/EmulatorBridge.c の
+#   フレームループが走査線の display 境界でスライスをクランプし、到達時に
+#   CRTC_HorizontalFrontPorch() を呼ぶ(P657_FRONTPORCH_ENABLE=1)。
+#   このパッチ単独では CRTC_HorizontalFrontPorch() の呼び手が居ない。
+#
+--- a/Core/px68k/x68k/crtc.c
++++ b/Core/px68k/x68k/crtc.c
+@@ -124,13 +124,20 @@
+ // -----------------------------------------------------------------------
+ //   らすたーこぴー
+ // -----------------------------------------------------------------------
+-void CRTC_RasterCopy(void)
++/* P657: 外部公開を廃止。唯一の実行契機は CRTC_HorizontalFrontPorch()。 */
++static void CRTC_RasterCopy(void)
+ {
+ 
+ 	uint32_t line = (((uint32_t)CRTC_Regs[0x2d])<<2);
+ 	uint32_t src = (((uint32_t)CRTC_Regs[0x2c])<<9);
+ 	uint32_t dst = (((uint32_t)CRTC_Regs[0x2d])<<9);
+ 
++	/* P657: プレーン未選択または転送元==転送先は転送を行わない。
++	 * 実機仕様: 「R21(E8002AH)のD03〜D00すべてに"0"を書き込むと、ラスタコピーは
++	 * 実行されません」(テクニカルデータブック p.33 / PDF p.45)。 */
++	if (!(CRTC_Regs[0x2b] & 0x0f) || src == dst)
++		return;
++
+ 	static const uint32_t off[4] = { 0, 0x20000, 0x40000, 0x60000 };
+ 	int_fast16_t i, bit;
+ 
+@@ -152,6 +159,19 @@
+ }
+ 
+ 
++/*
++ * P657: 水平フロントポーチ
++ *
++ * 動作ポート bit3 はレベル制御のイネーブルである。セットされている間、
++ * ラスタコピーは各水平フロントポーチで、その時点の R21/R22 を使って1回実行される。
++ */
++void CRTC_HorizontalFrontPorch(void)
++{
++	if (CRTC_Mode & 8)
++		CRTC_RasterCopy();
++}
++
++
+ // -----------------------------------------------------------------------
+ //   びでおこんとろーるれじすた
+ // -----------------------------------------------------------------------
+@@ -273,6 +293,13 @@
+ void CRTC_Init(void)
+ {
+ 	memset(CRTC_Regs, 0, sizeof(CRTC_Regs));
++	/* P657: リセット時に動作ポート由来の状態も明示的にクリアする(PR#2)。
++	 * これが無いと、ハードリセット後も前セッションのラスタコピー/高速クリアの
++	 * イネーブル状態が残る。 */
++	CRTC_Mode = 0;
++	CRTC_FastClr = 0;
++	CRTC_FastClrLine = 0;
++	CRTC_FastClrMask = 0;
+ 	TextScrollX = 0, TextScrollY = 0;
+ 	memset(GrphScrollX, 0, sizeof(GrphScrollX));
+ 	memset(GrphScrollY, 0, sizeof(GrphScrollY));
+@@ -514,17 +541,14 @@
+ 			break;
+ 		case 0x2c:				// CRTC動作ポートのラスタコピーをONにしておいて（しておいたまま）、
+ 		case 0x2d:				// Src/Dstだけ次々変えていくのも許されるらしい（ドラキュラとか）
++			/* P657: レジスタ書込みは状態更新のみ。転送は水平フロントポーチで
++			 * 行われる(CRTC_HorizontalFrontPorch)。CRTC_RCFlag[] は旧実装の
++			 * 名残で、スケジューリングには使われない(MX固有の ulds 判定は温存)。 */
+ 			if(ulds & 0x02){
+-			  CRTC_RCFlag[reg-0x2c] = 1;// Dst変更後に実行される？
++			  CRTC_RCFlag[reg-0x2c] = 1;
+ 			}
+ 			if(ulds & 0x01){
+-			  CRTC_RCFlag[reg-0x2c+1] = 1;// Dst変更後に実行される？
+-			}
+-			if ((CRTC_Mode&8)&&/*(CRTC_RCFlag[0])&&*/(CRTC_RCFlag[1]))
+-			{
+-				CRTC_RasterCopy();
+-				CRTC_RCFlag[0] = 0;
+-				CRTC_RCFlag[1] = 0;
++			  CRTC_RCFlag[reg-0x2c+1] = 1;
+ 			}
+ 			break;
+ 		default:
+@@ -535,13 +559,10 @@
+ 	{
+ 	  if(ulds & 0x01){// access 0xe80481
+ 					// CRTC動作ポート
++		/* P657: 動作ポートの bit3 はレベル制御のイネーブル。ここでは状態を
++		 * 更新するだけで転送は行わない(実行は水平フロントポーチ)。
++		 * MX固有の &0x0f マスクは温存(bit3 はマスク内なので影響しない)。 */
+ 		CRTC_Mode = ((data & 0x0f)|(CRTC_Mode&2));
+-		if (CRTC_Mode&8)
+-		{				// Raster Copy
+-			CRTC_RasterCopy();
+-			CRTC_RCFlag[0] = 0;
+-			CRTC_RCFlag[1] = 0;
+-		}
+ 		if (CRTC_Mode&2)		// 高速クリア
+ 		{
+ 			CRTC_FastClrLine = x68k_vline;
+--- a/Core/px68k/x68k/crtc.h
++++ b/Core/px68k/x68k/crtc.h
+@@ -39,7 +39,10 @@
+ 
+ void CRTC_Init(void);
+ 
+-void CRTC_RasterCopy(void);
++/* P657: 水平フロントポーチ到達時に Bridge のフレームループから呼ぶ。
++ * CRTC_Mode bit3 が立っていればラスタコピーを1回実行する。
++ * CRTC_RasterCopy() は crtc.c 内 static となり外部公開しない。 */
++void CRTC_HorizontalFrontPorch(void);
+ 
+ uint8_t  FASTCALL CRTC_Read(uint32_t adr);
+ uint16_t FASTCALL CRTC_Read16(uint32_t adr);

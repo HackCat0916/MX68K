@@ -1,0 +1,70 @@
+# Xcode
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+build/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# BIOS（絶対に含めない）
+*.DAT
+*.dat
+IPLROM*
+CGROM*
+iplrom*
+cgrom*
+
+# ディスクイメージ（テスト用も含めない）
+*.xdf
+*.dim
+*.d88
+*.hdm
+*.hdf
+*.2hd
+*.img
+*.mos
+*.MOS
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Build logs
+build*.log
+
+# Test scripts (build_c68k.sh is committed)
+Scripts/*.py
+Scripts/test_*
+
+# Backup directories
+*.backup/
+*.backup
+
+# Nested/duplicate artifacts
+MX68K/MX68K.xcodeproj/
+MX68K/Bridge/
+
+# macOS resource forks
+._*
+
+# Claude Code local working artifacts
+.mx68k_cycles/
+.claude/worktrees/
+.claude/skills/
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+.claude/*.bak.*
+
+# Reference book scans (kept local for OCR; too large to commit)
+Docs/*.pdf
+
+# Throwaway experiment code from early Phase 1 (compiled binaries mixed in)
+Tests/
+
+# Stray file
+/=

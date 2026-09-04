@@ -1,0 +1,65 @@
+# 分類: A
+# 出典リポジトリ:
+#   - px68k本家 https://github.com/hissorii/px68k (x68k/crtc.c)
+#   - px68k-libretro https://github.com/libretro/px68k-libretro (x68k/crtc.c)
+#   - MPX68K https://github.com/YosAwed/MPX68K (X68000 Shared/px68k/x68k/crtc.c)
+#   - 補強: XM6 v2.06 (PI氏, 2001-2005) vm/crtc.cpp / vm/gvram.cpp
+#     (静的ソース、git管理外。独立コードベースでの一致確認のため補強として引用)
+# 参照コミットハッシュ:
+#   - px68k本家:      74ddbb37b4e12b77362a4e12f28ceb5aaa593684
+#   - px68k-libretro: 617574fc65892421dd8be92270f8241c96a1a594
+#   - MPX68K:         42fc3401b5a3449a3b758ae67edba3c4a19682b8
+# 対象ファイル:行範囲: Core/px68k/x68k/crtc.c:342 (CRTC_Write16 内、case 0x28)
+# 理由(1行): CRTC R20上位バイトへの全書込みからbit3(65536色配置/線形VRAM
+#   配置「Nemesis」技法)を毎回剥ぎ取るMX固有のマスクを削除し、参照4実装
+#   (px68k本家・px68k-libretro・MPX68K・XM6)全てが行っている「マスクせず
+#   生値を保存する」挙動へ合わせる。
+# 由来サイクル: P622 (D-59調査、P610-P621の11サイクル+Fable5独立監査を経て特定)
+#
+# ---------------------------------------------------------------------------
+# 背景(詳細は .mx68k_cycles/P621_fable5_audit.md, .mx68k_cycles/P622_plan.md)
+# ---------------------------------------------------------------------------
+# クレイジークライマー2がFD1イジェクト直後、ゲームコード自身が正当な
+# `lea (a5),a6` / `jmp (a6)` 経由でGVRAM上のコード(64KBコピーで配置)へ
+# ジャンプするが、そのGVRAM内容が「虫食い」状態になっており(256色モードの
+# 奇数バイト破棄で本来の半分しか着地していない)、暴走してIPL-ROM再初期化に
+# 至る不具合(D-59)を修正する。
+#
+# 因果連鎖:
+#   1. ゲストがR20上位バイトにbit3付きの値($09)を書く
+#      (65536色配置/線形VRAM配置を要求)
+#   2. このMX固有マスク(`&= 0x07`)がbit3を剥ぎ取り、256色モードのまま留まる
+#   3. 256色モードのまま64KBコピーがGVRAMへ走り、gvram.cの256色ケース
+#      (上流準拠・正しい仕様、奇数バイト破棄)により半分しか着地しない
+#   4. 虫食いのGVRAM内容をコードとして実行し暴走
+#
+# gvram.cの256色ケース自体は4リポジトリでバイト一致する上流準拠の正しい
+# 仕様であり、本パッチの対象ではない(Fable5監査で誤認と判明・修正対象外)。
+#
+# 参照実装3種の該当箇所(いずれもマスク無し・break有り、本サイクルで
+# grep/sedにより直接再確認済み):
+#   px68k本家:crtc.c:403-404       case 0x28: TVRAM_SetAllDirty(); break;
+#   px68k-libretro:crtc.c:403-404  case 0x28: TVRAM_SetAllDirty(); break;
+#   MPX:crtc.c:407-408             case 0x28: TVRAM_SetAllDirty(); break;
+#
+# git blame Core/px68k/x68k/crtc.c により、削除対象行はMXの最初のコミット
+# (6337b28, 2026-05-03「Add px68k core, SwiftUI app shell, and Bridge
+# layer」)から存在することを確認済み——初回ベンダリング時点の混入であり、
+# MXが後から独自に加えた変更ではない。
+#
+# スコープ最小化: 同じcase 0x28ブロックの `//break;`(フォールスルー、
+# case 0x29 の `&=0x1f` ロジックへ連続実行される設計)は参照実装と食い違う
+# 可能性があるが、本パッチには意図的に同梱しない(1パッチ1逸脱の原則)。
+# 別途評価する。
+# ---------------------------------------------------------------------------
+
+--- a/Core/px68k/x68k/crtc.c
++++ b/Core/px68k/x68k/crtc.c
+@@ -339,7 +339,6 @@
+ 			WinDraw_ChangeSize();
+ 			break;
+ 		case 0x28:
+-			CRTC_Regs[0x28] &= 0x07;
+ 			TVRAM_SetAllDirty();
+ 			//break;
+ 		case 0x29:
