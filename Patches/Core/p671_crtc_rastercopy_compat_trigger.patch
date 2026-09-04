@@ -1,0 +1,100 @@
+# P671: CRTC ラスタコピーの互換トリガ復活(Class A: verbatim 移植)
+#
+# 分類: A
+# 出典リポジトリ: MPX68K https://github.com/YosAwed/MPX68K
+# 参照コミットハッシュ: f59c07d5152daf165eae2a2dbb20254bbd7e0357
+#   ("Fix CRTC raster-copy compatibility timing" 2026-08-20 08:58:01 +0900)
+# 対象ファイル:行範囲: Core/px68k/x68k/crtc.c:295-302, :542-553, :558-573
+#   :295-302  CRTC_Init() に CRTC_RCFlag[] のクリアを追加
+#   :542-553  R22($E8002C/D)書込み時の即時トリガを復活
+#   :558-573  動作ポート($E80481) bit3 セット時の即時トリガを復活
+#   (いずれも適用前の MX の行番号)
+# 理由(1行): P657 が削除した即時トリガの復活——ゲストが1水平期間内に発行した
+#   複数の src/dst 対の一部が転送されないまま上書きされ、テキスト表示が崩れる(D-69)。
+# 由来サイクル: P671
+#
+# --- 以下、CLAUDE.md が追加で要求する項目 ---
+#
+# 検証コマンドと生出力:
+#   $ cd /tmp/mpx && git log -3 --format='%H %ci %s'
+#   f59c07d5152daf165eae2a2dbb20254bbd7e0357 2026-08-20 08:58:01 +0900 Fix CRTC raster-copy compatibility timing
+#   6e4d928c5251caaffa60c20cd27e03062c9697fe 2026-08-19 15:47:42 +0900 Bump App Store version to 4.3
+#   bb26a3b17d82981de0965443d5f1a39dcdfd0728 2026-08-19 15:39:55 +0900 Support .2hd floppy disk images
+#
+# 参照実装の横断確認(Class A 条件2):
+#   YosAwed/MPX68K(f59c07d)          : 本修正あり ← 唯一の保持者
+#   uraraworks/px68k-libretro(cd88e2e): 即時トリガ削除のまま(= P657 の移植元、同一欠陥)
+#   px68k本家(74ddbb3)                : 即時のみ、フロントポーチ実行が存在しない
+#   px68k-libretro本流(617574f)       : 即時のみ、フロントポーチ実行が存在しない
+#   → 「フロントポーチ実行 + 即時互換トリガ」の両立を持つのは MPX68K のみ。
+#     単一参照実装のみが保持することは Class A 条件2 の許容範囲(理由の文書化で足りる)。
+#
+# 適用方法: git apply Patches/Core/p671_crtc_rastercopy_compat_trigger.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#
+# 併用が必須の Bridge 側変更: 無し(本サイクルは Bridge/ を変更しない)。
+#
+--- a/Core/px68k/x68k/crtc.c
++++ b/Core/px68k/x68k/crtc.c
+@@ -300,6 +300,12 @@
+ 	CRTC_FastClr = 0;
+ 	CRTC_FastClrLine = 0;
+ 	CRTC_FastClrMask = 0;
++	/* P671: 即時トリガ復活に伴い、旧実装フラグもリセット対象に含める
++	 * (MPX68K f59c07d と同一)。これが無いと、リセット直前に src だけ書かれて
++	 * dst 未更新だった中間状態が残り、リセット後の最初の $E8002D バイト書込みで
++	 * 意図しない対が転送されうる。 */
++	CRTC_RCFlag[0] = 0;
++	CRTC_RCFlag[1] = 0;
+ 	TextScrollX = 0, TextScrollY = 0;
+ 	memset(GrphScrollX, 0, sizeof(GrphScrollX));
+ 	memset(GrphScrollY, 0, sizeof(GrphScrollY));
+@@ -541,14 +547,24 @@
+ 			break;
+ 		case 0x2c:				// CRTC動作ポートのラスタコピーをONにしておいて（しておいたまま）、
+ 		case 0x2d:				// Src/Dstだけ次々変えていくのも許されるらしい（ドラキュラとか）
+-			/* P657: レジスタ書込みは状態更新のみ。転送は水平フロントポーチで
+-			 * 行われる(CRTC_HorizontalFrontPorch)。CRTC_RCFlag[] は旧実装の
+-			 * 名残で、スケジューリングには使われない(MX固有の ulds 判定は温存)。 */
++			/* P671 (D-69): 互換トリガの復活(MPX68K f59c07d と同一設計、
++			 * "Keep the legacy R22 completion trigger")。
++			 * 転送は水平フロントポーチでも反復されるが(CRTC_HorizontalFrontPorch)、
++			 * IOCS のように RC を ON にしたまま src/dst を次々更新するソフトでは、
++			 * 1水平期間内に発行された対の一部が次の値で上書きされて失われる。
++			 * 書込み時点でも1回転送することで、発行された対の取りこぼしを防ぐ。
++			 * MX固有の ulds 判定は温存。 */
+ 			if(ulds & 0x02){
+ 			  CRTC_RCFlag[reg-0x2c] = 1;
+ 			}
+ 			if(ulds & 0x01){
+ 			  CRTC_RCFlag[reg-0x2c+1] = 1;
++			}
++			if ((CRTC_Mode & 8) && (CRTC_RCFlag[1]))
++			{
++				CRTC_RasterCopy();
++				CRTC_RCFlag[0] = 0;
++				CRTC_RCFlag[1] = 0;
+ 			}
+ 			break;
+ 		default:
+@@ -559,10 +575,18 @@
+ 	{
+ 	  if(ulds & 0x01){// access 0xe80481
+ 					// CRTC動作ポート
+-		/* P657: 動作ポートの bit3 はレベル制御のイネーブル。ここでは状態を
+-		 * 更新するだけで転送は行わない(実行は水平フロントポーチ)。
++		/* P657/P671: 動作ポートの bit3 はレベル制御のイネーブルであり、
++		 * ON の間は水平フロントポーチごとに転送が反復される。
++		 * それに加えて、P671 では bit3 がセットされた時点でも1回転送する
++		 * (MPX68K f59c07d の "compatibility trigger" と同一)。
+ 		 * MX固有の &0x0f マスクは温存(bit3 はマスク内なので影響しない)。 */
+ 		CRTC_Mode = ((data & 0x0f)|(CRTC_Mode&2));
++		if (CRTC_Mode & 8)
++		{
++			CRTC_RasterCopy();
++			CRTC_RCFlag[0] = 0;
++			CRTC_RCFlag[1] = 0;
++		}
+ 		if (CRTC_Mode&2)		// 高速クリア
+ 		{
+ 			CRTC_FastClrLine = x68k_vline;

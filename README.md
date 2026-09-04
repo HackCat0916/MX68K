@@ -1,16 +1,35 @@
+<!--
+  このファイルは github.com/HackCat0916/MX68K（公開リポジトリ）に
+  README.md として置く下書き(2026-08-24、P682後「保留」解除・公開作業
+  開始。同日、日本語の後ろに英訳を併記する形式へ変更。2026-09、ソース
+  コード一式(mac/iOS)を公開する方針転換に伴い全面改訂)。
+
+  README.md（本リポジトリのトップ）と共通する節(機能一覧・動作環境・
+  対応ディスクイメージ形式・キーボードマッピング・ライセンス・謝辞)を
+  編集した場合は、このファイルの対応箇所も同時に更新すること。
+
+  各節は「日本語 → English」の順で併記する。表は日本語版の下に英語版を
+  追加する形とし、キーボードマッピング表のようにキー名主体で言語非依存な
+  表は見出しのみ英訳し表自体は共有する。
+-->
+
 # MX68K
 
-**Mac X68000 Emulator for macOS**
+**Sharp X68000 Emulator for macOS and iOS**
 
-Sharp X68000のエミュレータを、macOS向けにSwiftUIとMetalでネイティブ実装したものです。
+Sharp X68000のエミュレータを、macOS/iOS向けにSwiftUIとMetalでネイティブ実装したものです。
 エミュレーションコアには実績のある [px68k](https://github.com/hissorii/px68k)（hissorii氏作）のC/C++ソースを流用し、GUIレイヤーをSwift/SwiftUIで構築しています。
 
-このリポジトリでは、**ビルド済みの実行モジュール**（`.app` / `.dmg`）を [Releases](../../releases) で配布しています。ソースコードは非公開のプライベートリポジトリで開発しています。
+このリポジトリでは、**ソースコード一式**（macOS/iOS両ターゲット）を公開しています。
+ビルド方法は [USAGE.md](USAGE.md) を参照してください。macOS版のビルド済み実行モジュール
+（`.app` / `.dmg`）は [Releases](../../releases) でも配布しています。
 
-A native macOS port of the Sharp X68000 emulator, built with SwiftUI and Metal.
+A native macOS/iOS port of the Sharp X68000 emulator, built with SwiftUI and Metal.
 The emulation core reuses the proven C/C++ sources of [px68k](https://github.com/hissorii/px68k) (by hissorii), with the GUI layer built in Swift/SwiftUI.
 
-This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](../../releases). The source code is developed in a private repository and is not published here.
+This repository publishes the **full source code** (both the macOS and iOS targets).
+See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
+(`.app` / `.dmg`) are also distributed via [Releases](../../releases).
 
 ---
 
@@ -20,15 +39,13 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 - **px68kコア** — 実績のあるpx68kエミュレーションコアをベースに実機ソフトの動作を目指す
 - **Apple Silicon ネイティブ** — arm64アーキテクチャに最適化（M1/M2/M3/M4シリーズ対応）
 - **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
-- **拡張FDD対応（FD2/FD3）** — Fileメニューから2台の追加フロッピードライブが利用可能（設定画面のHardwareタブで有効化、既定は無効）
 - **ドラッグ&ドロップマウント** — ディスクイメージをウィンドウにドロップしてFDDマウント（**FD のみ** — HDD/SCSI/CD-ROM/MOイメージは各設定画面の該当行へD&D可）
 - **キーボード入力** — X68000のJISキーボードレイアウトに対応、キーリマップ設定・ソフトウェアキーボード対応
 - **ターボ / ノーウェイト** — 2x〜5x固定倍率、または上限無しの専用スレッド駆動ノーウェイトモード
 - **ゲームパッド対応** — 2ポート対応、複数ボタンプロファイル（Standard / CPSF-MD / マジカルパッド）
 - **ステートセーブ/ロード** — `*.mxstate`形式、個数無制限
 - **スクリーンショット** — PNG保存（保存先変更可）
-- **動画録画** — H.264(映像)+AAC(音声)/mp4録画、解像度モードが切り替わってもライブ表示と同じ見た目で記録（保存先変更可、録画中はTurbo/No-Waitを禁止）
-- **SASI / SCSI HDD** — SASI 8台・外付けSCSI/内蔵SCSI対応、イメージの誤挿入（SASI/SCSI取り違え）を検出
+- **SASI / SCSI HDD** — SASI 8台・外付けSCSI/内蔵SCSI対応
 - **MOドライブ** — SCSI ID5固定スロット、実行中のライブ媒体交換対応
 - **CD-ROM（ISO・Mode1）マウント** — SCSI ID6固定スロット（CD-DA・CDブートは非対応）
 - **Windrv** — Macのフォルダを共有ドライブとしてゲストからファイル読み書き
@@ -43,15 +60,13 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 - **px68k Core** — based on the proven px68k emulation core, aiming for compatibility with real X68000 software
 - **Apple Silicon Native** — optimized for arm64 (M1/M2/M3/M4 series)
 - **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, ISO, **ZIP** (FD, single/multi-image archives)
-- **Extended Floppy Drives (FD2/FD3)** — two additional floppy drives available from the File menu (enable in the Hardware settings tab, off by default)
 - **Drag & Drop Mounting** — drop a disk image onto the window to mount it as FDD (**FD only** — HDD/SCSI/CD-ROM/MO images can be dropped onto the corresponding row in each settings tab)
 - **Keyboard Input** — X68000 JIS keyboard layout support, key remapping, on-screen software keyboard
 - **Turbo / No-Wait** — fixed 2x–5x multipliers, or an uncapped dedicated-thread no-wait mode
 - **Gamepad Support** — 2 ports, multiple button profiles (Standard / CPSF-MD / Magical Pad)
 - **State Save / Load** — `*.mxstate` format, unlimited slots
 - **Screenshot** — saved as PNG (destination configurable)
-- **Video Recording** — H.264(video)+AAC(audio)/mp4 recording, matches the live display even when the resolution mode changes (destination configurable, Turbo/No-Wait disabled while recording)
-- **SASI / SCSI HDD** — up to 8 SASI drives, internal/external SCSI support, detects HDD image misinsertion (SASI/SCSI format mismatch)
+- **SASI / SCSI HDD** — up to 8 SASI drives, internal/external SCSI support
 - **MO Drive** — dedicated SCSI ID5 slot, live media swap while running
 - **CD-ROM (ISO / Mode1) Mount** — dedicated SCSI ID6 slot (CD-DA and CD-boot are not supported)
 - **Windrv** — share a Mac folder as a guest-accessible drive for file read/write
@@ -66,27 +81,37 @@ This repository distributes **built binaries** (`.app` / `.dmg`) via [Releases](
 
 | 項目 | 要件 |
 |------|-------------|
-| macOS | 13.0 Ventura 以降 |
-| アーキテクチャ | Apple Silicon (arm64) |
+| macOS | 13.0 Ventura 以降・Apple Silicon (arm64) |
+| iOS | 16.0以降（ソースからビルド。詳細は[USAGE.md](USAGE.md)） |
 
 | Item | Requirement |
 |------|-------------|
-| macOS | 13.0 Ventura or later |
-| Architecture | Apple Silicon (arm64) |
+| macOS | 13.0 Ventura or later, Apple Silicon (arm64) |
+| iOS | 16.0 or later (build from source — see [USAGE.md](USAGE.md)) |
 
 ---
 
 ## インストール / Installation
 
+**macOS:**
+
 1. [Releases](../../releases) から最新の `.dmg` をダウンロード
 2. マウントして `MX68K.app` を `/Applications` へドラッグ
 3. 初回起動時はGatekeeperの確認が出る場合があります（右クリック→開く）
 
+ソースからビルドする場合や、**iOS版**（ビルド済み配布物なし、ソースからのビルドのみ）
+については [USAGE.md](USAGE.md) を参照してください。
+
 **English:**
+
+**macOS:**
 
 1. Download the latest `.dmg` from [Releases](../../releases)
 2. Mount it and drag `MX68K.app` to `/Applications`
 3. On first launch, Gatekeeper may show a warning (right-click → Open)
+
+To build from source, or for the **iOS** target (no pre-built distribution —
+build from source only), see [USAGE.md](USAGE.md).
 
 ---
 
@@ -182,36 +207,31 @@ X68000 uses a JIS keyboard layout. macOS keycodes are mapped to X68000 scan code
 
 ## ライセンス・法的事項 / License & Legal Notice
 
-本プロジェクト自体は**非商用フリーウェア**として配布しています。個人利用目的での使用・
-ビルド済み配布物の無改変再配布は自由ですが、商用利用・改変版の再配布は禁止しています。
-詳細は [LICENSE](LICENSE) を参照してください。
+本プロジェクトはC68K(MC68000 CPUコア)のGPL-2.0-or-laterを含む結合著作物のため、
+**GPL-2.0-or-later**の下でソースコードを公開しています。各コンポーネントの由来・
+ライセンスは [LICENSE](LICENSE)・[ATTRIBUTION.md](ATTRIBUTION.md) を、XM6由来
+コードの許諾経緯は [NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md) を参照してください。
 
-- 本プロジェクトは **px68k** コアを使用しています。オリジナルのpx68kライセンスに従ってください（upstreamリポジトリ参照）。
-- FM音源実装には **fmgen**（cisc氏作）のライセンスが適用されます。
-- MC68000エミュレータには **c68k** CPUコアのライセンスが適用されます。
-- **XM6**（ＰＩ．氏作）から移植したSCSI/SASI/MO/CD-ROM関連コードは、商用利用禁止の条件付きです。詳細は [NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md) を参照してください。
 - **SHARP純正のBIOS ROMは含まれていません。** ご自身で合法的に入手したものをご利用ください。
-- Human68k自体はパブリックドメイン（SHARPによりリリース済み）です。
+- Human68k自体は2000年にシャープ・ハドソン等の権利各社により無償公開されましたが、これは使用許諾であり著作権の移転ではありません。著作権は権利各社に帰属したままで、**パブリックドメインではありません**。使用は実機X68000/X68030シリーズおよびそのエミュレータ上に限られます。詳細は[許諾条件](http://retropc.net/x68000/software/sharp/license.htm)を参照してください。
 
 **English:**
 
-This project itself is distributed as **non-commercial freeware**. Personal use and unmodified
-redistribution of the built binaries are permitted; commercial use and redistribution of
-modified versions are prohibited. See [LICENSE](LICENSE) for details.
+Because this project statically links C68K (the MC68000 CPU core), which is
+licensed under GPL-2.0-or-later, MX68K's source code is published under
+**GPL-2.0-or-later**. See [LICENSE](LICENSE) and [ATTRIBUTION.md](ATTRIBUTION.md)
+for the provenance and license of each component, and
+[NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md) for the XM6 permission.
 
-- This project uses the **px68k** core. Please follow the original px68k license (see the upstream repository).
-- The FM sound implementation uses **fmgen** (by cisc), under its own license.
-- The MC68000 emulator uses the **c68k** CPU core, under its own license.
-- SCSI/SASI/MO/CD-ROM-related code ported from **XM6** (by ＰＩ．) carries a non-commercial-use-only condition. See [NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md) for details.
 - **Genuine SHARP BIOS ROMs are NOT included.** Users must provide their own legally obtained copies.
-- Human68k itself is in the public domain (released by SHARP).
+- Human68k itself was freely released in 2000 by Sharp, Hudson, and other rights holders — this is a usage license, not a transfer of copyright. Sharp/Hudson retain copyright, and it is **not** public domain. Use is limited to genuine X68000/X68030 hardware and emulators thereof. See the [license terms](http://retropc.net/x68000/software/sharp/license.htm) (Japanese) for details.
 
 ---
 
 ## 謝辞 / Acknowledgements
 
 - [px68k](https://github.com/hissorii/px68k) by hissorii — X68000エミュレータコア / X68000 emulator core
-- [c68k](https://github.com/kenyahiro/px68k/tree/master/m68000/c68k) by kenyahiro — MC68000 CPUエミュレータ（kenyahiro氏のpx68kフォーク内、ARM64対応） / MC68000 CPU emulator (from kenyahiro's px68k fork, ARM64-compatible)
+- [c68k](https://github.com/kenyahiro/px68k/tree/master/m68000/c68k) by Stephane Dallongeville（Yabause同梱版、kenyahiro氏のpx68kフォーク経由） — MC68000 CPUエミュレータ（ARM64対応） / MC68000 CPU emulator (via kenyahiro's px68k fork, ARM64-compatible)
 - [fmgen](http://retropc.net/cisc/m88/) by cisc — FM音源生成ライブラリ / FM sound generator library
 
 ---

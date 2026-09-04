@@ -1,0 +1,142 @@
+# 分類: A(参照実装からの実証済み修正のverbatim移植)
+# ★2026-08-16 Requirements Review Round 2(R9)により再分類: 当初Class Bとして
+#   提案したが、px68k本家に既に同一修正(`PC -= 2;`)が存在することが判明
+#   したため、より単純で確立されたClass Aへ差し替える。Class B自体は
+#   CLAUDE.md/Patches/Core/README.mdへユーザーの承認により正式に追加済み
+#   (2026-08-16、`9d14036`)——本パッチがClass Aで足りると判明しただけで、
+#   Class Bという分類自体の取り下げではない。
+# 出典リポジトリ: px68k本家 (/Volumes/WD 8TB HDD/Develop/px68k)
+# 参照コミットハッシュ: 74ddbb37b4e12b77362a4e12f28ceb5aaa593684 (2014-08-12,
+#   PX68K_VERSION=0.15)
+# 対象ファイル:行範囲(参照実装側):
+#   m68000/c68k_ini.c:1576 (`{&&op_illegal, 0xffff, 0x4afc}` ディスパッチ登録)
+#   m68000/c68k_op.c:1085-1099 (`OP(illegal)`本体、下記に全文引用)
+#
+# --- 参照実装側の該当コード(m68000/c68k_op.c:1085-1099、変更なし・引用のみ) ---
+# /*-----------------------------------------------------------------------------
+#   ILLEGAL    Take Illegal Instruction Trap
+# -----------------------------------------------------------------------------*/
+#
+# // 4afc
+# OP(illegal)
+# {
+# 	SWAP_SP()
+# 	PC -= 2;
+# 	EXCEPTION(C68K_ILLEGAL_INSTRUCTION_EX)
+# 	RET(34)
+# }
+# --- 引用終わり ---
+#
+# 理由(1行): 実機は不当命令例外でスタックするPCが命令自身のアドレスを示す
+#   (68000ファミリハンドブック PDF p.107/印刷p.95で確認済み、下記「一次資料
+#   (補強)」参照)。px68k本家は`PC -= 2;`でこれを正しく実装しているが、MXの
+#   `Core/c68k/`(kenyahiro fork、gen68k.c生成コード採用)はこの補正を欠いて
+#   おり、実機・px68k本家いずれとも異なる誤った値をスタックしていた。
+#
+# 一次資料(補強、Class B相当の証拠も保持): 68000ファミリハンドブック
+#   PDF p.107(印刷 p.95、第7章「例外処理」)——「ソフトウェアによって未実装
+#   命令をエミュレートするのであれば、スタック・フレームに蓄えたプログラム・
+#   カウンタPCの内容が不当命令を示していることに留意されたい。エミュレートが
+#   終わった後、スタック・フレーム内のPCの内容が修正されたことを確める必要が
+#   ある。これによって、不当命令に続く次の命令が指示される。」
+#   (オーケストレーターが実際にページ画像を開いて確認、2026-08-16)。
+#
+# 実測根拠: [runtime log] P602 [P602-EXCHIST]プローブ、同人版ソーサリアン
+#   ディスクイメージ起動時、TINY-DOS(サードパーティHuman68k互換DOS)のCPU判定
+#   ルーチンが guest $411C で `MOVEC TC,D0`(68040専用、opcode $4E7A/$0003)を
+#   実行 → vec=4(Illegal)発生時の stacked_pc=$0000411E を観測(命令自身の
+#   アドレス$0000411Cに対し+2)。ルーチンは自己書換え方式(ベクタ4ハンドラが
+#   $411Cの4バイトを`moveq #0,d1`+`nop`へ書き換えてRTE)で、実機/px68k本家
+#   なら書き換えたコードへ復帰し正しく「68040ではない」と判定するはずだが、
+#   MXでは+2先の$411E(nop)から再開するため書き換えを読み飛ばし「68040搭載」
+#   と誤判定する(`.mx68k_cycles/P602_disasm_inv.md`にディスク逆アセンブル
+#   全詳細、`.mx68k_cycles/P603_plan.md`にruntime確認ログ全文)。
+#
+# 上流欠陥同定: Core/c68k/gen68k.c の GenILLEGAL()(~L1071)は、Line-A/Line-F
+#   例外を生成する Gen1010(~L3627)/Gen1111(~L3642)が出力する`PC -= 2;`補正を
+#   出力しない——MX/MPX68K/px68k-libretroが共有する生成器レベルの欠落
+#   (px68k本家は生成器を使わない手書きの別系統のためこの欠陥を免れている)。
+#
+# 同系先例(MX内部): Core/c68k/c68k_opA.inc:6(OP_0xA000)・
+#   c68k_opF.inc:6(OP_0xF000)に同一イディオム`PC -= 2;`が既に存在
+#   (同じ生成器が正しく出力した箇所)。
+#
+# 参照実装調査(交差確認):
+#   - px68k-libretro (https://github.com/libretro/px68k-libretro)
+#     pinned commit: cc45b55983b4d30c961a313a77df9bcf9461dc63 (2026-07-19)
+#     `m68000/c68k/c68k_op4.inc:5270-5289` `case 0x4AFC:`に`PC -= 2`無し
+#     ——px68k本家と異なりこの欠陥を持つ(px68k本家からのフォーク後に
+#     gen68k.c生成コードへ切り替わった際に取り込まれた欠陥と推定、未確認)。
+#   - MPX68K (https://github.com/YosAwed/MPX68K)
+#     ローカル作業コピー pinned commit: 42fc3401b5a3449a3b758ae67edba3c4a19682b8
+#     (2026-07-10) — `X68000 Shared/px68k/m68000/c68k/c68k_op4.inc:5272-5292`
+#     同様に`PC -= 2`無し。
+#   - 両者ともMXと異なるディスパッチ方式(switch文、`C68K_NO_JUMP_TABLE`)を
+#     採用しており、この特定の症状(同人版ソーサリアンの68040誤検出)自体は
+#     再現しないとユーザーが確認済みだが(2026-08-16 hands-on)、調査の結果、
+#     MPX68Kのswitch文には`default:`が無く未定義オペコードの約17%
+#     (10,936/65,536、本欠陥の起点である$4E7Aを含む)が例外を一切発生させず
+#     素通りするという別の(こちらの方が深刻な)欠陥に起因する可能性が高いと
+#     判明(`.mx68k_cycles/P602_mpx_pctiming_inv.md`)——参照実装が「たまたま
+#     動く」ことは本欠陥の不在を意味しない。
+#
+# Codex/Fable5クロスファミリーレビュー: 実施済み・APPROVE
+#   (`.mx68k_cycles/P603_fable5_review.md`、2026-08-16。NEXT/PUSH_32_F/
+#   SET_PC/gen68k.c生成規約を独立トレースで検証、CCnt非依存・BasePC非干渉・
+#   Bridge側のP565ガードバッファ機構(`0x4AFC`充填)との相互作用も分析し
+#   回帰なしと確認)。
+#
+# 対象ファイル:行範囲(MX側、修正対象): Core/c68k/c68k_op4.inc:4377
+#   (OP_0x4AFC本体、`PC -= 2;`挿入行) ——diff全体は前後20行の文脈を含む
+# 由来サイクル: P603
+
+--- a/Core/c68k/c68k_op4.inc
++++ b/Core/c68k/c68k_op4.inc
+@@ -4360,40 +4360,47 @@
+ 	u32 adr;
+ 	u32 res;
+ 	adr = CPU->A[7] - 2;
+ 	CPU->A[7] = adr;
+ 	PRE_IO
+ 	READ_BYTE_F(adr, res)
+ 	CPU->flag_C = 0;
+ 	CPU->flag_V = 0;
+ 	CPU->flag_notZ = res;
+ 	CPU->flag_N = res;
+ 	res |= 0x80;
+ 	WRITE_BYTE_F(adr, res)
+ 	POST_IO
+ }
+ RET(10)
+ 
+ // ILLEGAL
+ OP_0x4AFC:
+ {
+ 	u32 res;
++	/* P603 (Class A, verbatim port from px68k本家): real MC68000/68008 hardware stacks the address of the
++	 * faulting instruction itself for the illegal/unimplemented-instruction
++	 * exception (68000 Family Handbook, PDF p.107 / printed p.95). The same
++	 * generator (gen68k.c) already emits this correction for the sibling
++	 * Line-A/Line-F exception handlers (c68k_opA.inc:6 / c68k_opF.inc:6);
++	 * GenILLEGAL() alone omits it, so OP_0x4AFC pushes PC+2 instead of PC. */
++	PC -= 2;
+ 		if (!CPU->flag_S)
+ 		{
+ 			res = CPU->USP;
+ 			CPU->USP = CPU->A[7];
+ 			CPU->A[7] = res;
+ 		}
+ 		res = C68K_ILLEGAL_INSTRUCTION_EX;
+ 	CCnt -= c68k_exception_cycle_table[res];
+ 	PRE_IO
+ 		PUSH_32_F((u32)(PC - CPU->BasePC))
+ 		PUSH_16_F(GET_SR)
+ 		CPU->flag_S = C68K_SR_S;
+ 		READ_LONG_F(res * 4, PC)
+ 		SET_PC(PC)
+ 	POST_IO
+ }
+ RET(4)
+ 
+ // MOVEMaR
+ OP_0x4C90:

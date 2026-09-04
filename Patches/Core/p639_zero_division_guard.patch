@@ -1,0 +1,153 @@
+# ===========================================================================
+# ★★★ SUPERSEDED BY P641 — 取り下げ済み、適用不要 ★★★
+# ===========================================================================
+# 本パッチの内容は Patches/Core/p641_crtc_dynamic_timing.patch に**全て吸収**
+# された。単独適用は不要かつ不可(同一箇所を触るため衝突する)。本ファイルは
+# 履歴として残す。内訳:
+#   (1) crtc.c のゼロガード式 `/(VLINE_TOTAL?VLINE_TOTAL:1)` は、P641が新設する
+#       CRTC_UpdateHSyncClock() の退避経路(else側)に内包された。通常経路は
+#       そもそも VLINE_TOTAL で除算しないため、ゼロ除算の余地が無い。
+#   (2) mfp.c のブロックスコープ化 + htotal ゼロガードは、字面完全一致で
+#       P641パッチに含まれる(コメントのみ和文化)。
+# 理由: 両パッチとも未適用の時点で、2つの独立パッチが異なる基底コードを前提に
+#       する不整合を避ける唯一安全な方法が「単一のunified diffへの統合」だった
+#       (Fable5監査指摘、P641_plan.md §変更内容1.d)。
+# ===========================================================================
+#
+# 分類: A
+# 出典リポジトリ: MPX68K https://github.com/YosAwed/MPX68K
+#   (該当ファイル: "X68000 Shared/px68k/x68k/crtc.c" / "X68000 Shared/px68k/x68k/mfp.c")
+# 参照コミットハッシュ:
+#   - merge commit: 0d096dab8048e64f0e850f35c500e9e746929347
+#     (PR#26 "Derive the per-field cycle budget from CRTC registers", merged 2026-08-19)
+#   - PR head:      eaeb194428505c9f209da79e26974bec40fbcddd
+#   (本サイクルで `gh api repos/YosAwed/MPX68K/pulls/26` および `gh pr diff 26` により
+#    直接取得・字面照合済み。pr26.diff L212 = crtc.c フォールバック式、
+#    pr26.diff L358-365 = mfp.c ブロックスコープ修正)
+# 対象ファイル:行範囲:
+#   - Core/px68k/x68k/crtc.c:296  (CRTC_Write 内、case 0x08/0x09)
+#   - Core/px68k/x68k/crtc.c:346  (CRTC_Write 内、case 0x29)
+#   - Core/px68k/x68k/mfp.c:175-179 (MFP_Read 内、case 0x01 = GPIP、HSYNC位置判定)
+# 理由(1行): 上流px68k系統が共有するゼロ除算クラッシュ(SIGFPE)2件——
+#   VLINE_TOTAL=0 (CRTC R04 の0クリア→復元操作) と CRTC_Regs[1]=0 (R00=0x100 の
+#   合法書込みでR00下位バイトが0) ——を、唯一修正済みの参照実装MPX68K PR#26の
+#   ゼロガードで解消する。
+# 由来サイクル: P639
+#
+# ---------------------------------------------------------------------------
+# 適用範囲(★このパッチ単独を将来参照する読者への注意)
+# ---------------------------------------------------------------------------
+# 本パッチは PR#26 のうち、以下の2点**のみ**を抜粋してMX既存の計算式に適用する:
+#   (1) crtc.c: CRTC_UpdateHSyncClock() 内のフォールバック式
+#       `HSYNC_CLK = (...)/(VLINE_TOTAL?VLINE_TOTAL:1);` (式のみ、関数は導入しない)
+#   (2) mfp.c: GPIP HSYNC位置判定のブロックスコープ化 + htotal ゼロガード
+#
+# PR#26 の本体である CRTC_UpdateHSyncClock() 関数そのもの、crtc_timing.c/h
+# (CRTCレジスタからラスタ周期を動的に導出するタイミングモデル)、および
+# 付随する crtc.h / sysport.c / x11配下 / tests の変更は**本パッチの対象外**。
+# それらは D-65本体(CRTC動的タイミング化)として別Pxxサイクルへ先送りしている。
+# → **本パッチの適用をもって D-65 が解決済みになるわけではない。**
+#
+# ---------------------------------------------------------------------------
+# 参照実装の状況(P638 Spec Inv §4 で3リポジトリ直接diff確認済み)
+# ---------------------------------------------------------------------------
+#   px68k本家       : 同一の脆弱性を保持(未修正) x68k/crtc.c:363-364,407 / mfp.c:167-168
+#   px68k-libretro  : 同一の脆弱性を保持(未修正) 同ファイル同行番号
+#   MPX68K (PR#26)  : **修正済み——唯一の修正済み参照実装**
+# CLAUDE.md Class A 条件2「参照実装の一つのみが修正を持つ場合はその旨明記すればよい」
+# に基づき、単一参照実装由来であることをここに明記する。
+#
+# ---------------------------------------------------------------------------
+# MPX68K原文との差異(意図的、ロジックは verbatim)
+# ---------------------------------------------------------------------------
+#  - 型: MPX側は `int` / `(int)` キャスト、MX側は既存コードが `int32_t` /
+#    `(int32_t)` キャスト。**既存MXコードの型を維持**し、ロジックのみ移植した。
+#  - `hpos` の宣言位置: MPX側は関数先頭で別途宣言済みのため代入のみ。MX側は
+#    元から `int32_t hpos = ...;` の宣言付き初期化であり、それを新設ブロック内へ
+#    そのまま移動した(hpos は mfp.c 内でこの2行以外に参照が無いことを grep 確認済み。
+#    `htotal` という識別子も mfp.c 内に既存の衝突が無いことを確認済み)。
+#  - ブロックの閉じ `}` は `ret |= 0x80;` の直後。後続の
+#    `if (x68k_vline!=CRTC_IntLine)` はブロックの**外側**(switch本体)のまま
+#    変更しない(MPX側の構造と一致)。
+#
+# ---------------------------------------------------------------------------
+# 挙動への影響
+# ---------------------------------------------------------------------------
+# VLINE_TOTAL / CRTC_Regs[1] が正の値である限り、ガード式は元の式と数学的に
+# 完全に同一の結果を返す(通常操作への影響なし)。影響が出るのは、これまで
+# SIGFPEでクラッシュしていた異常なレジスタ値のときのみで、その場合は
+# クラッシュせず除数1でフォールバックする(安全側、MPX68Kと同じ挙動)。
+# ---------------------------------------------------------------------------
+
+--- a/Core/px68k/x68k/crtc.c
++++ b/Core/px68k/x68k/crtc.c
+@@ -288,17 +288,17 @@
+ 			CRTC_HEND = (((uint16_t)CRTC_Regs[0x6]<<8)+CRTC_Regs[0x7]);
+ 			if(CRTC_HEND>CRTC_HSTART){ TextDotX = (CRTC_HEND-CRTC_HSTART)*8; }//設定途中対策
+ 			WinDraw_ChangeSize();
+ 			break;
+ 		case 0x08:
+ 			CRTC_Regs[0x08] &= 0x03;
+ 		case 0x09:
+ 			VLINE_TOTAL = (((uint16_t)CRTC_Regs[8]<<8)+CRTC_Regs[9]);
+-			HSYNC_CLK = ((CRTC_Regs[0x29]&0x10)?VSYNC_HIGH:VSYNC_NORM)/VLINE_TOTAL;
++			HSYNC_CLK = ((CRTC_Regs[0x29]&0x10)?VSYNC_HIGH:VSYNC_NORM)/(VLINE_TOTAL?VLINE_TOTAL:1);
+ 			break;
+ 		case 0x0a:
+ 			CRTC_Regs[0x0a] &= 0x03;
+ 		case 0x0b:
+ 			break;
+ 		case 0x0c:
+ 			CRTC_Regs[0x0c] &= 0x03;
+ 		case 0x0d:
+@@ -338,17 +338,17 @@
+ 				CRTC_VStep = 2;
+ 			WinDraw_ChangeSize();
+ 			break;
+ 		case 0x28:
+ 			TVRAM_SetAllDirty();
+ 			//break;
+ 		case 0x29:
+ 			CRTC_Regs[0x29] &= 0x1f;
+-			HSYNC_CLK = ((CRTC_Regs[0x29]&0x10)?VSYNC_HIGH:VSYNC_NORM)/VLINE_TOTAL;
++			HSYNC_CLK = ((CRTC_Regs[0x29]&0x10)?VSYNC_HIGH:VSYNC_NORM)/(VLINE_TOTAL?VLINE_TOTAL:1);
+ 			VID_MODE = !!(CRTC_Regs[0x29]&0x10);
+ 			if(CRTC_VEND>CRTC_VSTART){ TextDotY = CRTC_VEND-CRTC_VSTART; }//設定途中対策
+ 			if ((CRTC_Regs[0x29]&0x14)==0x10)
+ 			{
+ 				TextDotY/=2;
+ 				CRTC_VStep = 1;
+ 			}
+ 			else if ((CRTC_Regs[0x29]&0x14)==0x04)
+--- a/Core/px68k/x68k/mfp.c
++++ b/Core/px68k/x68k/mfp.c
+@@ -167,21 +167,24 @@
+ 			ret |= 0x01;
+ 		}
+ 
+ 		if ( (x68k_vline>=CRTC_VSTART)&&(x68k_vline<CRTC_VEND) )//V-DISP 1:垂直表示 0:帰線時間
+ 		{
+ 			ret |= 0x10;
+ 		}
+ 
+-		int32_t hpos = (int32_t)(ICount%HSYNC_CLK);//H-SYNC
+-		if ( (hpos>=((int32_t)CRTC_Regs[5]*HSYNC_CLK/CRTC_Regs[1]))&&(hpos<((int32_t)CRTC_Regs[7]*HSYNC_CLK/CRTC_Regs[1])) )
+-			ret &= 0x7f;
+-		else
+-			ret |= 0x80;
++		{
++			int32_t htotal = CRTC_Regs[1] ? CRTC_Regs[1] : 1;
++			int32_t hpos = (int32_t)(ICount%HSYNC_CLK);//H-SYNC
++			if ( (hpos>=((int32_t)CRTC_Regs[5]*HSYNC_CLK/htotal))&&(hpos<((int32_t)CRTC_Regs[7]*HSYNC_CLK/htotal)) )
++				ret &= 0x7f;
++			else
++				ret |= 0x80;
++		}
+ 
+ 		if (x68k_vline!=CRTC_IntLine)//ラスタ割込 1:要求なし
+ 		{
+ 			ret |= 0x40;
+ 		}
+ 		break;
+ 	case 0x03://Reg01
+ 	case 0x05://Reg02

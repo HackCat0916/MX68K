@@ -1,9 +1,12 @@
 # Third-Party Notices
 
-MX68K is a macOS port of the open-source Sharp X68000 emulator px68k. In
+MX68K is a macOS/iOS port of the open-source Sharp X68000 emulator px68k. In
 addition to px68k, MX68K incorporates source code ported from other
 open-source X68000 emulators, listed below with their original copyright
-notices and license terms.
+notices and license terms. For the complete list of all third-party
+components (px68k, C68K, fmgen, win32api, ZIPFoundation, and the XM6 port
+below), see `ATTRIBUTION.md`; for the overall license structure, see
+`LICENSE`.
 
 ---
 
@@ -62,11 +65,34 @@ documentation, and commercial use is prohibited.
 
 This notice satisfies the copyright-attribution requirement above.
 
-### Commercial-use restriction
+### License-change permission for the ported files
 
-The XM6 `vm/` license prohibits commercial use. MX68K is distributed free of
-charge, so this restriction is currently satisfied. **If the MX68K
-distribution model ever changes, this restriction must be re-examined.**
+MX68K incorporates C68K (Copyright 2003-2004 Stephane Dallongeville, as
+distributed with Yabause; MX68K vendors the copy in the
+[kenyahiro fork of px68k](https://github.com/kenyahiro/px68k)'s
+`m68000/c68k/`), which is licensed under GPL-2.0-or-later. GPL requires
+that the corresponding source of the entire combined work be made
+available under GPL-compatible terms, which is not compatible with the
+XM6 `vm/` license's blanket commercial-use prohibition quoted above.
+
+To resolve this, HackCat0916 (the MX68K author) contacted ＰＩ．, the original
+author of XM6, and requested permission to use the four ported files listed
+above under GPL-compatible terms. By email dated 2026-09, ＰＩ．granted this
+permission: scsi.h, scsi.cpp, disk.h and disk.cpp may be treated as
+GPL2-licensed, on the condition that this documentation record that the
+license-change permission was granted by the original author. (The
+correspondence itself is kept on file by the MX68K author and is not
+reproduced verbatim here.)
+
+**`Bridge/scsi_disk.cpp`, `Bridge/scsi_disk.h`, `Bridge/scsi_spc.cpp` and
+`Bridge/scsi_spc.h` (ported from XM6 `vm/disk.cpp`, `vm/disk.h`,
+`vm/scsi.cpp` and `vm/scsi.h` respectively) are licensed under GPL-2.0
+per this permission.** The copyright-attribution requirement above is
+already satisfied by GPL-2.0 §1's own notice-preservation requirement,
+not an additional condition. The original XM6 `vm/` commercial-use
+restriction quoted above no longer applies to these four files; it is
+retained above for historical/attribution accuracy and continues to
+describe XM6 itself.
 
 ### Additions
 
