@@ -1,0 +1,1683 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0476CDA09169A17EA37FBE44 /* SoftKeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A228C01D0000000000000002 /* SoftKeyboardView.swift */; };
+		06C78C80ECD42F12F84AB115 /* MX68KApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4EF857ED0FF30E751C69497 /* MX68KApp.swift */; };
+		0738427F0576AA42C24DD998 /* status_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = 730804EB85BF182326A8F27A /* status_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		0831B950BB1799A8737D7460 /* gen68k.inc in Resources */ = {isa = PBXBuildFile; fileRef = FC713E23E71B43F7D5F46877 /* gen68k.inc */; };
+		09D64255C37438D79F416D3C /* c68k_op7.inc in Resources */ = {isa = PBXBuildFile; fileRef = AB7832DFF90E7827B537E3EA /* c68k_op7.inc */; };
+		0CBC0856E71915487F3681F9 /* winx68k_compat.c in Sources */ = {isa = PBXBuildFile; fileRef = 9575585983B0B669C4B62092 /* winx68k_compat.c */; };
+		0E05209561424E5D434F4C31 /* fmgen.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 674BD4F522FF45E6BAF22741 /* fmgen.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		0EDED5B1CE0C091AF10E4F81 /* m68000_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = 9B10FD0D913F30EAA75ED65B /* m68000_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		11339DC4999D1B0BE9065374 /* IOSArchiveMountService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB637B31F299992624215F8B /* IOSArchiveMountService.swift */; };
+		11516BE56F8F6838011F133B /* m68000_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = 9B10FD0D913F30EAA75ED65B /* m68000_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		12F42DB64F30123162E90AD9 /* DiskBookmarkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D037F8D536493FDF203286A /* DiskBookmarkStore.swift */; };
+		13D816183C7688F965FE9E56 /* BIOSSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CE90F093816E08BE85D65E8 /* BIOSSettingsView.swift */; };
+		143AE024A93DD3EF320C0929 /* adpcm.c in Sources */ = {isa = PBXBuildFile; fileRef = A8AAB0FB3E7BB7D9A1E67E9E /* adpcm.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		15093DF5E8A4AD94CA658DD4 /* EmulatorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 181ECF4E20A2900281A6249C /* EmulatorConfig.swift */; };
+		1835BA770E29AB355D806718 /* rtc.c in Sources */ = {isa = PBXBuildFile; fileRef = FB920E38D02C0B5BCC2CC269 /* rtc.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		1892518C4F55D83C185F9F04 /* dmac.c in Sources */ = {isa = PBXBuildFile; fileRef = EC1E1B22FEA98DBAE4E13AB0 /* dmac.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		1A4EC428A4FEB870F5B29C25 /* gen68k.c in Sources */ = {isa = PBXBuildFile; fileRef = 7C0A68122AA16DF179904BA6 /* gen68k.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing"; }; };
+		1CB080CC7F112DA4E8D91F1C /* EmulatorEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF11B628A192E968C1E2D6F9 /* EmulatorEngine.swift */; };
+		1CDC09F36094FC8667BBD784 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BFC1F52D2711E2E89A9C223C /* AVFoundation.framework */; };
+		1CF1D3608FA433931F15D87B /* c68k_op9.inc in Resources */ = {isa = PBXBuildFile; fileRef = C3D1DF17E5B29C47CBDDF043 /* c68k_op9.inc */; };
+		1E4EC37D18A397ACC5C7521E /* DiskImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 534834A70C642A55B849450B /* DiskImage.swift */; };
+		1E6590C265F8999BE560AF2A /* c68k_op6.inc in Resources */ = {isa = PBXBuildFile; fileRef = 9AFBEAF51569BA67DF9BFE4E /* c68k_op6.inc */; };
+		20347869E1EB516836EB954F /* c68k_op5.inc in Resources */ = {isa = PBXBuildFile; fileRef = 45CB0E039CDD578DE7C428B9 /* c68k_op5.inc */; };
+		2172E84D1CF6CE7D250D5314 /* scsi_disk.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4D5E6F7A8B9C0D1E2F3 /* scsi_disk.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		21D2D4D1EAAFD824E7A08B86 /* c68k_opA.inc in Resources */ = {isa = PBXBuildFile; fileRef = 4D93BA897006AE8820778A64 /* c68k_opA.inc */; };
+		21DDE0B8E5DF84B231924E21 /* c68k_opB.inc in Resources */ = {isa = PBXBuildFile; fileRef = 3FB6F1CE3C142D94106643AF /* c68k_opB.inc */; };
+		243FBF82CB55EB06D0524958 /* libiconv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000006 /* libiconv.tbd */; };
+		24669AED8CA27023FE305B0A /* midi_coremidi.c in Sources */ = {isa = PBXBuildFile; fileRef = B0C1D2E3F4A5B6C7D8E9F0A1 /* midi_coremidi.c */; };
+		248C3BFE5D166CF31E19E504 /* mercury.c in Sources */ = {isa = PBXBuildFile; fileRef = 8628CB8F898F482BD2A9DC82 /* mercury.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		24B81EA81DA92AEDAA3E6E2A /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 43B8A84464B213F5E4BDA46F /* CoreAudio.framework */; };
+		26595B9715BC2D054AE93DD4 /* c68kexec.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E938B4E2DD3596E167A5CF0 /* c68kexec.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing"; }; };
+		273A3B0841D339A2B3163190 /* IOSSettingsPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1C753125B0BB352FBC8C16C /* IOSSettingsPresentation.swift */; };
+		29D27C4421CBAC46EB1CB7FB /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F133009A3BF697FFCF00FC /* SettingsViewModel.swift */; };
+		2BFBDA4641EEFF1668E51713 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D24175CE9474C2FD57F10734 /* AppDelegate.swift */; };
+		2D554855417A39C52DCA087C /* BIOSSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CE90F093816E08BE85D65E8 /* BIOSSettingsView.swift */; };
+		2F821F327D0C825F1A7DA323 /* mfp.c in Sources */ = {isa = PBXBuildFile; fileRef = AE4517BDB3742E2212C44176 /* mfp.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		30A10A9358CB84976FA9E905 /* c68k_opD.inc in Resources */ = {isa = PBXBuildFile; fileRef = DE8A3B3C4043AAA756A75D3F /* c68k_opD.inc */; };
+		329D20DBED5F3894CF10AFEC /* d68k.c in Sources */ = {isa = PBXBuildFile; fileRef = 9A963BCB3BC9701162F9F50A /* d68k.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		32D71D3D409F18DB7D794C7F /* dosio.c in Sources */ = {isa = PBXBuildFile; fileRef = 9DCBCC30C08C57DBC2FF81A7 /* dosio.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		32E23EE06B98FE8932366702 /* disk_xdf.c in Sources */ = {isa = PBXBuildFile; fileRef = 1B6E27F2842911579052AE14 /* disk_xdf.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		32E970CE36916A9E68EB2C9A /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D79F0F6D2A77F0C78137DEF1 /* StatusBarView.swift */; };
+		353761F58A1C3243D42D66CD /* EmulatorViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B916C1582ADFAEC25DC6ACA /* EmulatorViewModel.swift */; };
+		361D5D02F75A00C9DD3BDF19 /* EmulatorMetalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F0EEC01565ED9A5C8AB9A9E /* EmulatorMetalView.swift */; };
+		36C5C377A49C9BAC818463FC /* HardwareSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A815A9BB54341EE45E01EF9 /* HardwareSettingsView.swift */; };
+		3743896BF7F5AA50FD1C52BD /* FilePickerButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A9468CF503561E42AC904F /* FilePickerButton.swift */; };
+		37674428D4425248AED5179D /* opna.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 6DD4CA99CE067DC14B76E326 /* opna.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		37CD759B52883DF16B793452 /* fake.c in Sources */ = {isa = PBXBuildFile; fileRef = 052E864D803189AEDE124311 /* fake.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		38B8A6BBB07103B3A108972A /* sasi.c in Sources */ = {isa = PBXBuildFile; fileRef = A32CDBD88ECEFAFCD7D65C12 /* sasi.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h -include $(SRCROOT)/../Bridge/sasi_io_cache.h"; }; };
+		390D434674803D1B1FDBB1D4 /* scsi_spc.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A3B4C5D6E7F8A9B0C1D2E3F4 /* scsi_spc.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		399542FA8C7B622BB82BAE76 /* TouchMouseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE03AF0B19C4EF9AB8D83C5E /* TouchMouseView.swift */; };
+		3A6CCC20A6FA3671F66470CC /* fmg_wrap.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A75AC4881AA8220927B8473A /* fmg_wrap.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		3AC4AF52241AF65094F8C090 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE4C39CF44B8C2F975EF16C8 /* AudioEngine.swift */; };
+		3B22A1BAB128B342FEA5DF77 /* disk_d88.c in Sources */ = {isa = PBXBuildFile; fileRef = 30878FECB6D13410905E3B21 /* disk_d88.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		3D3077F49B96A2ED6DB03267 /* Carbon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = DC75D0DAD4C788F94930E1F5 /* Carbon.framework */; };
+		3D97BEC13189BE762D610A87 /* HardwareSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A815A9BB54341EE45E01EF9 /* HardwareSettingsView.swift */; };
+		3DF736E98E0AF3A67FC3A739 /* c68k_ini.inc in Resources */ = {isa = PBXBuildFile; fileRef = DF2B90B4F9CAC940CDF384AC /* c68k_ini.inc */; };
+		3F394E94DC66015E7F6A3CCB /* keyboard.c in Sources */ = {isa = PBXBuildFile; fileRef = D5C76925705E073A6FD84BBA /* keyboard.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		3F715C65FC6B930F92F6446A /* mem_wrap.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AB2F9B5DE8A513334CCB427 /* mem_wrap.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		40A8E60D4F99A3CF0A50C045 /* IOSKeyboardInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72E46E651688042FF6BFC44C /* IOSKeyboardInput.swift */; };
+		41DFDDEB6418F5ED850F6A46 /* ppi.c in Sources */ = {isa = PBXBuildFile; fileRef = 4C2011B27976E189DEE8BB0D /* ppi.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		4237E11C5553C34E91854BCD /* TouchJoystickView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12EF41F71BBA9943E22A7206 /* TouchJoystickView.swift */; };
+		4327819AD3331A75EABF2EBF /* crtc.c in Sources */ = {isa = PBXBuildFile; fileRef = EA80C903765A441E2E3B5849 /* crtc.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		4337F84ADAFFE653B63ED181 /* DisplayGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C979BCAAB38A7C02126D92 /* DisplayGeometry.swift */; };
+		43A104EE9126A798EEB471FB /* fdd.c in Sources */ = {isa = PBXBuildFile; fileRef = C825194BFAA3598408FABFE2 /* fdd.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h -include $(SRCROOT)/../Bridge/fdd_timing_shim.h"; }; };
+		46FA2EA92E441FF2611111FB /* file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3613BEAD4A95B3BF64BD055E /* file.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		47C9313101835848FA07A494 /* c68k_op9.inc in Resources */ = {isa = PBXBuildFile; fileRef = C3D1DF17E5B29C47CBDDF043 /* c68k_op9.inc */; };
+		47FC7700CC8D21AE23F72273 /* c68k_opC.inc in Resources */ = {isa = PBXBuildFile; fileRef = F085C6DEEC46F66BB73E35DE /* c68k_opC.inc */; };
+		484F796DB20E38FA5174ED2D /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 346654C849A99E40853F04C4 /* Metal.framework */; };
+		48BDD6A136FC53B860F3898E /* scsi_ext_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* scsi_ext_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		4A5F39FAF01890C3CC0DD022 /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C65450E2E624F120B2211A64 /* GameController.framework */; };
+		4A7767D0A65BE7C2E1B612EC /* psg.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 955B10C00AFF3F4282F9F499 /* psg.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		4B41CDA18C9BA46475F9725E /* c68k_opD.inc in Resources */ = {isa = PBXBuildFile; fileRef = DE8A3B3C4043AAA756A75D3F /* c68k_opD.inc */; };
+		4BF576C283B0F0FEC5DC3599 /* midi.c in Sources */ = {isa = PBXBuildFile; fileRef = 29DF1D8A4E971C600CB1CBE4 /* midi.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		4CED27CA733881CB001F594F /* c68k_op0.inc in Resources */ = {isa = PBXBuildFile; fileRef = F14AD30931B7F51E4E7F247A /* c68k_op0.inc */; };
+		4D3C59ACA8FFE058ADB0709D /* disk_xdf.c in Sources */ = {isa = PBXBuildFile; fileRef = 1B6E27F2842911579052AE14 /* disk_xdf.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		4E3ECF3BFA89BA91E44743B0 /* sysport.c in Sources */ = {isa = PBXBuildFile; fileRef = 5CFD16909FA371519C948910 /* sysport.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		501E9C6E88DAA6ED0318EE80 /* c68k_opC.inc in Resources */ = {isa = PBXBuildFile; fileRef = F085C6DEEC46F66BB73E35DE /* c68k_opC.inc */; };
+		5BC443127C079E61890938CD /* EmulatorBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F88B0AC8F71E3977DD0F86C7 /* EmulatorBridge.c */; };
+		5C77A9EB0CEDCE54250B137D /* rtc.c in Sources */ = {isa = PBXBuildFile; fileRef = FB920E38D02C0B5BCC2CC269 /* rtc.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		5F0F676A8733BA6C8AD14D1A /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7899E8DF6EA3A0610DB824B9 /* AudioToolbox.framework */; };
+		5F5EDEFB8E75C6CA7E0ECF77 /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F133009A3BF697FFCF00FC /* SettingsViewModel.swift */; };
+		5FCD339474735E0EA2F129C4 /* c68k_op3.inc in Resources */ = {isa = PBXBuildFile; fileRef = FD0B7BC7157AAD8A8853F14F /* c68k_op3.inc */; };
+		6005D5D17BC7994FD8C66E38 /* d68k.c in Sources */ = {isa = PBXBuildFile; fileRef = 9A963BCB3BC9701162F9F50A /* d68k.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		647D1C1F536ABB19E42FACBD /* windraw.c in Sources */ = {isa = PBXBuildFile; fileRef = BDA994435EE6B94A94880A02 /* windraw.c */; };
+		660D210660FF3A2B0AB1E81B /* sram_ext_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = E7F8A9B0C1D2E3F4A5B6C7D8 /* sram_ext_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		66B30C84A8932E6ADF1D78AE /* file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 3613BEAD4A95B3BF64BD055E /* file.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		66BF627547A35D8CB87A80E2 /* X68KRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6D33F7D261D74B1EF7F777F /* X68KRenderer.swift */; };
+		674F26EE1D1D54FA43B0AE0E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140C84FF13D03770D09E3229 /* SettingsView.swift */; };
+		6938254845D221D9376591EE /* EmulatorEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF11B628A192E968C1E2D6F9 /* EmulatorEngine.swift */; };
+		6A30BF37B61DCEBEAD54BB42 /* mercury.c in Sources */ = {isa = PBXBuildFile; fileRef = 8628CB8F898F482BD2A9DC82 /* mercury.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		6AD04BD99BEFB49E43D9FF28 /* ioc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5BDE60868F2C06FF9DC0823 /* ioc.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		6B201C82D2B70E858B776636 /* c68k_op0.inc in Resources */ = {isa = PBXBuildFile; fileRef = F14AD30931B7F51E4E7F247A /* c68k_op0.inc */; };
+		6C3F8B4A21D75E90C4A63F18 /* StateListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A7E2C1D0B94F63A8D125E77 /* StateListView.swift */; };
+		6D072ADA6F8F33410270DADA /* c68k_opA.inc in Resources */ = {isa = PBXBuildFile; fileRef = 4D93BA897006AE8820778A64 /* c68k_opA.inc */; };
+		6DB79D0D6AC8AB028BBDE1B6 /* c68k_opB.inc in Resources */ = {isa = PBXBuildFile; fileRef = 3FB6F1CE3C142D94106643AF /* c68k_opB.inc */; };
+		6DCD848B522D8A5FB2D59BB0 /* c68k_opF.inc in Resources */ = {isa = PBXBuildFile; fileRef = CF9E10E3C71C121974F0DE2D /* c68k_opF.inc */; };
+		6F3F38F66590C451D9F838F5 /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 43B8A84464B213F5E4BDA46F /* CoreAudio.framework */; };
+		704C1A8B334451B0374C5CCD /* scc.c in Sources */ = {isa = PBXBuildFile; fileRef = 2ABDB27DF802DEC2204B67FB /* scc.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		709355CFBC31777AB57E509A /* EmulatorPerfStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C08A0000000000000002 /* EmulatorPerfStatus.swift */; };
+		70B2BFDE978921F56B8ECDF6 /* c68k_opE.inc in Resources */ = {isa = PBXBuildFile; fileRef = A31AE0C16AD1F7BC6272F376 /* c68k_opE.inc */; };
+		71B9CF27AB0833649BE6959B /* scsi.c in Sources */ = {isa = PBXBuildFile; fileRef = 67B30715B8F792A55D887B0F /* scsi.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		746891D845F41C0DD8BCFC8B /* c68k.c in Sources */ = {isa = PBXBuildFile; fileRef = 779402C59F7B53D3EE9A2B74 /* c68k.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing"; }; };
+		74ABDB00F15C0AFD9116B6A2 /* fdd.c in Sources */ = {isa = PBXBuildFile; fileRef = C825194BFAA3598408FABFE2 /* fdd.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h -include $(SRCROOT)/../Bridge/fdd_timing_shim.h"; }; };
+		76196DA3A2E2E0223D7A66BB /* irqh.c in Sources */ = {isa = PBXBuildFile; fileRef = BDAC3FBEE78AA464E3E8E0C5 /* irqh.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		77D718D0D8D8FD3587B7F50B /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BFC1F52D2711E2E89A9C223C /* AVFoundation.framework */; };
+		796372A4D28103891D0BA90C /* fmg_wrap.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A75AC4881AA8220927B8473A /* fmg_wrap.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		796D3F7F1E4840F8B7C2CAA2 /* X68KDisplay.metal in Sources */ = {isa = PBXBuildFile; fileRef = DADCD8856444453B8BEC6EF0 /* X68KDisplay.metal */; };
+		7B34A3DEA2C645EA02568337 /* ppi.c in Sources */ = {isa = PBXBuildFile; fileRef = 4C2011B27976E189DEE8BB0D /* ppi.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		7CF74B00E8DBD99220784ADA /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7899E8DF6EA3A0610DB824B9 /* AudioToolbox.framework */; };
+		7E1809E3D8CAAD388E86E25A /* ToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8572D2B0E96FEDB3D2E0956 /* ToolbarView.swift */; };
+		7E96C59B28FFD9BE79656285 /* fmtimer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 75C046F4F19982360666D365 /* fmtimer.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		7E9A0F527FAD33543058DB33 /* ArchiveEntryPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D06A404FCD1F241586833CA /* ArchiveEntryPickerView.swift */; };
+		842C39341A9366C6FEF45E1E /* sasi_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* sasi_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		85111286384064F85FCB2730 /* c68k_op1.inc in Resources */ = {isa = PBXBuildFile; fileRef = 5BD6D6A79E79E51317CAE385 /* c68k_op1.inc */; };
+		85933D638BB3B550F3F4A537 /* X68KDisplay.metal in Sources */ = {isa = PBXBuildFile; fileRef = DADCD8856444453B8BEC6EF0 /* X68KDisplay.metal */; };
+		865667FF0D772F10C3345AF5 /* peace.c in Sources */ = {isa = PBXBuildFile; fileRef = 5D81E7595358D8EF0FD19E4C /* peace.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		86B8D606C26031CB789A9DDD /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 346654C849A99E40853F04C4 /* Metal.framework */; };
+		8713099E28DBAE16E8815B2C /* EmulatorStorageStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A40000000000000002 /* EmulatorStorageStatus.swift */; };
+		88DDFEF9AF92FE8A4E2695FB /* palette.c in Sources */ = {isa = PBXBuildFile; fileRef = 3C510AA1114EB4B9ABD94AAC /* palette.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		8968ABCFA7EE3CE31444C12A /* X68KRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6D33F7D261D74B1EF7F777F /* X68KRenderer.swift */; };
+		89B3EA741FC6BB028D5FA85E /* GamePad.c in Sources */ = {isa = PBXBuildFile; fileRef = 5CB59F91E21133EA180AE38C /* GamePad.c */; };
+		8C988B3FC709A861C8F3D59B /* EmulatorMIDIStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A60000000000000002 /* EmulatorMIDIStatus.swift */; };
+		8CE7792A8DE3C1F978273F2D /* c68kmac.inc in Resources */ = {isa = PBXBuildFile; fileRef = 047008F0E836F6BA031445B8 /* c68kmac.inc */; };
+		8D3DF1EF0C05FFD3AF73885D /* scsi.c in Sources */ = {isa = PBXBuildFile; fileRef = 67B30715B8F792A55D887B0F /* scsi.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		8DEBC5573FFB65C6D494A102 /* gvram.c in Sources */ = {isa = PBXBuildFile; fileRef = 4FB81A28977CD83B0CC8C361 /* gvram.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h -include $(SRCROOT)/../Bridge/p534_gvwcol_hook.h"; }; };
+		8ECD5F8F5620F032FE58E995 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = DD6EE063E7E7D9E9615379AB /* ZIPFoundation */; };
+		950248F816B630A5DBB43788 /* c68k_op8.inc in Resources */ = {isa = PBXBuildFile; fileRef = 696EA8E7CC8CE9226C16C384 /* c68k_op8.inc */; };
+		9633710652DB7C987ADE7F5C /* c68k_op3.inc in Resources */ = {isa = PBXBuildFile; fileRef = FD0B7BC7157AAD8A8853F14F /* c68k_op3.inc */; };
+		969ADB7A3B036E18D2D8C578 /* irqh.c in Sources */ = {isa = PBXBuildFile; fileRef = BDAC3FBEE78AA464E3E8E0C5 /* irqh.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		96D04B223459BE7045D5E735 /* c68k_op4.inc in Resources */ = {isa = PBXBuildFile; fileRef = 1871D3012FF408DCD77AC987 /* c68k_op4.inc */; };
+		97B546EABC8F6D3F016D4674 /* c68k_opE.inc in Resources */ = {isa = PBXBuildFile; fileRef = A31AE0C16AD1F7BC6272F376 /* c68k_opE.inc */; };
+		98F82D93AA76CD463081E6D1 /* sysport.c in Sources */ = {isa = PBXBuildFile; fileRef = 5CFD16909FA371519C948910 /* sysport.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		A183B01D0000000000000001 /* AudioSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A183B01D0000000000000002 /* AudioSettingsView.swift */; };
+		A187C01D0000000000000001 /* CPUMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C01D0000000000000002 /* CPUMonitorView.swift */; };
+		A187C0860000000000000001 /* CRTCMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0860000000000000002 /* CRTCMonitorView.swift */; };
+		A187C0870000000000000001 /* VideoControllerMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0870000000000000002 /* VideoControllerMonitorView.swift */; };
+		A187C0880000000000000001 /* BGMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0880000000000000002 /* BGMonitorView.swift */; };
+		A187C0890000000000000001 /* PerformanceMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0890000000000000002 /* PerformanceMonitorView.swift */; };
+		A187C08A0000000000000001 /* EmulatorPerfStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C08A0000000000000002 /* EmulatorPerfStatus.swift */; };
+		A187C08B0000000000000001 /* SpriteMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C08B0000000000000002 /* SpriteMonitorView.swift */; };
+		A187C08C0000000000000001 /* SpriteTableMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C08C0000000000000002 /* SpriteTableMapView.swift */; };
+		A187C08D0000000000000001 /* RendererMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C08D0000000000000002 /* RendererMonitorView.swift */; };
+		A187C08E0000000000000001 /* TextPlaneMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C08E0000000000000002 /* TextPlaneMonitorView.swift */; };
+		A187C08F0000000000000001 /* BGPageMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C08F0000000000000002 /* BGPageMonitorView.swift */; };
+		A187C0900000000000000001 /* GrpPageMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0900000000000000002 /* GrpPageMonitorView.swift */; };
+		A187C0910000000000000001 /* BGSPCompositeMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0910000000000000002 /* BGSPCompositeMonitorView.swift */; };
+		A187C0920000000000000001 /* SoundMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0920000000000000002 /* SoundMonitorView.swift */; };
+		A187C0930000000000000001 /* PaletteMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0930000000000000002 /* PaletteMonitorView.swift */; };
+		A187C0940000000000000001 /* InputMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0940000000000000002 /* InputMonitorView.swift */; };
+		A187C0950000000000000001 /* ArchiveEntryPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0950000000000000002 /* ArchiveEntryPickerSheet.swift */; };
+		A187C0A00000000000000001 /* MemoryDumpMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A00000000000000002 /* MemoryDumpMonitorView.swift */; };
+		A187C0A10000000000000001 /* MemoryMapMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A10000000000000002 /* MemoryMapMonitorView.swift */; };
+		A187C0A20000000000000001 /* OPMSynthesizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A20000000000000002 /* OPMSynthesizerView.swift */; };
+		A187C0A30000000000000001 /* StorageMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A30000000000000002 /* StorageMonitorView.swift */; };
+		A187C0A40000000000000001 /* EmulatorStorageStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A40000000000000002 /* EmulatorStorageStatus.swift */; };
+		A187C0A50000000000000001 /* MIDIMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A50000000000000002 /* MIDIMonitorView.swift */; };
+		A187C0A60000000000000001 /* EmulatorMIDIStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A60000000000000002 /* EmulatorMIDIStatus.swift */; };
+		A187C0A70000000000000001 /* RTCMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A70000000000000002 /* RTCMonitorView.swift */; };
+		A188C01D0000000000000001 /* LocalizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A188C01D0000000000000002 /* LocalizationManager.swift */; };
+		A188C01D0000000000000011 /* GeneralSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A188C01D0000000000000012 /* GeneralSettingsView.swift */; };
+		A188C01D0000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A188C01D0000000000000022 /* Localizable.xcstrings */; };
+		A189C01D0000000000000001 /* ScreenshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A189C01D0000000000000002 /* ScreenshotService.swift */; };
+		A190C01D0000000000000001 /* WindowScaler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A190C01D0000000000000002 /* WindowScaler.swift */; };
+		A191C01D0000000000000001 /* ArchiveMountService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A191C01D0000000000000002 /* ArchiveMountService.swift */; };
+		A194C01D0000000000000001 /* InputSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A194C01D0000000000000002 /* InputSettingsView.swift */; };
+		A1B059BC01777CE0AF2528EC /* windrv_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000002 /* windrv_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		A228C01D0000000000000001 /* SoftKeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A228C01D0000000000000002 /* SoftKeyboardView.swift */; };
+		A237C01D0000000000000001 /* MouseCaptureState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A237C01D0000000000000002 /* MouseCaptureState.swift */; };
+		A24B7E78B9252F3854AC9A1B /* ioc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5BDE60868F2C06FF9DC0823 /* ioc.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		A273500000000000000000A1 /* SASISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A273500000000000000000A2 /* SASISettingsView.swift */; };
+		A273500000000000000000B1 /* SCSISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A273500000000000000000B2 /* SCSISettingsView.swift */; };
+		A280C01D0000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A280C01D0000000000000002 /* Assets.xcassets */; };
+		A4EBDCF74311192007F1F0FD /* winui.c in Sources */ = {isa = PBXBuildFile; fileRef = C78757E6DA4BBF9653D9A408 /* winui.c */; };
+		A511C01D0000000000000001 /* KeyRemapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A511C01D0000000000000002 /* KeyRemapView.swift */; };
+		A51B54996E12199B1043540B /* disk_dim.c in Sources */ = {isa = PBXBuildFile; fileRef = 0D753CB715B299FD3984E0F1 /* disk_dim.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		A546C01D0000000000000001 /* EmulatorRunState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A546C01D0000000000000002 /* EmulatorRunState.swift */; };
+		A574C01D0000000000000001 /* BlankImageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A574C01D0000000000000002 /* BlankImageService.swift */; };
+		A578C01D0000000000000001 /* BlankImageDialogs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A578C01D0000000000000002 /* BlankImageDialogs.swift */; };
+		A585C01D0000000000000001 /* GamepadRemapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A585C01D0000000000000002 /* GamepadRemapView.swift */; };
+		A697C01D0000000000000001 /* VideoRecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A697C01D0000000000000002 /* VideoRecordingService.swift */; };
+		A701C01D0000000000000001 /* AboutPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A701C01D0000000000000002 /* AboutPanel.swift */; };
+		A7B8C9D0E1F2A3B4C5D6E7F8 /* sasi_io_cache.c in Sources */ = {isa = PBXBuildFile; fileRef = B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		A95E1CF3E7A21E8741C1C320 /* palette.c in Sources */ = {isa = PBXBuildFile; fileRef = 3C510AA1114EB4B9ABD94AAC /* palette.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		A9B0C1D2E3F4A5B6C7D8E9F0 /* midi_coremidi.c in Sources */ = {isa = PBXBuildFile; fileRef = B0C1D2E3F4A5B6C7D8E9F0A1 /* midi_coremidi.c */; };
+		AA964734E2BB36022E59E8F5 /* c68k.c in Sources */ = {isa = PBXBuildFile; fileRef = 779402C59F7B53D3EE9A2B74 /* c68k.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing"; }; };
+		AAB96B91D64FC50E29C7F604 /* c68k_ini.inc in Resources */ = {isa = PBXBuildFile; fileRef = DF2B90B4F9CAC940CDF384AC /* c68k_ini.inc */; };
+		AB090E70FD33DFB66C6E4E72 /* crtc.c in Sources */ = {isa = PBXBuildFile; fileRef = EA80C903765A441E2E3B5849 /* crtc.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		AE8FF816991440C154A74770 /* sasi.c in Sources */ = {isa = PBXBuildFile; fileRef = A32CDBD88ECEFAFCD7D65C12 /* sasi.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h -include $(SRCROOT)/../Bridge/sasi_io_cache.h"; }; };
+		AF0FFCB6D09E44263E893BAF /* MX68KiOSViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE6BF3DAB77C38A5BBFA7574 /* MX68KiOSViewModel.swift */; };
+		AFD35F439DDFF36C30FB13ED /* ConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E1AD77A4FD7DBD35B5C79A3 /* ConfigManager.swift */; };
+		B02E971D1AA477F9FBEF8BA3 /* bg.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AD5697FA73902D02AD3758C /* bg.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		B1FFC70CDE8DBD8D400FF244 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 140C84FF13D03770D09E3229 /* SettingsView.swift */; };
+		B2C3D4E5F6A7B8C9D0E1F2A3 /* sasi_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* sasi_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		B392D601FDE7F4C8B6D6A7AE /* midi.c in Sources */ = {isa = PBXBuildFile; fileRef = 29DF1D8A4E971C600CB1CBE4 /* midi.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		B3C4D5E6F7A8B9C0D1E2F3A4 /* scsi_disk.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4D5E6F7A8B9C0D1E2F3 /* scsi_disk.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		B4C5D6E7F8A9B0C1D2E3F4A5 /* scsi_spc.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A3B4C5D6E7F8A9B0C1D2E3F4 /* scsi_spc.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		B5C6D7E8F9A0B1C2D3E4F5A6 /* scsi_spc_bridge.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A4B5C6D7E8F9A0B1C2D3E4F5 /* scsi_spc_bridge.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		B6B2ADDA5240D475D28CF144 /* c68k_op1.inc in Resources */ = {isa = PBXBuildFile; fileRef = 5BD6D6A79E79E51317CAE385 /* c68k_op1.inc */; };
+		B9F4211E089005BF0492E6C2 /* c68k_op5.inc in Resources */ = {isa = PBXBuildFile; fileRef = 45CB0E039CDD578DE7C428B9 /* c68k_op5.inc */; };
+		BD609930B81948A2E73AED13 /* status_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = 730804EB85BF182326A8F27A /* status_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		BD63382557EC7266AD9E9327 /* scsi_in_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* scsi_in_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		BE937DDEF6064406A90FBAEB /* sasi_io_cache.c in Sources */ = {isa = PBXBuildFile; fileRef = B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		BF23348EC8212BE88E073460 /* scsi_spc_bridge.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A4B5C6D7E8F9A0B1C2D3E4F5 /* scsi_spc_bridge.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		BF5255F847E78A0DB4A07FF7 /* c68kexec.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E938B4E2DD3596E167A5CF0 /* c68kexec.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing"; }; };
+		BFC982E87AB9B1A94462D1E4 /* c68kmac.inc in Resources */ = {isa = PBXBuildFile; fileRef = 047008F0E836F6BA031445B8 /* c68kmac.inc */; };
+		C1B10FECF8D397211D57F8F5 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E092CA5788375294C862D65F /* MetalKit.framework */; };
+		C1B81DFAF9E5B51BD0451EE7 /* keyboard.c in Sources */ = {isa = PBXBuildFile; fileRef = D5C76925705E073A6FD84BBA /* keyboard.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		C37994FEC143D962A93EF873 /* c68k_op7.inc in Resources */ = {isa = PBXBuildFile; fileRef = AB7832DFF90E7827B537E3EA /* c68k_op7.inc */; };
+		C4690D74A82306CAB56E2C05 /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C65450E2E624F120B2211A64 /* GameController.framework */; };
+		C553BD191FBF1E887C19021F /* DisplayGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C979BCAAB38A7C02126D92 /* DisplayGeometry.swift */; };
+		C5776FD2FB7277FF3D6230B3 /* sram.c in Sources */ = {isa = PBXBuildFile; fileRef = 14438A0D5F051BB2E4E43B3F /* sram.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		C71C0641AA01000000000001 /* crtc_timing.c in Sources */ = {isa = PBXBuildFile; fileRef = C71C0641BB02000000000002 /* crtc_timing.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		C8012658C93D9911AC284F03 /* c68k_op8.inc in Resources */ = {isa = PBXBuildFile; fileRef = 696EA8E7CC8CE9226C16C384 /* c68k_op8.inc */; };
+		C87D490EBE306D4DAFBB885F /* common.c in Sources */ = {isa = PBXBuildFile; fileRef = C00CAD4021543867531A629C /* common.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		C944FA4A1BF3F0FDDD41E361 /* disk_d88.c in Sources */ = {isa = PBXBuildFile; fileRef = 30878FECB6D13410905E3B21 /* disk_d88.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		CDA46A66870915ACD3368CB4 /* winui.c in Sources */ = {isa = PBXBuildFile; fileRef = C78757E6DA4BBF9653D9A408 /* winui.c */; };
+		CE8A3E346DF6AA124F0D7745 /* peace.c in Sources */ = {isa = PBXBuildFile; fileRef = 5D81E7595358D8EF0FD19E4C /* peace.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		CF1A965579CB58A267810758 /* c68k_opF.inc in Resources */ = {isa = PBXBuildFile; fileRef = CF9E10E3C71C121974F0DE2D /* c68k_opF.inc */; };
+		D0F371819C8808F2B2AD485C /* gvram.c in Sources */ = {isa = PBXBuildFile; fileRef = 4FB81A28977CD83B0CC8C361 /* gvram.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h -include $(SRCROOT)/../Bridge/p534_gvwcol_hook.h"; }; };
+		D37BB79EC57DDC478F39762C /* crtc_timing.c in Sources */ = {isa = PBXBuildFile; fileRef = C71C0641BB02000000000002 /* crtc_timing.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		D45B526C49A3B2F8157D91B0 /* EmulatorBridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F88B0AC8F71E3977DD0F86C7 /* EmulatorBridge.c */; };
+		D4E1B684DA08C9DB69FE88B6 /* InputManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BEC2B964E8748809B9D751 /* InputManager.swift */; };
+		D4E5F6A7B8C9D0E1F2A3B4C5 /* scsi_in_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* scsi_in_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		D61703A2130E163EC7373E0A /* psg.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 955B10C00AFF3F4282F9F499 /* psg.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		D6E7F8A9B0C1D2E3F4A5B6C7 /* sram_ext_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = E7F8A9B0C1D2E3F4A5B6C7D8 /* sram_ext_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		D71C9FD5ACAE4AAFFCF68C9A /* windraw.c in Sources */ = {isa = PBXBuildFile; fileRef = BDA994435EE6B94A94880A02 /* windraw.c */; };
+		D80F17DDA6273F627534C252 /* EmulatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A531DE8B5ECBBF2F7246D09 /* EmulatorView.swift */; };
+		D851767C843B40662409F8BB /* Resources in Resources */ = {isa = PBXBuildFile; fileRef = BE12A35E37234E4E8A7FFA7C /* Resources */; };
+		D9C260366EAC8BFF0E1CDB5A /* fmgen.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 674BD4F522FF45E6BAF22741 /* fmgen.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		DA43834EAA023374700814BF /* EmulatorMetalView_iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A47B8112CE24A02FAB2183CA /* EmulatorMetalView_iOS.swift */; };
+		DC24A524689BC4FAFC9E9E99 /* fake.c in Sources */ = {isa = PBXBuildFile; fileRef = 052E864D803189AEDE124311 /* fake.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		DC8263868FCD72DD22417B31 /* common.c in Sources */ = {isa = PBXBuildFile; fileRef = C00CAD4021543867531A629C /* common.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		DF03697F34286F975719E7E1 /* fdc.c in Sources */ = {isa = PBXBuildFile; fileRef = 7D611AA305B2C4D7F32E20A2 /* fdc.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		DFD1CD32B442A8FC0E58D146 /* c68k_op4.inc in Resources */ = {isa = PBXBuildFile; fileRef = 1871D3012FF408DCD77AC987 /* c68k_op4.inc */; };
+		E0DF5FF3E5BA143AEFF50286 /* gen68k.c in Sources */ = {isa = PBXBuildFile; fileRef = 7C0A68122AA16DF179904BA6 /* gen68k.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing"; }; };
+		E160D83BB7D308A79BCC5EF6 /* opm.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 6BA8B82A7F9059AFF50EE464 /* opm.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		E17C30E5B5C387AB00CCA9F0 /* c68k_op6.inc in Resources */ = {isa = PBXBuildFile; fileRef = 9AFBEAF51569BA67DF9BFE4E /* c68k_op6.inc */; };
+		E31A3CEDCF54DE5AA4C3304E /* EmulatorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 181ECF4E20A2900281A6249C /* EmulatorConfig.swift */; };
+		E4648BEBE84FF50528B9451D /* mem_wrap.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AB2F9B5DE8A513334CCB427 /* mem_wrap.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		E4EDA90278D19F7A6EC2ADB6 /* GamePad.c in Sources */ = {isa = PBXBuildFile; fileRef = 5CB59F91E21133EA180AE38C /* GamePad.c */; };
+		E565F96E78BA111F371017B9 /* tvram.c in Sources */ = {isa = PBXBuildFile; fileRef = 8ED7A17DFD1B59E8E250BA43 /* tvram.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		E59DE89EEDF2AC4536123130 /* scc.c in Sources */ = {isa = PBXBuildFile; fileRef = 2ABDB27DF802DEC2204B67FB /* scc.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		E7D97868C0C0C7A01C180811 /* libstdc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 02BD74F4A557D6B9C63B15F8 /* libstdc++.tbd */; };
+		E819519B0D00009DD92427B3 /* SASISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A273500000000000000000A2 /* SASISettingsView.swift */; };
+		E918523C788FEEAC3EC57F70 /* tvram.c in Sources */ = {isa = PBXBuildFile; fileRef = 8ED7A17DFD1B59E8E250BA43 /* tvram.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		E97C039A6A083123CEDA7DFD /* mfp.c in Sources */ = {isa = PBXBuildFile; fileRef = AE4517BDB3742E2212C44176 /* mfp.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		EBCCF6A7B2843E1B95C13607 /* dosio.c in Sources */ = {isa = PBXBuildFile; fileRef = 9DCBCC30C08C57DBC2FF81A7 /* dosio.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		ECD1B2F727FECCD92BEA119C /* FilePickerButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A9468CF503561E42AC904F /* FilePickerButton.swift */; };
+		ED10AC52215C5C1C81951622 /* SCSISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A273500000000000000000B2 /* SCSISettingsView.swift */; };
+		EDDB2EC1AC19F29F12159CF1 /* c68k_op2.inc in Resources */ = {isa = PBXBuildFile; fileRef = 95BD414C4D8FD2663D3A380B /* c68k_op2.inc */; };
+		EFAC350BACD82D85EE737111 /* gen68k.inc in Resources */ = {isa = PBXBuildFile; fileRef = FC713E23E71B43F7D5F46877 /* gen68k.inc */; };
+		F24D1C0E7AD885FE22B874EF /* adpcm.c in Sources */ = {isa = PBXBuildFile; fileRef = A8AAB0FB3E7BB7D9A1E67E9E /* adpcm.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F26E65F9832241F69EC8BCBF /* fmtimer.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 75C046F4F19982360666D365 /* fmtimer.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F278F84650D0DC4E534A95C1 /* ConfigManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E1AD77A4FD7DBD35B5C79A3 /* ConfigManager.swift */; };
+		F46D86CF15F81E4B7C5223DC /* MX68KiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22756E0CC785437D1BFD2D6D /* MX68KiOSApp.swift */; };
+		F4E36AD5B7398E03790534B9 /* c68k_op2.inc in Resources */ = {isa = PBXBuildFile; fileRef = 95BD414C4D8FD2663D3A380B /* c68k_op2.inc */; };
+		F5234890F72D17B036D1CF49 /* winx68k_compat.c in Sources */ = {isa = PBXBuildFile; fileRef = 9575585983B0B669C4B62092 /* winx68k_compat.c */; };
+		F5DDEADF809D62327CE65257 /* dmac.c in Sources */ = {isa = PBXBuildFile; fileRef = EC1E1B22FEA98DBAE4E13AB0 /* dmac.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F642A1B2C3D4E5F600000001 /* windrv_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000002 /* windrv_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F642A1B2C3D4E5F600000003 /* WindrvSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000004 /* WindrvSettingsView.swift */; };
+		F642A1B2C3D4E5F600000005 /* libiconv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000006 /* libiconv.tbd */; };
+		F6A7B8C9D0E1F2A3B4C5D6E7 /* scsi_ext_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = E5F6A7B8C9D0E1F2A3B4C5D6 /* scsi_ext_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		FA18ECA772AFE4CA631CD39A /* bg.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AD5697FA73902D02AD3758C /* bg.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		FAD5E3A7B7F8C196DE28E47A /* sram.c in Sources */ = {isa = PBXBuildFile; fileRef = 14438A0D5F051BB2E4E43B3F /* sram.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		FBCDC68255076F6252B0FFD4 /* fdc.c in Sources */ = {isa = PBXBuildFile; fileRef = 7D611AA305B2C4D7F32E20A2 /* fdc.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		FD22A02D6ABF68BB21D9D074 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E092CA5788375294C862D65F /* MetalKit.framework */; };
+		FD72DE0A348716D9844C1B60 /* disk_dim.c in Sources */ = {isa = PBXBuildFile; fileRef = 0D753CB715B299FD3984E0F1 /* disk_dim.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		FD934FE3BA6744A3667F8FD6 /* opm.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 6BA8B82A7F9059AFF50EE464 /* opm.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		FDC53DD792AE488D8649AA73 /* opna.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 6DD4CA99CE067DC14B76E326 /* opna.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		FE65CDE5BE1850B84DE539E5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 563A62908B380F86CA2E8ED5 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		01EA17647AA618AE34F83CCA /* GamePad.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GamePad.h; sourceTree = "<group>"; };
+		02BD74F4A557D6B9C63B15F8 /* libstdc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libstdc++.tbd"; path = "usr/lib/libstdc++.tbd"; sourceTree = SDKROOT; };
+		047008F0E836F6BA031445B8 /* c68kmac.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68kmac.inc; sourceTree = "<group>"; };
+		052E864D803189AEDE124311 /* fake.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = fake.c; sourceTree = "<group>"; };
+		05EC44473C24C127BDD50724 /* EmulatorBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = EmulatorBridge.h; sourceTree = "<group>"; };
+		0B8CCADE622A2583582A6780 /* mouse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mouse.h; sourceTree = "<group>"; };
+		0D753CB715B299FD3984E0F1 /* disk_dim.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = disk_dim.c; sourceTree = "<group>"; };
+		0E4A42944BD17800C2D546D1 /* midi_darwin.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = midi_darwin.c; sourceTree = "<group>"; };
+		12EF41F71BBA9943E22A7206 /* TouchJoystickView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TouchJoystickView.swift; sourceTree = "<group>"; };
+		130783D766D872B193BC3294 /* m68kcpu.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = m68kcpu.h; sourceTree = "<group>"; };
+		140C84FF13D03770D09E3229 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		14438A0D5F051BB2E4E43B3F /* sram.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sram.c; sourceTree = "<group>"; };
+		1796EDDA02063AD9541742D9 /* windraw.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = windraw.h; sourceTree = "<group>"; };
+		181ECF4E20A2900281A6249C /* EmulatorConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorConfig.swift; sourceTree = "<group>"; };
+		18555FA339C1C24DDF004DB6 /* status.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = status.c; sourceTree = "<group>"; };
+		1871D3012FF408DCD77AC987 /* c68k_op4.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op4.inc; sourceTree = "<group>"; };
+		19A0A534A86A3A2A00A5B075 /* ppi.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ppi.h; sourceTree = "<group>"; };
+		1B0CAAF92060FA9CD22D606A /* scc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scc.h; sourceTree = "<group>"; };
+		1B6E27F2842911579052AE14 /* disk_xdf.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = disk_xdf.c; sourceTree = "<group>"; };
+		1CD49027AD16441A5A8B4B8D /* psg.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = psg.h; sourceTree = "<group>"; };
+		1D332CDE727CAE9463A2F8FD /* rtc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = rtc.h; sourceTree = "<group>"; };
+		1E938B4E2DD3596E167A5CF0 /* c68kexec.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = c68kexec.c; sourceTree = "<group>"; };
+		1E98F3B4183C1D679771857D /* common.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = common.h; sourceTree = "<group>"; };
+		1F0EEC01565ED9A5C8AB9A9E /* EmulatorMetalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorMetalView.swift; sourceTree = "<group>"; };
+		22756E0CC785437D1BFD2D6D /* MX68KiOSApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MX68KiOSApp.swift; sourceTree = "<group>"; };
+		24CE195408382D51A8471ADA /* sram.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sram.h; sourceTree = "<group>"; };
+		29DF1D8A4E971C600CB1CBE4 /* midi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = midi.c; sourceTree = "<group>"; };
+		2ABDB27DF802DEC2204B67FB /* scc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = scc.c; sourceTree = "<group>"; };
+		2AC987C0FAC19560B2ECB3AA /* scsi.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scsi.h; sourceTree = "<group>"; };
+		30799D207B3A0D2ECFA1D29B /* disk_d88.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = disk_d88.h; sourceTree = "<group>"; };
+		30878FECB6D13410905E3B21 /* disk_d88.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = disk_d88.c; sourceTree = "<group>"; };
+		340AE78874E041287AFBA24A /* d68k.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = d68k.h; sourceTree = "<group>"; };
+		346654C849A99E40853F04C4 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
+		36100CD2FB010294309B5015 /* peace.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = peace.h; sourceTree = "<group>"; };
+		3613BEAD4A95B3BF64BD055E /* file.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = file.cpp; sourceTree = "<group>"; };
+		378BEE09393260A012BA7C23 /* diag.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = diag.h; sourceTree = "<group>"; };
+		3B932B0EA9119CF9F398280C /* fmgeninl.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fmgeninl.h; sourceTree = "<group>"; };
+		3C510AA1114EB4B9ABD94AAC /* palette.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = palette.c; sourceTree = "<group>"; };
+		3E33BF3F02A826D4E09F282E /* Info-iOS.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "Info-iOS.plist"; sourceTree = "<group>"; };
+		3FB6F1CE3C142D94106643AF /* c68k_opB.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_opB.inc; sourceTree = "<group>"; };
+		413039DC455DAF3C12CB3E68 /* x68kmemory.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = x68kmemory.h; sourceTree = "<group>"; };
+		42437DEAD1B15CC0685D7B10 /* sasi.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sasi.h; sourceTree = "<group>"; };
+		43B8A84464B213F5E4BDA46F /* CoreAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreAudio.framework; path = System/Library/Frameworks/CoreAudio.framework; sourceTree = SDKROOT; };
+		4505DCA4212B96FFF5206191 /* palette.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = palette.h; sourceTree = "<group>"; };
+		45CB0E039CDD578DE7C428B9 /* c68k_op5.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op5.inc; sourceTree = "<group>"; };
+		4C2011B27976E189DEE8BB0D /* ppi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ppi.c; sourceTree = "<group>"; };
+		4CE90F093816E08BE85D65E8 /* BIOSSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BIOSSettingsView.swift; sourceTree = "<group>"; };
+		4D037F8D536493FDF203286A /* DiskBookmarkStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiskBookmarkStore.swift; sourceTree = "<group>"; };
+		4D06A404FCD1F241586833CA /* ArchiveEntryPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ArchiveEntryPickerView.swift; sourceTree = "<group>"; };
+		4D08B8841676FB916C9745D1 /* MX68K.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MX68K.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D93BA897006AE8820778A64 /* c68k_opA.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_opA.inc; sourceTree = "<group>"; };
+		4EC2064CB97CD750E3593925 /* irqh.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = irqh.h; sourceTree = "<group>"; };
+		4FB81A28977CD83B0CC8C361 /* gvram.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gvram.c; sourceTree = "<group>"; };
+		534834A70C642A55B849450B /* DiskImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiskImage.swift; sourceTree = "<group>"; };
+		563A62908B380F86CA2E8ED5 /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		57B2DCFDDCA39BE7690931F6 /* winui.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = winui.h; sourceTree = "<group>"; };
+		5804A38D5CAB8DBE06A4FE33 /* opm.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = opm.h; sourceTree = "<group>"; };
+		592BB5C7FEC4718ED8F34A46 /* headers.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = headers.h; sourceTree = "<group>"; };
+		59BEC2B964E8748809B9D751 /* InputManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputManager.swift; sourceTree = "<group>"; };
+		5A7E2C1D0B94F63A8D125E77 /* StateListView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StateListView.swift; sourceTree = "<group>"; };
+		5BD6D6A79E79E51317CAE385 /* c68k_op1.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op1.inc; sourceTree = "<group>"; };
+		5CB59F91E21133EA180AE38C /* GamePad.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = GamePad.c; sourceTree = "<group>"; };
+		5CFD16909FA371519C948910 /* sysport.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sysport.c; sourceTree = "<group>"; };
+		5D81E7595358D8EF0FD19E4C /* peace.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = peace.c; sourceTree = "<group>"; };
+		5F54385400ED8966F935A9FB /* mfp.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mfp.h; sourceTree = "<group>"; };
+		60E8EDA276E6C7575C1F9510 /* px68k_compat.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = px68k_compat.h; sourceTree = "<group>"; };
+		631BF6838ED3DE028312DE5F /* midi.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = midi.h; sourceTree = "<group>"; };
+		674BD4F522FF45E6BAF22741 /* fmgen.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fmgen.cpp; sourceTree = "<group>"; };
+		67B30715B8F792A55D887B0F /* scsi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = scsi.c; sourceTree = "<group>"; };
+		696EA8E7CC8CE9226C16C384 /* c68k_op8.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op8.inc; sourceTree = "<group>"; };
+		69860BDED068448CE085ADBB /* tvram.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = tvram.h; sourceTree = "<group>"; };
+		6A259AB0E2F1CB54310F8EB2 /* gen68k.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = gen68k.h; sourceTree = "<group>"; };
+		6AB2F9B5DE8A513334CCB427 /* mem_wrap.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mem_wrap.c; sourceTree = "<group>"; };
+		6AD5697FA73902D02AD3758C /* bg.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = bg.c; sourceTree = "<group>"; };
+		6BA8B82A7F9059AFF50EE464 /* opm.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = opm.cpp; sourceTree = "<group>"; };
+		6DD4CA99CE067DC14B76E326 /* opna.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = opna.cpp; sourceTree = "<group>"; };
+		72E46E651688042FF6BFC44C /* IOSKeyboardInput.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = IOSKeyboardInput.swift; sourceTree = "<group>"; };
+		730804EB85BF182326A8F27A /* status_bridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = status_bridge.c; sourceTree = "<group>"; };
+		75C046F4F19982360666D365 /* fmtimer.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fmtimer.cpp; sourceTree = "<group>"; };
+		7696F1FA01BDE59E623BA3F6 /* mercury.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mercury.h; sourceTree = "<group>"; };
+		779402C59F7B53D3EE9A2B74 /* c68k.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = c68k.c; sourceTree = "<group>"; };
+		7899E8DF6EA3A0610DB824B9 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
+		7A815A9BB54341EE45E01EF9 /* HardwareSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HardwareSettingsView.swift; sourceTree = "<group>"; };
+		7B916C1582ADFAEC25DC6ACA /* EmulatorViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorViewModel.swift; sourceTree = "<group>"; };
+		7C0A68122AA16DF179904BA6 /* gen68k.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = gen68k.c; sourceTree = "<group>"; };
+		7C515A354F17BE73273A5D5F /* MX68K.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MX68K.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7D611AA305B2C4D7F32E20A2 /* fdc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = fdc.c; sourceTree = "<group>"; };
+		7D712816350F40C99711F013 /* file.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = file.h; sourceTree = "<group>"; };
+		7E1AD77A4FD7DBD35B5C79A3 /* ConfigManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigManager.swift; sourceTree = "<group>"; };
+		7F6AB4F06B439073FD80A2ED /* adpcm.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = adpcm.h; sourceTree = "<group>"; };
+		81A032BD900A7A0AF7062770 /* opna.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = opna.h; sourceTree = "<group>"; };
+		86066DEF3809135C553F38EA /* windraw.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = windraw.h; sourceTree = "<group>"; };
+		8628CB8F898F482BD2A9DC82 /* mercury.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mercury.c; sourceTree = "<group>"; };
+		8A531DE8B5ECBBF2F7246D09 /* EmulatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorView.swift; sourceTree = "<group>"; };
+		8A6F26FEEE9D639BDBE19330 /* d68kconf.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = d68kconf.h; sourceTree = "<group>"; };
+		8ADFB6166A661F5B5B992B4F /* keyboard.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = keyboard.h; sourceTree = "<group>"; };
+		8E23F93F3F084EE55B8E5F69 /* misc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = misc.h; sourceTree = "<group>"; };
+		8ED7A17DFD1B59E8E250BA43 /* tvram.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = tvram.c; sourceTree = "<group>"; };
+		938A8F9DC051C76F59EA92B1 /* windows.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = windows.h; sourceTree = "<group>"; };
+		93D9058E8E5419E9221E36DB /* c68k.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = c68k.h; sourceTree = "<group>"; };
+		955B10C00AFF3F4282F9F499 /* psg.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = psg.cpp; sourceTree = "<group>"; };
+		9575585983B0B669C4B62092 /* winx68k_compat.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = winx68k_compat.c; sourceTree = "<group>"; };
+		95BD414C4D8FD2663D3A380B /* c68k_op2.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op2.inc; sourceTree = "<group>"; };
+		97F54700F09259D8C069A33F /* bg.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bg.h; sourceTree = "<group>"; };
+		9893A5CB3E5C6A6FFE3AC2C9 /* fmgen_types.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fmgen_types.h; sourceTree = "<group>"; };
+		9A963BCB3BC9701162F9F50A /* d68k.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = d68k.c; sourceTree = "<group>"; };
+		9AFBEAF51569BA67DF9BFE4E /* c68k_op6.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op6.inc; sourceTree = "<group>"; };
+		9B10FD0D913F30EAA75ED65B /* m68000_bridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = m68000_bridge.c; sourceTree = "<group>"; };
+		9DCBCC30C08C57DBC2FF81A7 /* dosio.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = dosio.c; sourceTree = "<group>"; };
+		9FA7DCCB35C2D4D3C61F0F68 /* dosio.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = dosio.h; sourceTree = "<group>"; };
+		A183B01D0000000000000002 /* AudioSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSettingsView.swift; sourceTree = "<group>"; };
+		A187C01D0000000000000002 /* CPUMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CPUMonitorView.swift; sourceTree = "<group>"; };
+		A187C0860000000000000002 /* CRTCMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CRTCMonitorView.swift; sourceTree = "<group>"; };
+		A187C0870000000000000002 /* VideoControllerMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoControllerMonitorView.swift; sourceTree = "<group>"; };
+		A187C0880000000000000002 /* BGMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BGMonitorView.swift; sourceTree = "<group>"; };
+		A187C0890000000000000002 /* PerformanceMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMonitorView.swift; sourceTree = "<group>"; };
+		A187C08A0000000000000002 /* EmulatorPerfStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorPerfStatus.swift; sourceTree = "<group>"; };
+		A187C08B0000000000000002 /* SpriteMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpriteMonitorView.swift; sourceTree = "<group>"; };
+		A187C08C0000000000000002 /* SpriteTableMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpriteTableMapView.swift; sourceTree = "<group>"; };
+		A187C08D0000000000000002 /* RendererMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererMonitorView.swift; sourceTree = "<group>"; };
+		A187C08E0000000000000002 /* TextPlaneMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextPlaneMonitorView.swift; sourceTree = "<group>"; };
+		A187C08F0000000000000002 /* BGPageMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BGPageMonitorView.swift; sourceTree = "<group>"; };
+		A187C0900000000000000002 /* GrpPageMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GrpPageMonitorView.swift; sourceTree = "<group>"; };
+		A187C0910000000000000002 /* BGSPCompositeMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BGSPCompositeMonitorView.swift; sourceTree = "<group>"; };
+		A187C0920000000000000002 /* SoundMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundMonitorView.swift; sourceTree = "<group>"; };
+		A187C0930000000000000002 /* PaletteMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaletteMonitorView.swift; sourceTree = "<group>"; };
+		A187C0940000000000000002 /* InputMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputMonitorView.swift; sourceTree = "<group>"; };
+		A187C0950000000000000002 /* ArchiveEntryPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveEntryPickerSheet.swift; sourceTree = "<group>"; };
+		A187C0A00000000000000002 /* MemoryDumpMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDumpMonitorView.swift; sourceTree = "<group>"; };
+		A187C0A10000000000000002 /* MemoryMapMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryMapMonitorView.swift; sourceTree = "<group>"; };
+		A187C0A20000000000000002 /* OPMSynthesizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMSynthesizerView.swift; sourceTree = "<group>"; };
+		A187C0A30000000000000002 /* StorageMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageMonitorView.swift; sourceTree = "<group>"; };
+		A187C0A40000000000000002 /* EmulatorStorageStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorStorageStatus.swift; sourceTree = "<group>"; };
+		A187C0A50000000000000002 /* MIDIMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIDIMonitorView.swift; sourceTree = "<group>"; };
+		A187C0A60000000000000002 /* EmulatorMIDIStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorMIDIStatus.swift; sourceTree = "<group>"; };
+		A187C0A70000000000000002 /* RTCMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RTCMonitorView.swift; sourceTree = "<group>"; };
+		A188C01D0000000000000002 /* LocalizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationManager.swift; sourceTree = "<group>"; };
+		A188C01D0000000000000012 /* GeneralSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsView.swift; sourceTree = "<group>"; };
+		A188C01D0000000000000022 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = SOURCE_ROOT; };
+		A189C01D0000000000000002 /* ScreenshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotService.swift; sourceTree = "<group>"; };
+		A190C01D0000000000000002 /* WindowScaler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowScaler.swift; sourceTree = "<group>"; };
+		A191C01D0000000000000002 /* ArchiveMountService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveMountService.swift; sourceTree = "<group>"; };
+		A194C01D0000000000000002 /* InputSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSettingsView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* sasi_bridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sasi_bridge.c; sourceTree = "<group>"; };
+		A228C01D0000000000000002 /* SoftKeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoftKeyboardView.swift; sourceTree = "<group>"; };
+		A237C01D0000000000000002 /* MouseCaptureState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseCaptureState.swift; sourceTree = "<group>"; };
+		A273500000000000000000A2 /* SASISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SASISettingsView.swift; sourceTree = "<group>"; };
+		A273500000000000000000B2 /* SCSISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SCSISettingsView.swift; sourceTree = "<group>"; };
+		A280C01D0000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = MX68K/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		A2B3C4D5E6F7A8B9C0D1E2F3 /* scsi_disk.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = scsi_disk.cpp; sourceTree = "<group>"; };
+		A31AE0C16AD1F7BC6272F376 /* c68k_opE.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_opE.inc; sourceTree = "<group>"; };
+		A32CDBD88ECEFAFCD7D65C12 /* sasi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sasi.c; sourceTree = "<group>"; };
+		A3B4C5D6E7F8A9B0C1D2E3F4 /* scsi_spc.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = scsi_spc.cpp; sourceTree = "<group>"; };
+		A47B8112CE24A02FAB2183CA /* EmulatorMetalView_iOS.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EmulatorMetalView_iOS.swift; sourceTree = "<group>"; };
+		A4B5C6D7E8F9A0B1C2D3E4F5 /* scsi_spc_bridge.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = scsi_spc_bridge.cpp; sourceTree = "<group>"; };
+		A511C01D0000000000000002 /* KeyRemapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyRemapView.swift; sourceTree = "<group>"; };
+		A546C01D0000000000000002 /* EmulatorRunState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorRunState.swift; sourceTree = "<group>"; };
+		A574C01D0000000000000002 /* BlankImageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlankImageService.swift; sourceTree = "<group>"; };
+		A578C01D0000000000000002 /* BlankImageDialogs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlankImageDialogs.swift; sourceTree = "<group>"; };
+		A585C01D0000000000000002 /* GamepadRemapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamepadRemapView.swift; sourceTree = "<group>"; };
+		A697C01D0000000000000002 /* VideoRecordingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoRecordingService.swift; sourceTree = "<group>"; };
+		A701C01D0000000000000002 /* AboutPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutPanel.swift; sourceTree = "<group>"; };
+		A737466ADAF6CCCF5451E9FF /* mmsystem.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mmsystem.h; sourceTree = "<group>"; };
+		A75AC4881AA8220927B8473A /* fmg_wrap.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = fmg_wrap.cpp; sourceTree = "<group>"; };
+		A7C979BCAAB38A7C02126D92 /* DisplayGeometry.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DisplayGeometry.swift; sourceTree = "<group>"; };
+		A8AAB0FB3E7BB7D9A1E67E9E /* adpcm.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = adpcm.c; sourceTree = "<group>"; };
+		AB7832DFF90E7827B537E3EA /* c68k_op7.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op7.inc; sourceTree = "<group>"; };
+		ACAB6ADFE4198AE58A4F174C /* fdc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fdc.h; sourceTree = "<group>"; };
+		AE03AF0B19C4EF9AB8D83C5E /* TouchMouseView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TouchMouseView.swift; sourceTree = "<group>"; };
+		AE4517BDB3742E2212C44176 /* mfp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mfp.c; sourceTree = "<group>"; };
+		AE4C39CF44B8C2F975EF16C8 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
+		B0C1D2E3F4A5B6C7D8E9F0A1 /* midi_coremidi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = midi_coremidi.c; sourceTree = "<group>"; };
+		B1CC4A382A1B8BD8FF66CD73 /* sysport.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sysport.h; sourceTree = "<group>"; };
+		B2E8FE4D98199531B8933408 /* status.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = status.h; sourceTree = "<group>"; };
+		B4EF857ED0FF30E751C69497 /* MX68KApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MX68KApp.swift; sourceTree = "<group>"; };
+		B529C1E952A6B67A0D79A724 /* fmgen.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fmgen.h; sourceTree = "<group>"; };
+		B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sasi_io_cache.c; sourceTree = "<group>"; };
+		BA084257C0081147B425E5DC /* dmac.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = dmac.h; sourceTree = "<group>"; };
+		BC6AA7510FC364405FA86908 /* disk_dim.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = disk_dim.h; sourceTree = "<group>"; };
+		BDA994435EE6B94A94880A02 /* windraw.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = windraw.c; sourceTree = "<group>"; };
+		BDAC3FBEE78AA464E3E8E0C5 /* irqh.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = irqh.c; sourceTree = "<group>"; };
+		BE12A35E37234E4E8A7FFA7C /* Resources */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Resources; path = MX68K/Resources; sourceTree = SOURCE_ROOT; };
+		BEB9E33097802FFE4D53A2F6 /* m68000.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = m68000.h; sourceTree = "<group>"; };
+		BFC1F52D2711E2E89A9C223C /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
+		C00CAD4021543867531A629C /* common.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = common.c; sourceTree = "<group>"; };
+		C17E74CA34F0EF1B6C2FBA4D /* appftype.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = appftype.h; sourceTree = "<group>"; };
+		C3D1DF17E5B29C47CBDDF043 /* c68k_op9.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op9.inc; sourceTree = "<group>"; };
+		C3D4E5F6A7B8C9D0E1F2A3B4 /* scsi_in_bridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = scsi_in_bridge.c; sourceTree = "<group>"; };
+		C4D5E6F7A8B9C0D1E2F3A4B5 /* scsi_disk.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scsi_disk.h; sourceTree = "<group>"; };
+		C5D6E7F8A9B0C1D2E3F4A5B6 /* scsi_spc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scsi_spc.h; sourceTree = "<group>"; };
+		C65450E2E624F120B2211A64 /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
+		C71C0641BB02000000000002 /* crtc_timing.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = crtc_timing.c; sourceTree = "<group>"; };
+		C71C0641CC03000000000003 /* crtc_timing.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = crtc_timing.h; sourceTree = "<group>"; };
+		C78757E6DA4BBF9653D9A408 /* winui.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = winui.c; sourceTree = "<group>"; };
+		C7F133009A3BF697FFCF00FC /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
+		C80AEAA4B0324EAD277DCA39 /* ioc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ioc.h; sourceTree = "<group>"; };
+		C825194BFAA3598408FABFE2 /* fdd.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = fdd.c; sourceTree = "<group>"; };
+		C90EEE594622F2B40F531BC6 /* disk_xdf.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = disk_xdf.h; sourceTree = "<group>"; };
+		C9D0E1F2A3B4C5D6E7F8A9B0 /* sasi_io_cache.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sasi_io_cache.h; sourceTree = "<group>"; };
+		CB637B31F299992624215F8B /* IOSArchiveMountService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = IOSArchiveMountService.swift; sourceTree = "<group>"; };
+		CCDB0BBA28BF81FF4D3A46D2 /* crtc.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = crtc.h; sourceTree = "<group>"; };
+		CE6BF3DAB77C38A5BBFA7574 /* MX68KiOSViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MX68KiOSViewModel.swift; sourceTree = "<group>"; };
+		CF9E10E3C71C121974F0DE2D /* c68k_opF.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_opF.inc; sourceTree = "<group>"; };
+		D24175CE9474C2FD57F10734 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		D41374A8D329EED6B4674A1D /* fdd.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fdd.h; sourceTree = "<group>"; };
+		D5C76925705E073A6FD84BBA /* keyboard.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = keyboard.c; sourceTree = "<group>"; };
+		D5E6F7A8B9C0D1E2F3A4B5C6 /* scsi_compat_shim.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = scsi_compat_shim.h; sourceTree = "<group>"; };
+		D6D33F7D261D74B1EF7F777F /* X68KRenderer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = X68KRenderer.swift; sourceTree = "<group>"; };
+		D79F0F6D2A77F0C78137DEF1 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
+		D845A4D98A7CDAC5CB51CC95 /* MX68K-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MX68K-Bridging-Header.h"; sourceTree = "<group>"; };
+		D85CB98CE6346C3B197791D2 /* fmtimer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fmtimer.h; sourceTree = "<group>"; };
+		DADCD8856444453B8BEC6EF0 /* X68KDisplay.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Resources/Shaders/X68KDisplay.metal; sourceTree = SOURCE_ROOT; };
+		DB5A6767292D29CDF9957030 /* GamePad.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GamePad.h; sourceTree = "<group>"; };
+		DB7F6A52ECAC72DCD1A5B338 /* fmg_wrap.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fmg_wrap.h; sourceTree = "<group>"; };
+		DC75D0DAD4C788F94930E1F5 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
+		DE8A3B3C4043AAA756A75D3F /* c68k_opD.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_opD.inc; sourceTree = "<group>"; };
+		DF2B90B4F9CAC940CDF384AC /* c68k_ini.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_ini.inc; sourceTree = "<group>"; };
+		E092CA5788375294C862D65F /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
+		E1C753125B0BB352FBC8C16C /* IOSSettingsPresentation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = IOSSettingsPresentation.swift; sourceTree = "<group>"; };
+		E2E450D8BB0665BB2DA9F644 /* m68000.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = m68000.h; sourceTree = "<group>"; };
+		E5A9468CF503561E42AC904F /* FilePickerButton.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FilePickerButton.swift; sourceTree = "<group>"; };
+		E5F6A7B8C9D0E1F2A3B4C5D6 /* scsi_ext_bridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = scsi_ext_bridge.c; sourceTree = "<group>"; };
+		E7F8A9B0C1D2E3F4A5B6C7D8 /* sram_ext_bridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sram_ext_bridge.c; sourceTree = "<group>"; };
+		EA80C903765A441E2E3B5849 /* crtc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = crtc.c; sourceTree = "<group>"; };
+		EB19B320E3393C1F27D0796B /* prop.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = prop.h; sourceTree = "<group>"; };
+		EB31ACF1D8E471E9B27941B4 /* m68k.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = m68k.h; sourceTree = "<group>"; };
+		EC1E1B22FEA98DBAE4E13AB0 /* dmac.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = dmac.c; sourceTree = "<group>"; };
+		F085C6DEEC46F66BB73E35DE /* c68k_opC.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_opC.inc; sourceTree = "<group>"; };
+		F14AD30931B7F51E4E7F247A /* c68k_op0.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op0.inc; sourceTree = "<group>"; };
+		F1E1BEF70B2FAE49BE7AC183 /* core.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = core.h; sourceTree = "<group>"; };
+		F519C22FBD45EEADF175C4D8 /* mouse.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mouse.c; sourceTree = "<group>"; };
+		F5BDE60868F2C06FF9DC0823 /* ioc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ioc.c; sourceTree = "<group>"; };
+		F642A1B2C3D4E5F600000002 /* windrv_bridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = windrv_bridge.c; sourceTree = "<group>"; };
+		F642A1B2C3D4E5F600000004 /* WindrvSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindrvSettingsView.swift; sourceTree = "<group>"; };
+		F642A1B2C3D4E5F600000006 /* libiconv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libiconv.tbd; path = usr/lib/libiconv.tbd; sourceTree = SDKROOT; };
+		F642A1B2C3D4E5F600000007 /* windrv_bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = windrv_bridge.h; sourceTree = "<group>"; };
+		F8572D2B0E96FEDB3D2E0956 /* ToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarView.swift; sourceTree = "<group>"; };
+		F88B0AC8F71E3977DD0F86C7 /* EmulatorBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = EmulatorBridge.c; sourceTree = "<group>"; };
+		F8A9B0C1D2E3F4A5B6C7D8E9 /* sram_ext_bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = sram_ext_bridge.h; sourceTree = "<group>"; };
+		F95FD8990A4C195CCFABA0AA /* winx68k.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = winx68k.h; sourceTree = "<group>"; };
+		FAD5E8878DF339BCBE4CB172 /* gvram.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = gvram.h; sourceTree = "<group>"; };
+		FB920E38D02C0B5BCC2CC269 /* rtc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = rtc.c; sourceTree = "<group>"; };
+		FC713E23E71B43F7D5F46877 /* gen68k.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = gen68k.inc; sourceTree = "<group>"; };
+		FD0B7BC7157AAD8A8853F14F /* c68k_op3.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_op3.inc; sourceTree = "<group>"; };
+		FF11B628A192E968C1E2D6F9 /* EmulatorEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorEngine.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2EEF696E407B33E563695410 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				24B81EA81DA92AEDAA3E6E2A /* CoreAudio.framework in Frameworks */,
+				77D718D0D8D8FD3587B7F50B /* AVFoundation.framework in Frameworks */,
+				86B8D606C26031CB789A9DDD /* Metal.framework in Frameworks */,
+				FD22A02D6ABF68BB21D9D074 /* MetalKit.framework in Frameworks */,
+				C4690D74A82306CAB56E2C05 /* GameController.framework in Frameworks */,
+				7CF74B00E8DBD99220784ADA /* AudioToolbox.framework in Frameworks */,
+				243FBF82CB55EB06D0524958 /* libiconv.tbd in Frameworks */,
+				8ECD5F8F5620F032FE58E995 /* ZIPFoundation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3CFD9B785E2CDC161431EB92 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6F3F38F66590C451D9F838F5 /* CoreAudio.framework in Frameworks */,
+				1CDC09F36094FC8667BBD784 /* AVFoundation.framework in Frameworks */,
+				484F796DB20E38FA5174ED2D /* Metal.framework in Frameworks */,
+				C1B10FECF8D397211D57F8F5 /* MetalKit.framework in Frameworks */,
+				4A5F39FAF01890C3CC0DD022 /* GameController.framework in Frameworks */,
+				3D3077F49B96A2ED6DB03267 /* Carbon.framework in Frameworks */,
+				5F0F676A8733BA6C8AD14D1A /* AudioToolbox.framework in Frameworks */,
+				E7D97868C0C0C7A01C180811 /* libstdc++.tbd in Frameworks */,
+				F642A1B2C3D4E5F600000005 /* libiconv.tbd in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		10749836373020E9D066577F /* px68k */ = {
+			isa = PBXGroup;
+			children = (
+				C00CAD4021543867531A629C /* common.c */,
+				1E98F3B4183C1D679771857D /* common.h */,
+				D5C76925705E073A6FD84BBA /* keyboard.c */,
+				8ADFB6166A661F5B5B992B4F /* keyboard.h */,
+				F95FD8990A4C195CCFABA0AA /* winx68k.h */,
+				724ACCE2579DB89A644E59F2 /* fmgen */,
+				B60E5645ACF2EDFD3C87872B /* m68000 */,
+				23743563C0A80E054962E8D8 /* win32api */,
+				F8D9A2EEB540389D6E3A26EB /* x68k */,
+			);
+			name = px68k;
+			path = ../Core/px68k;
+			sourceTree = "<group>";
+		};
+		230121F6223ABD9DFB2C20BD /* Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				F88B0AC8F71E3977DD0F86C7 /* EmulatorBridge.c */,
+				05EC44473C24C127BDD50724 /* EmulatorBridge.h */,
+				5CB59F91E21133EA180AE38C /* GamePad.c */,
+				01EA17647AA618AE34F83CCA /* GamePad.h */,
+				9B10FD0D913F30EAA75ED65B /* m68000_bridge.c */,
+				B0C1D2E3F4A5B6C7D8E9F0A1 /* midi_coremidi.c */,
+				D845A4D98A7CDAC5CB51CC95 /* MX68K-Bridging-Header.h */,
+				60E8EDA276E6C7575C1F9510 /* px68k_compat.h */,
+				730804EB85BF182326A8F27A /* status_bridge.c */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* sasi_bridge.c */,
+				B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */,
+				C9D0E1F2A3B4C5D6E7F8A9B0 /* sasi_io_cache.h */,
+				C3D4E5F6A7B8C9D0E1F2A3B4 /* scsi_in_bridge.c */,
+				E5F6A7B8C9D0E1F2A3B4C5D6 /* scsi_ext_bridge.c */,
+				E7F8A9B0C1D2E3F4A5B6C7D8 /* sram_ext_bridge.c */,
+				F8A9B0C1D2E3F4A5B6C7D8E9 /* sram_ext_bridge.h */,
+				F642A1B2C3D4E5F600000002 /* windrv_bridge.c */,
+				F642A1B2C3D4E5F600000007 /* windrv_bridge.h */,
+				A2B3C4D5E6F7A8B9C0D1E2F3 /* scsi_disk.cpp */,
+				C4D5E6F7A8B9C0D1E2F3A4B5 /* scsi_disk.h */,
+				A3B4C5D6E7F8A9B0C1D2E3F4 /* scsi_spc.cpp */,
+				A4B5C6D7E8F9A0B1C2D3E4F5 /* scsi_spc_bridge.cpp */,
+				C5D6E7F8A9B0C1D2E3F4A5B6 /* scsi_spc.h */,
+				D5E6F7A8B9C0D1E2F3A4B5C6 /* scsi_compat_shim.h */,
+				BDA994435EE6B94A94880A02 /* windraw.c */,
+				86066DEF3809135C553F38EA /* windraw.h */,
+				C78757E6DA4BBF9653D9A408 /* winui.c */,
+				9575585983B0B669C4B62092 /* winx68k_compat.c */,
+			);
+			name = Bridge;
+			path = ../Bridge;
+			sourceTree = "<group>";
+		};
+		23743563C0A80E054962E8D8 /* win32api */ = {
+			isa = PBXGroup;
+			children = (
+				C17E74CA34F0EF1B6C2FBA4D /* appftype.h */,
+				9DCBCC30C08C57DBC2FF81A7 /* dosio.c */,
+				9FA7DCCB35C2D4D3C61F0F68 /* dosio.h */,
+				052E864D803189AEDE124311 /* fake.c */,
+				A737466ADAF6CCCF5451E9FF /* mmsystem.h */,
+				5D81E7595358D8EF0FD19E4C /* peace.c */,
+				36100CD2FB010294309B5015 /* peace.h */,
+				938A8F9DC051C76F59EA92B1 /* windows.h */,
+			);
+			path = win32api;
+			sourceTree = "<group>";
+		};
+		2D85D76AABAE7549D67A2A97 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				7899E8DF6EA3A0610DB824B9 /* AudioToolbox.framework */,
+				BFC1F52D2711E2E89A9C223C /* AVFoundation.framework */,
+				DC75D0DAD4C788F94930E1F5 /* Carbon.framework */,
+				43B8A84464B213F5E4BDA46F /* CoreAudio.framework */,
+				C65450E2E624F120B2211A64 /* GameController.framework */,
+				02BD74F4A557D6B9C63B15F8 /* libstdc++.tbd */,
+				F642A1B2C3D4E5F600000006 /* libiconv.tbd */,
+				346654C849A99E40853F04C4 /* Metal.framework */,
+				E092CA5788375294C862D65F /* MetalKit.framework */,
+				C7F6B69A80B270AB0201B0CF /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		365CBC71AF8FE8A860511F94 /* MainWindow */ = {
+			isa = PBXGroup;
+			children = (
+				1F0EEC01565ED9A5C8AB9A9E /* EmulatorMetalView.swift */,
+				8A531DE8B5ECBBF2F7246D09 /* EmulatorView.swift */,
+				A187C0950000000000000002 /* ArchiveEntryPickerSheet.swift */,
+				D79F0F6D2A77F0C78137DEF1 /* StatusBarView.swift */,
+				F8572D2B0E96FEDB3D2E0956 /* ToolbarView.swift */,
+				A7C979BCAAB38A7C02126D92 /* DisplayGeometry.swift */,
+				D6D33F7D261D74B1EF7F777F /* X68KRenderer.swift */,
+			);
+			path = MainWindow;
+			sourceTree = "<group>";
+		};
+		3F666B25C83B9957DF2300E1 /* c68k */ = {
+			isa = PBXGroup;
+			children = (
+				DF2B90B4F9CAC940CDF384AC /* c68k_ini.inc */,
+				F14AD30931B7F51E4E7F247A /* c68k_op0.inc */,
+				5BD6D6A79E79E51317CAE385 /* c68k_op1.inc */,
+				95BD414C4D8FD2663D3A380B /* c68k_op2.inc */,
+				FD0B7BC7157AAD8A8853F14F /* c68k_op3.inc */,
+				1871D3012FF408DCD77AC987 /* c68k_op4.inc */,
+				45CB0E039CDD578DE7C428B9 /* c68k_op5.inc */,
+				9AFBEAF51569BA67DF9BFE4E /* c68k_op6.inc */,
+				AB7832DFF90E7827B537E3EA /* c68k_op7.inc */,
+				696EA8E7CC8CE9226C16C384 /* c68k_op8.inc */,
+				C3D1DF17E5B29C47CBDDF043 /* c68k_op9.inc */,
+				4D93BA897006AE8820778A64 /* c68k_opA.inc */,
+				3FB6F1CE3C142D94106643AF /* c68k_opB.inc */,
+				F085C6DEEC46F66BB73E35DE /* c68k_opC.inc */,
+				DE8A3B3C4043AAA756A75D3F /* c68k_opD.inc */,
+				A31AE0C16AD1F7BC6272F376 /* c68k_opE.inc */,
+				CF9E10E3C71C121974F0DE2D /* c68k_opF.inc */,
+				779402C59F7B53D3EE9A2B74 /* c68k.c */,
+				93D9058E8E5419E9221E36DB /* c68k.h */,
+				1E938B4E2DD3596E167A5CF0 /* c68kexec.c */,
+				047008F0E836F6BA031445B8 /* c68kmac.inc */,
+				F1E1BEF70B2FAE49BE7AC183 /* core.h */,
+				7C0A68122AA16DF179904BA6 /* gen68k.c */,
+				6A259AB0E2F1CB54310F8EB2 /* gen68k.h */,
+				FC713E23E71B43F7D5F46877 /* gen68k.inc */,
+			);
+			name = c68k;
+			path = ../Core/c68k;
+			sourceTree = "<group>";
+		};
+		4847BA0163D670548A10AF14 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				365CBC71AF8FE8A860511F94 /* MainWindow */,
+				A187C01D0000000000000003 /* Monitor */,
+				A228C01D0000000000000003 /* SoftKeyboard */,
+				86ABB80078168B459685C8AD /* Settings */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		4BE121A21FD2352C3214D536 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				AE4C39CF44B8C2F975EF16C8 /* AudioEngine.swift */,
+				7E1AD77A4FD7DBD35B5C79A3 /* ConfigManager.swift */,
+				FF11B628A192E968C1E2D6F9 /* EmulatorEngine.swift */,
+				59BEC2B964E8748809B9D751 /* InputManager.swift */,
+				A237C01D0000000000000002 /* MouseCaptureState.swift */,
+				A546C01D0000000000000002 /* EmulatorRunState.swift */,
+				A188C01D0000000000000002 /* LocalizationManager.swift */,
+				A189C01D0000000000000002 /* ScreenshotService.swift */,
+				A697C01D0000000000000002 /* VideoRecordingService.swift */,
+				A574C01D0000000000000002 /* BlankImageService.swift */,
+				A190C01D0000000000000002 /* WindowScaler.swift */,
+				A191C01D0000000000000002 /* ArchiveMountService.swift */,
+				A701C01D0000000000000002 /* AboutPanel.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		6BD7108747015621E083792E /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				913B516C7C740EFE23B34F39 /* Resources */,
+				22756E0CC785437D1BFD2D6D /* MX68KiOSApp.swift */,
+				CE6BF3DAB77C38A5BBFA7574 /* MX68KiOSViewModel.swift */,
+				A47B8112CE24A02FAB2183CA /* EmulatorMetalView_iOS.swift */,
+				72E46E651688042FF6BFC44C /* IOSKeyboardInput.swift */,
+				E1C753125B0BB352FBC8C16C /* IOSSettingsPresentation.swift */,
+				4D037F8D536493FDF203286A /* DiskBookmarkStore.swift */,
+				12EF41F71BBA9943E22A7206 /* TouchJoystickView.swift */,
+				AE03AF0B19C4EF9AB8D83C5E /* TouchMouseView.swift */,
+				5A7E2C1D0B94F63A8D125E77 /* StateListView.swift */,
+				CB637B31F299992624215F8B /* IOSArchiveMountService.swift */,
+				4D06A404FCD1F241586833CA /* ArchiveEntryPickerView.swift */,
+			);
+			name = iOS;
+			path = iOS;
+			sourceTree = "<group>";
+		};
+		724ACCE2579DB89A644E59F2 /* fmgen */ = {
+			isa = PBXGroup;
+			children = (
+				378BEE09393260A012BA7C23 /* diag.h */,
+				3613BEAD4A95B3BF64BD055E /* file.cpp */,
+				7D712816350F40C99711F013 /* file.h */,
+				A75AC4881AA8220927B8473A /* fmg_wrap.cpp */,
+				DB7F6A52ECAC72DCD1A5B338 /* fmg_wrap.h */,
+				9893A5CB3E5C6A6FFE3AC2C9 /* fmgen_types.h */,
+				674BD4F522FF45E6BAF22741 /* fmgen.cpp */,
+				B529C1E952A6B67A0D79A724 /* fmgen.h */,
+				3B932B0EA9119CF9F398280C /* fmgeninl.h */,
+				75C046F4F19982360666D365 /* fmtimer.cpp */,
+				D85CB98CE6346C3B197791D2 /* fmtimer.h */,
+				592BB5C7FEC4718ED8F34A46 /* headers.h */,
+				8E23F93F3F084EE55B8E5F69 /* misc.h */,
+				6BA8B82A7F9059AFF50EE464 /* opm.cpp */,
+				5804A38D5CAB8DBE06A4FE33 /* opm.h */,
+				6DD4CA99CE067DC14B76E326 /* opna.cpp */,
+				81A032BD900A7A0AF7062770 /* opna.h */,
+				955B10C00AFF3F4282F9F499 /* psg.cpp */,
+				1CD49027AD16441A5A8B4B8D /* psg.h */,
+			);
+			path = fmgen;
+			sourceTree = "<group>";
+		};
+		84718D2CB4030F173A40D69E /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				534834A70C642A55B849450B /* DiskImage.swift */,
+				181ECF4E20A2900281A6249C /* EmulatorConfig.swift */,
+				A187C08A0000000000000002 /* EmulatorPerfStatus.swift */,
+				A187C0A40000000000000002 /* EmulatorStorageStatus.swift */,
+				A187C0A60000000000000002 /* EmulatorMIDIStatus.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		86ABB80078168B459685C8AD /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A578C01D0000000000000002 /* BlankImageDialogs.swift */,
+				4CE90F093816E08BE85D65E8 /* BIOSSettingsView.swift */,
+				7A815A9BB54341EE45E01EF9 /* HardwareSettingsView.swift */,
+				A183B01D0000000000000002 /* AudioSettingsView.swift */,
+				A188C01D0000000000000012 /* GeneralSettingsView.swift */,
+				A194C01D0000000000000002 /* InputSettingsView.swift */,
+				A511C01D0000000000000002 /* KeyRemapView.swift */,
+				A585C01D0000000000000002 /* GamepadRemapView.swift */,
+				A273500000000000000000A2 /* SASISettingsView.swift */,
+				A273500000000000000000B2 /* SCSISettingsView.swift */,
+				F642A1B2C3D4E5F600000004 /* WindrvSettingsView.swift */,
+				140C84FF13D03770D09E3229 /* SettingsView.swift */,
+				E5A9468CF503561E42AC904F /* FilePickerButton.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		913B516C7C740EFE23B34F39 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				3E33BF3F02A826D4E09F282E /* Info-iOS.plist */,
+				563A62908B380F86CA2E8ED5 /* Assets.xcassets */,
+			);
+			name = Resources;
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		91BDE317C6E08FF6146AC788 = {
+			isa = PBXGroup;
+			children = (
+				DADCD8856444453B8BEC6EF0 /* X68KDisplay.metal */,
+				A188C01D0000000000000022 /* Localizable.xcstrings */,
+				A280C01D0000000000000002 /* Assets.xcassets */,
+				BE12A35E37234E4E8A7FFA7C /* Resources */,
+				DFA3FC46F8F6F11436A14995 /* App */,
+				230121F6223ABD9DFB2C20BD /* Bridge */,
+				3F666B25C83B9957DF2300E1 /* c68k */,
+				10749836373020E9D066577F /* px68k */,
+				2D85D76AABAE7549D67A2A97 /* Frameworks */,
+				B16ED0F3C693B625AC416F6F /* Products */,
+				6BD7108747015621E083792E /* iOS */,
+			);
+			sourceTree = "<group>";
+		};
+		A187C01D0000000000000003 /* Monitor */ = {
+			isa = PBXGroup;
+			children = (
+				A187C01D0000000000000002 /* CPUMonitorView.swift */,
+				A187C0860000000000000002 /* CRTCMonitorView.swift */,
+				A187C0870000000000000002 /* VideoControllerMonitorView.swift */,
+				A187C0880000000000000002 /* BGMonitorView.swift */,
+				A187C08B0000000000000002 /* SpriteMonitorView.swift */,
+				A187C08C0000000000000002 /* SpriteTableMapView.swift */,
+				A187C08E0000000000000002 /* TextPlaneMonitorView.swift */,
+				A187C08F0000000000000002 /* BGPageMonitorView.swift */,
+				A187C0900000000000000002 /* GrpPageMonitorView.swift */,
+				A187C0910000000000000002 /* BGSPCompositeMonitorView.swift */,
+				A187C0920000000000000002 /* SoundMonitorView.swift */,
+				A187C0A20000000000000002 /* OPMSynthesizerView.swift */,
+				A187C0930000000000000002 /* PaletteMonitorView.swift */,
+				A187C0940000000000000002 /* InputMonitorView.swift */,
+				A187C0A00000000000000002 /* MemoryDumpMonitorView.swift */,
+				A187C0A10000000000000002 /* MemoryMapMonitorView.swift */,
+				A187C0A30000000000000002 /* StorageMonitorView.swift */,
+				A187C0A50000000000000002 /* MIDIMonitorView.swift */,
+				A187C0A70000000000000002 /* RTCMonitorView.swift */,
+				A187C08D0000000000000002 /* RendererMonitorView.swift */,
+				A187C0890000000000000002 /* PerformanceMonitorView.swift */,
+			);
+			path = Monitor;
+			sourceTree = "<group>";
+		};
+		A228C01D0000000000000003 /* SoftKeyboard */ = {
+			isa = PBXGroup;
+			children = (
+				A228C01D0000000000000002 /* SoftKeyboardView.swift */,
+			);
+			path = SoftKeyboard;
+			sourceTree = "<group>";
+		};
+		AABBF54973BF785ADD87CD36 /* Musashi */ = {
+			isa = PBXGroup;
+			children = (
+				EB31ACF1D8E471E9B27941B4 /* m68k.h */,
+				130783D766D872B193BC3294 /* m68kcpu.h */,
+			);
+			path = Musashi;
+			sourceTree = "<group>";
+		};
+		B16ED0F3C693B625AC416F6F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4D08B8841676FB916C9745D1 /* MX68K.app */,
+				7C515A354F17BE73273A5D5F /* MX68K.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B60E5645ACF2EDFD3C87872B /* m68000 */ = {
+			isa = PBXGroup;
+			children = (
+				BEB9E33097802FFE4D53A2F6 /* m68000.h */,
+				AABBF54973BF785ADD87CD36 /* Musashi */,
+			);
+			path = m68000;
+			sourceTree = "<group>";
+		};
+		C7F6B69A80B270AB0201B0CF /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		CBBBDB687143D8A5D8D5C331 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				7B916C1582ADFAEC25DC6ACA /* EmulatorViewModel.swift */,
+				C7F133009A3BF697FFCF00FC /* SettingsViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		DFA3FC46F8F6F11436A14995 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B4EF857ED0FF30E751C69497 /* MX68KApp.swift */,
+				D24175CE9474C2FD57F10734 /* AppDelegate.swift */,
+				84718D2CB4030F173A40D69E /* Models */,
+				4BE121A21FD2352C3214D536 /* Services */,
+				CBBBDB687143D8A5D8D5C331 /* ViewModels */,
+				4847BA0163D670548A10AF14 /* Views */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F8D9A2EEB540389D6E3A26EB /* x68k */ = {
+			isa = PBXGroup;
+			children = (
+				A8AAB0FB3E7BB7D9A1E67E9E /* adpcm.c */,
+				7F6AB4F06B439073FD80A2ED /* adpcm.h */,
+				6AD5697FA73902D02AD3758C /* bg.c */,
+				97F54700F09259D8C069A33F /* bg.h */,
+				EA80C903765A441E2E3B5849 /* crtc.c */,
+				CCDB0BBA28BF81FF4D3A46D2 /* crtc.h */,
+				C71C0641BB02000000000002 /* crtc_timing.c */,
+				C71C0641CC03000000000003 /* crtc_timing.h */,
+				9A963BCB3BC9701162F9F50A /* d68k.c */,
+				340AE78874E041287AFBA24A /* d68k.h */,
+				8A6F26FEEE9D639BDBE19330 /* d68kconf.h */,
+				30878FECB6D13410905E3B21 /* disk_d88.c */,
+				30799D207B3A0D2ECFA1D29B /* disk_d88.h */,
+				0D753CB715B299FD3984E0F1 /* disk_dim.c */,
+				BC6AA7510FC364405FA86908 /* disk_dim.h */,
+				1B6E27F2842911579052AE14 /* disk_xdf.c */,
+				C90EEE594622F2B40F531BC6 /* disk_xdf.h */,
+				EC1E1B22FEA98DBAE4E13AB0 /* dmac.c */,
+				BA084257C0081147B425E5DC /* dmac.h */,
+				7D611AA305B2C4D7F32E20A2 /* fdc.c */,
+				ACAB6ADFE4198AE58A4F174C /* fdc.h */,
+				C825194BFAA3598408FABFE2 /* fdd.c */,
+				D41374A8D329EED6B4674A1D /* fdd.h */,
+				DB5A6767292D29CDF9957030 /* GamePad.h */,
+				4FB81A28977CD83B0CC8C361 /* gvram.c */,
+				FAD5E8878DF339BCBE4CB172 /* gvram.h */,
+				F5BDE60868F2C06FF9DC0823 /* ioc.c */,
+				C80AEAA4B0324EAD277DCA39 /* ioc.h */,
+				BDAC3FBEE78AA464E3E8E0C5 /* irqh.c */,
+				4EC2064CB97CD750E3593925 /* irqh.h */,
+				E2E450D8BB0665BB2DA9F644 /* m68000.h */,
+				6AB2F9B5DE8A513334CCB427 /* mem_wrap.c */,
+				8628CB8F898F482BD2A9DC82 /* mercury.c */,
+				7696F1FA01BDE59E623BA3F6 /* mercury.h */,
+				AE4517BDB3742E2212C44176 /* mfp.c */,
+				5F54385400ED8966F935A9FB /* mfp.h */,
+				0E4A42944BD17800C2D546D1 /* midi_darwin.c */,
+				29DF1D8A4E971C600CB1CBE4 /* midi.c */,
+				631BF6838ED3DE028312DE5F /* midi.h */,
+				F519C22FBD45EEADF175C4D8 /* mouse.c */,
+				0B8CCADE622A2583582A6780 /* mouse.h */,
+				3C510AA1114EB4B9ABD94AAC /* palette.c */,
+				4505DCA4212B96FFF5206191 /* palette.h */,
+				4C2011B27976E189DEE8BB0D /* ppi.c */,
+				19A0A534A86A3A2A00A5B075 /* ppi.h */,
+				EB19B320E3393C1F27D0796B /* prop.h */,
+				FB920E38D02C0B5BCC2CC269 /* rtc.c */,
+				1D332CDE727CAE9463A2F8FD /* rtc.h */,
+				A32CDBD88ECEFAFCD7D65C12 /* sasi.c */,
+				42437DEAD1B15CC0685D7B10 /* sasi.h */,
+				2ABDB27DF802DEC2204B67FB /* scc.c */,
+				1B0CAAF92060FA9CD22D606A /* scc.h */,
+				67B30715B8F792A55D887B0F /* scsi.c */,
+				2AC987C0FAC19560B2ECB3AA /* scsi.h */,
+				14438A0D5F051BB2E4E43B3F /* sram.c */,
+				24CE195408382D51A8471ADA /* sram.h */,
+				18555FA339C1C24DDF004DB6 /* status.c */,
+				B2E8FE4D98199531B8933408 /* status.h */,
+				5CFD16909FA371519C948910 /* sysport.c */,
+				B1CC4A382A1B8BD8FF66CD73 /* sysport.h */,
+				8ED7A17DFD1B59E8E250BA43 /* tvram.c */,
+				69860BDED068448CE085ADBB /* tvram.h */,
+				1796EDDA02063AD9541742D9 /* windraw.h */,
+				57B2DCFDDCA39BE7690931F6 /* winui.h */,
+				413039DC455DAF3C12CB3E68 /* x68kmemory.h */,
+			);
+			path = x68k;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		72F229C0BE1E1674D00F2C11 /* MX68K-iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8C9819917A52B6DAC71930FF /* Build configuration list for PBXNativeTarget "MX68K-iOS" */;
+			buildPhases = (
+				870D283B3A6B49FA49B0C588 /* Sources */,
+				2EEF696E407B33E563695410 /* Frameworks */,
+				4992E443093E55908DA811FE /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "MX68K-iOS";
+			packageProductDependencies = (
+				DD6EE063E7E7D9E9615379AB /* ZIPFoundation */,
+			);
+			productName = "MX68K-iOS";
+			productReference = 7C515A354F17BE73273A5D5F /* MX68K.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F5850019651999C0D37115F9 /* MX68K */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E209EEA7695C7B30BB64B1BB /* Build configuration list for PBXNativeTarget "MX68K" */;
+			buildPhases = (
+				22FF86C88E01C8E7BCA9C121 /* Sources */,
+				23F7F6644B0759B7EF9E4E1F /* Resources */,
+				3CFD9B785E2CDC161431EB92 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MX68K;
+			productName = MX68K;
+			productReference = 4D08B8841676FB916C9745D1 /* MX68K.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E21B5B8B1BA4F62539BD96BC /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 69FAC9BE6F32CC211CCD32C1 /* Build configuration list for PBXProject "MX68K" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				ja,
+			);
+			mainGroup = 91BDE317C6E08FF6146AC788;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D903C7F2B8F4CDE442FCF484 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B16ED0F3C693B625AC416F6F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F5850019651999C0D37115F9 /* MX68K */,
+				72F229C0BE1E1674D00F2C11 /* MX68K-iOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		23F7F6644B0759B7EF9E4E1F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A188C01D0000000000000021 /* Localizable.xcstrings in Resources */,
+				A280C01D0000000000000001 /* Assets.xcassets in Resources */,
+				D851767C843B40662409F8BB /* Resources in Resources */,
+				3DF736E98E0AF3A67FC3A739 /* c68k_ini.inc in Resources */,
+				4CED27CA733881CB001F594F /* c68k_op0.inc in Resources */,
+				85111286384064F85FCB2730 /* c68k_op1.inc in Resources */,
+				EDDB2EC1AC19F29F12159CF1 /* c68k_op2.inc in Resources */,
+				9633710652DB7C987ADE7F5C /* c68k_op3.inc in Resources */,
+				96D04B223459BE7045D5E735 /* c68k_op4.inc in Resources */,
+				20347869E1EB516836EB954F /* c68k_op5.inc in Resources */,
+				E17C30E5B5C387AB00CCA9F0 /* c68k_op6.inc in Resources */,
+				C37994FEC143D962A93EF873 /* c68k_op7.inc in Resources */,
+				950248F816B630A5DBB43788 /* c68k_op8.inc in Resources */,
+				47C9313101835848FA07A494 /* c68k_op9.inc in Resources */,
+				6D072ADA6F8F33410270DADA /* c68k_opA.inc in Resources */,
+				6DB79D0D6AC8AB028BBDE1B6 /* c68k_opB.inc in Resources */,
+				47FC7700CC8D21AE23F72273 /* c68k_opC.inc in Resources */,
+				30A10A9358CB84976FA9E905 /* c68k_opD.inc in Resources */,
+				97B546EABC8F6D3F016D4674 /* c68k_opE.inc in Resources */,
+				6DCD848B522D8A5FB2D59BB0 /* c68k_opF.inc in Resources */,
+				8CE7792A8DE3C1F978273F2D /* c68kmac.inc in Resources */,
+				EFAC350BACD82D85EE737111 /* gen68k.inc in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4992E443093E55908DA811FE /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FE65CDE5BE1850B84DE539E5 /* Assets.xcassets in Resources */,
+				AAB96B91D64FC50E29C7F604 /* c68k_ini.inc in Resources */,
+				6B201C82D2B70E858B776636 /* c68k_op0.inc in Resources */,
+				B6B2ADDA5240D475D28CF144 /* c68k_op1.inc in Resources */,
+				F4E36AD5B7398E03790534B9 /* c68k_op2.inc in Resources */,
+				5FCD339474735E0EA2F129C4 /* c68k_op3.inc in Resources */,
+				DFD1CD32B442A8FC0E58D146 /* c68k_op4.inc in Resources */,
+				B9F4211E089005BF0492E6C2 /* c68k_op5.inc in Resources */,
+				1E6590C265F8999BE560AF2A /* c68k_op6.inc in Resources */,
+				09D64255C37438D79F416D3C /* c68k_op7.inc in Resources */,
+				C8012658C93D9911AC284F03 /* c68k_op8.inc in Resources */,
+				1CF1D3608FA433931F15D87B /* c68k_op9.inc in Resources */,
+				21D2D4D1EAAFD824E7A08B86 /* c68k_opA.inc in Resources */,
+				21DDE0B8E5DF84B231924E21 /* c68k_opB.inc in Resources */,
+				501E9C6E88DAA6ED0318EE80 /* c68k_opC.inc in Resources */,
+				4B41CDA18C9BA46475F9725E /* c68k_opD.inc in Resources */,
+				70B2BFDE978921F56B8ECDF6 /* c68k_opE.inc in Resources */,
+				CF1A965579CB58A267810758 /* c68k_opF.inc in Resources */,
+				BFC982E87AB9B1A94462D1E4 /* c68kmac.inc in Resources */,
+				0831B950BB1799A8737D7460 /* gen68k.inc in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		22FF86C88E01C8E7BCA9C121 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3AC4AF52241AF65094F8C090 /* AudioEngine.swift in Sources */,
+				2D554855417A39C52DCA087C /* BIOSSettingsView.swift in Sources */,
+				F278F84650D0DC4E534A95C1 /* ConfigManager.swift in Sources */,
+				1E4EC37D18A397ACC5C7521E /* DiskImage.swift in Sources */,
+				D45B526C49A3B2F8157D91B0 /* EmulatorBridge.c in Sources */,
+				15093DF5E8A4AD94CA658DD4 /* EmulatorConfig.swift in Sources */,
+				6938254845D221D9376591EE /* EmulatorEngine.swift in Sources */,
+				361D5D02F75A00C9DD3BDF19 /* EmulatorMetalView.swift in Sources */,
+				D80F17DDA6273F627534C252 /* EmulatorView.swift in Sources */,
+				353761F58A1C3243D42D66CD /* EmulatorViewModel.swift in Sources */,
+				89B3EA741FC6BB028D5FA85E /* GamePad.c in Sources */,
+				36C5C377A49C9BAC818463FC /* HardwareSettingsView.swift in Sources */,
+				A183B01D0000000000000001 /* AudioSettingsView.swift in Sources */,
+				A187C01D0000000000000001 /* CPUMonitorView.swift in Sources */,
+				A187C0860000000000000001 /* CRTCMonitorView.swift in Sources */,
+				A187C0870000000000000001 /* VideoControllerMonitorView.swift in Sources */,
+				A187C0880000000000000001 /* BGMonitorView.swift in Sources */,
+				A187C08B0000000000000001 /* SpriteMonitorView.swift in Sources */,
+				A187C08C0000000000000001 /* SpriteTableMapView.swift in Sources */,
+				A187C08E0000000000000001 /* TextPlaneMonitorView.swift in Sources */,
+				A187C08F0000000000000001 /* BGPageMonitorView.swift in Sources */,
+				A187C0900000000000000001 /* GrpPageMonitorView.swift in Sources */,
+				A187C0910000000000000001 /* BGSPCompositeMonitorView.swift in Sources */,
+				A187C0920000000000000001 /* SoundMonitorView.swift in Sources */,
+				A187C0A20000000000000001 /* OPMSynthesizerView.swift in Sources */,
+				A187C0930000000000000001 /* PaletteMonitorView.swift in Sources */,
+				A187C0940000000000000001 /* InputMonitorView.swift in Sources */,
+				A187C0A00000000000000001 /* MemoryDumpMonitorView.swift in Sources */,
+				A187C0A10000000000000001 /* MemoryMapMonitorView.swift in Sources */,
+				A187C0A30000000000000001 /* StorageMonitorView.swift in Sources */,
+				A187C0A50000000000000001 /* MIDIMonitorView.swift in Sources */,
+				A187C0A70000000000000001 /* RTCMonitorView.swift in Sources */,
+				A187C08D0000000000000001 /* RendererMonitorView.swift in Sources */,
+				A187C0890000000000000001 /* PerformanceMonitorView.swift in Sources */,
+				A187C08A0000000000000001 /* EmulatorPerfStatus.swift in Sources */,
+				A187C0A40000000000000001 /* EmulatorStorageStatus.swift in Sources */,
+				A187C0A60000000000000001 /* EmulatorMIDIStatus.swift in Sources */,
+				A228C01D0000000000000001 /* SoftKeyboardView.swift in Sources */,
+				A188C01D0000000000000001 /* LocalizationManager.swift in Sources */,
+				A188C01D0000000000000011 /* GeneralSettingsView.swift in Sources */,
+				A194C01D0000000000000001 /* InputSettingsView.swift in Sources */,
+				A511C01D0000000000000001 /* KeyRemapView.swift in Sources */,
+				A585C01D0000000000000001 /* GamepadRemapView.swift in Sources */,
+				A273500000000000000000A1 /* SASISettingsView.swift in Sources */,
+				A578C01D0000000000000001 /* BlankImageDialogs.swift in Sources */,
+				A273500000000000000000B1 /* SCSISettingsView.swift in Sources */,
+				F642A1B2C3D4E5F600000003 /* WindrvSettingsView.swift in Sources */,
+				A189C01D0000000000000001 /* ScreenshotService.swift in Sources */,
+				A697C01D0000000000000001 /* VideoRecordingService.swift in Sources */,
+				A574C01D0000000000000001 /* BlankImageService.swift in Sources */,
+				A190C01D0000000000000001 /* WindowScaler.swift in Sources */,
+				A191C01D0000000000000001 /* ArchiveMountService.swift in Sources */,
+				A701C01D0000000000000001 /* AboutPanel.swift in Sources */,
+				A187C0950000000000000001 /* ArchiveEntryPickerSheet.swift in Sources */,
+				D4E1B684DA08C9DB69FE88B6 /* InputManager.swift in Sources */,
+				A237C01D0000000000000001 /* MouseCaptureState.swift in Sources */,
+				A546C01D0000000000000001 /* EmulatorRunState.swift in Sources */,
+				06C78C80ECD42F12F84AB115 /* MX68KApp.swift in Sources */,
+				2BFBDA4641EEFF1668E51713 /* AppDelegate.swift in Sources */,
+				674F26EE1D1D54FA43B0AE0E /* SettingsView.swift in Sources */,
+				29D27C4421CBAC46EB1CB7FB /* SettingsViewModel.swift in Sources */,
+				32E970CE36916A9E68EB2C9A /* StatusBarView.swift in Sources */,
+				7E1809E3D8CAAD388E86E25A /* ToolbarView.swift in Sources */,
+				143AE024A93DD3EF320C0929 /* adpcm.c in Sources */,
+				B02E971D1AA477F9FBEF8BA3 /* bg.c in Sources */,
+				746891D845F41C0DD8BCFC8B /* c68k.c in Sources */,
+				26595B9715BC2D054AE93DD4 /* c68kexec.c in Sources */,
+				DC8263868FCD72DD22417B31 /* common.c in Sources */,
+				AB090E70FD33DFB66C6E4E72 /* crtc.c in Sources */,
+				C71C0641AA01000000000001 /* crtc_timing.c in Sources */,
+				6005D5D17BC7994FD8C66E38 /* d68k.c in Sources */,
+				C944FA4A1BF3F0FDDD41E361 /* disk_d88.c in Sources */,
+				FD72DE0A348716D9844C1B60 /* disk_dim.c in Sources */,
+				32E23EE06B98FE8932366702 /* disk_xdf.c in Sources */,
+				F5DDEADF809D62327CE65257 /* dmac.c in Sources */,
+				EBCCF6A7B2843E1B95C13607 /* dosio.c in Sources */,
+				37CD759B52883DF16B793452 /* fake.c in Sources */,
+				FBCDC68255076F6252B0FFD4 /* fdc.c in Sources */,
+				43A104EE9126A798EEB471FB /* fdd.c in Sources */,
+				46FA2EA92E441FF2611111FB /* file.cpp in Sources */,
+				796372A4D28103891D0BA90C /* fmg_wrap.cpp in Sources */,
+				D9C260366EAC8BFF0E1CDB5A /* fmgen.cpp in Sources */,
+				7E96C59B28FFD9BE79656285 /* fmtimer.cpp in Sources */,
+				1A4EC428A4FEB870F5B29C25 /* gen68k.c in Sources */,
+				8DEBC5573FFB65C6D494A102 /* gvram.c in Sources */,
+				6AD04BD99BEFB49E43D9FF28 /* ioc.c in Sources */,
+				969ADB7A3B036E18D2D8C578 /* irqh.c in Sources */,
+				C1B81DFAF9E5B51BD0451EE7 /* keyboard.c in Sources */,
+				0EDED5B1CE0C091AF10E4F81 /* m68000_bridge.c in Sources */,
+				3F715C65FC6B930F92F6446A /* mem_wrap.c in Sources */,
+				6A30BF37B61DCEBEAD54BB42 /* mercury.c in Sources */,
+				E97C039A6A083123CEDA7DFD /* mfp.c in Sources */,
+				4BF576C283B0F0FEC5DC3599 /* midi.c in Sources */,
+				A9B0C1D2E3F4A5B6C7D8E9F0 /* midi_coremidi.c in Sources */,
+				FD934FE3BA6744A3667F8FD6 /* opm.cpp in Sources */,
+				37674428D4425248AED5179D /* opna.cpp in Sources */,
+				A95E1CF3E7A21E8741C1C320 /* palette.c in Sources */,
+				865667FF0D772F10C3345AF5 /* peace.c in Sources */,
+				41DFDDEB6418F5ED850F6A46 /* ppi.c in Sources */,
+				4A7767D0A65BE7C2E1B612EC /* psg.cpp in Sources */,
+				1835BA770E29AB355D806718 /* rtc.c in Sources */,
+				38B8A6BBB07103B3A108972A /* sasi.c in Sources */,
+				E59DE89EEDF2AC4536123130 /* scc.c in Sources */,
+				8D3DF1EF0C05FFD3AF73885D /* scsi.c in Sources */,
+				FAD5E3A7B7F8C196DE28E47A /* sram.c in Sources */,
+				BD609930B81948A2E73AED13 /* status_bridge.c in Sources */,
+				B2C3D4E5F6A7B8C9D0E1F2A3 /* sasi_bridge.c in Sources */,
+				A7B8C9D0E1F2A3B4C5D6E7F8 /* sasi_io_cache.c in Sources */,
+				D4E5F6A7B8C9D0E1F2A3B4C5 /* scsi_in_bridge.c in Sources */,
+				F6A7B8C9D0E1F2A3B4C5D6E7 /* scsi_ext_bridge.c in Sources */,
+				D6E7F8A9B0C1D2E3F4A5B6C7 /* sram_ext_bridge.c in Sources */,
+				F642A1B2C3D4E5F600000001 /* windrv_bridge.c in Sources */,
+				B3C4D5E6F7A8B9C0D1E2F3A4 /* scsi_disk.cpp in Sources */,
+				B4C5D6E7F8A9B0C1D2E3F4A5 /* scsi_spc.cpp in Sources */,
+				B5C6D7E8F9A0B1C2D3E4F5A6 /* scsi_spc_bridge.cpp in Sources */,
+				4E3ECF3BFA89BA91E44743B0 /* sysport.c in Sources */,
+				E918523C788FEEAC3EC57F70 /* tvram.c in Sources */,
+				647D1C1F536ABB19E42FACBD /* windraw.c in Sources */,
+				A4EBDCF74311192007F1F0FD /* winui.c in Sources */,
+				796D3F7F1E4840F8B7C2CAA2 /* X68KDisplay.metal in Sources */,
+				F5234890F72D17B036D1CF49 /* winx68k_compat.c in Sources */,
+				4337F84ADAFFE653B63ED181 /* DisplayGeometry.swift in Sources */,
+				66BF627547A35D8CB87A80E2 /* X68KRenderer.swift in Sources */,
+				ECD1B2F727FECCD92BEA119C /* FilePickerButton.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		870D283B3A6B49FA49B0C588 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F46D86CF15F81E4B7C5223DC /* MX68KiOSApp.swift in Sources */,
+				5BC443127C079E61890938CD /* EmulatorBridge.c in Sources */,
+				E4EDA90278D19F7A6EC2ADB6 /* GamePad.c in Sources */,
+				F24D1C0E7AD885FE22B874EF /* adpcm.c in Sources */,
+				FA18ECA772AFE4CA631CD39A /* bg.c in Sources */,
+				AA964734E2BB36022E59E8F5 /* c68k.c in Sources */,
+				BF5255F847E78A0DB4A07FF7 /* c68kexec.c in Sources */,
+				C87D490EBE306D4DAFBB885F /* common.c in Sources */,
+				4327819AD3331A75EABF2EBF /* crtc.c in Sources */,
+				D37BB79EC57DDC478F39762C /* crtc_timing.c in Sources */,
+				329D20DBED5F3894CF10AFEC /* d68k.c in Sources */,
+				3B22A1BAB128B342FEA5DF77 /* disk_d88.c in Sources */,
+				A51B54996E12199B1043540B /* disk_dim.c in Sources */,
+				4D3C59ACA8FFE058ADB0709D /* disk_xdf.c in Sources */,
+				1892518C4F55D83C185F9F04 /* dmac.c in Sources */,
+				32D71D3D409F18DB7D794C7F /* dosio.c in Sources */,
+				DC24A524689BC4FAFC9E9E99 /* fake.c in Sources */,
+				DF03697F34286F975719E7E1 /* fdc.c in Sources */,
+				74ABDB00F15C0AFD9116B6A2 /* fdd.c in Sources */,
+				66B30C84A8932E6ADF1D78AE /* file.cpp in Sources */,
+				3A6CCC20A6FA3671F66470CC /* fmg_wrap.cpp in Sources */,
+				0E05209561424E5D434F4C31 /* fmgen.cpp in Sources */,
+				F26E65F9832241F69EC8BCBF /* fmtimer.cpp in Sources */,
+				E0DF5FF3E5BA143AEFF50286 /* gen68k.c in Sources */,
+				D0F371819C8808F2B2AD485C /* gvram.c in Sources */,
+				A24B7E78B9252F3854AC9A1B /* ioc.c in Sources */,
+				76196DA3A2E2E0223D7A66BB /* irqh.c in Sources */,
+				3F394E94DC66015E7F6A3CCB /* keyboard.c in Sources */,
+				11516BE56F8F6838011F133B /* m68000_bridge.c in Sources */,
+				E4648BEBE84FF50528B9451D /* mem_wrap.c in Sources */,
+				248C3BFE5D166CF31E19E504 /* mercury.c in Sources */,
+				2F821F327D0C825F1A7DA323 /* mfp.c in Sources */,
+				B392D601FDE7F4C8B6D6A7AE /* midi.c in Sources */,
+				24669AED8CA27023FE305B0A /* midi_coremidi.c in Sources */,
+				E160D83BB7D308A79BCC5EF6 /* opm.cpp in Sources */,
+				FDC53DD792AE488D8649AA73 /* opna.cpp in Sources */,
+				88DDFEF9AF92FE8A4E2695FB /* palette.c in Sources */,
+				CE8A3E346DF6AA124F0D7745 /* peace.c in Sources */,
+				7B34A3DEA2C645EA02568337 /* ppi.c in Sources */,
+				D61703A2130E163EC7373E0A /* psg.cpp in Sources */,
+				5C77A9EB0CEDCE54250B137D /* rtc.c in Sources */,
+				AE8FF816991440C154A74770 /* sasi.c in Sources */,
+				704C1A8B334451B0374C5CCD /* scc.c in Sources */,
+				71B9CF27AB0833649BE6959B /* scsi.c in Sources */,
+				C5776FD2FB7277FF3D6230B3 /* sram.c in Sources */,
+				0738427F0576AA42C24DD998 /* status_bridge.c in Sources */,
+				842C39341A9366C6FEF45E1E /* sasi_bridge.c in Sources */,
+				BE937DDEF6064406A90FBAEB /* sasi_io_cache.c in Sources */,
+				BD63382557EC7266AD9E9327 /* scsi_in_bridge.c in Sources */,
+				48BDD6A136FC53B860F3898E /* scsi_ext_bridge.c in Sources */,
+				660D210660FF3A2B0AB1E81B /* sram_ext_bridge.c in Sources */,
+				A1B059BC01777CE0AF2528EC /* windrv_bridge.c in Sources */,
+				2172E84D1CF6CE7D250D5314 /* scsi_disk.cpp in Sources */,
+				390D434674803D1B1FDBB1D4 /* scsi_spc.cpp in Sources */,
+				BF23348EC8212BE88E073460 /* scsi_spc_bridge.cpp in Sources */,
+				98F82D93AA76CD463081E6D1 /* sysport.c in Sources */,
+				E565F96E78BA111F371017B9 /* tvram.c in Sources */,
+				D71C9FD5ACAE4AAFFCF68C9A /* windraw.c in Sources */,
+				CDA46A66870915ACD3368CB4 /* winui.c in Sources */,
+				0CBC0856E71915487F3681F9 /* winx68k_compat.c in Sources */,
+				85933D638BB3B550F3F4A537 /* X68KDisplay.metal in Sources */,
+				1CB080CC7F112DA4E8D91F1C /* EmulatorEngine.swift in Sources */,
+				709355CFBC31777AB57E509A /* EmulatorPerfStatus.swift in Sources */,
+				8713099E28DBAE16E8815B2C /* EmulatorStorageStatus.swift in Sources */,
+				8C988B3FC709A861C8F3D59B /* EmulatorMIDIStatus.swift in Sources */,
+				C553BD191FBF1E887C19021F /* DisplayGeometry.swift in Sources */,
+				8968ABCFA7EE3CE31444C12A /* X68KRenderer.swift in Sources */,
+				AF0FFCB6D09E44263E893BAF /* MX68KiOSViewModel.swift in Sources */,
+				DA43834EAA023374700814BF /* EmulatorMetalView_iOS.swift in Sources */,
+				40A8E60D4F99A3CF0A50C045 /* IOSKeyboardInput.swift in Sources */,
+				E31A3CEDCF54DE5AA4C3304E /* EmulatorConfig.swift in Sources */,
+				AFD35F439DDFF36C30FB13ED /* ConfigManager.swift in Sources */,
+				5F5EDEFB8E75C6CA7E0ECF77 /* SettingsViewModel.swift in Sources */,
+				3743896BF7F5AA50FD1C52BD /* FilePickerButton.swift in Sources */,
+				B1FFC70CDE8DBD8D400FF244 /* SettingsView.swift in Sources */,
+				13D816183C7688F965FE9E56 /* BIOSSettingsView.swift in Sources */,
+				3D97BEC13189BE762D610A87 /* HardwareSettingsView.swift in Sources */,
+				273A3B0841D339A2B3163190 /* IOSSettingsPresentation.swift in Sources */,
+				0476CDA09169A17EA37FBE44 /* SoftKeyboardView.swift in Sources */,
+				E819519B0D00009DD92427B3 /* SASISettingsView.swift in Sources */,
+				ED10AC52215C5C1C81951622 /* SCSISettingsView.swift in Sources */,
+				12F42DB64F30123162E90AD9 /* DiskBookmarkStore.swift in Sources */,
+				4237E11C5553C34E91854BCD /* TouchJoystickView.swift in Sources */,
+				399542FA8C7B622BB82BAE76 /* TouchMouseView.swift in Sources */,
+				6C3F8B4A21D75E90C4A63F18 /* StateListView.swift in Sources */,
+				11339DC4999D1B0BE9065374 /* IOSArchiveMountService.swift in Sources */,
+				7E9A0F527FAD33543058DB33 /* ArchiveEntryPickerView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		40CC861C988FF56C662CFB0A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GCC_C_LANGUAGE_STANDARD = c17;
+				GCC_OPTIMIZATION_LEVEL = 2;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../Bridge",
+					"$(SRCROOT)/../Core/px68k",
+					"$(SRCROOT)/../Core/px68k/win32api",
+					"$(SRCROOT)/../Core/px68k/x68k",
+					"$(SRCROOT)/../Core/px68k/fmgen",
+					"$(SRCROOT)/../Core/px68k/m68000",
+					"$(SRCROOT)/../Core/c68k",
+				);
+				INFOPLIST_FILE = "iOS/Resources/Info-iOS.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_CFLAGS = (
+					"-O2",
+					"-DC68K_BYTE_SWAP_OPT",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.mx68k.emulator.ios;
+				PRODUCT_NAME = MX68K;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../Bridge/MX68K-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		453BD5827D539793FB21F471 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CODE_SIGN_ENTITLEMENTS = ./MX68K/Resources/MX68K.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GCC_C_LANGUAGE_STANDARD = c17;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../Bridge",
+					"$(SRCROOT)/../Core/px68k",
+					"$(SRCROOT)/../Core/px68k/win32api",
+					"$(SRCROOT)/../Core/px68k/x68k",
+					"$(SRCROOT)/../Core/px68k/fmgen",
+					"$(SRCROOT)/../Core/px68k/m68000",
+					"$(SRCROOT)/../Core/c68k",
+				);
+				INFOPLIST_FILE = MX68K/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_CFLAGS = (
+					"-DDEBUG=1",
+					"-g",
+					"-O0",
+					"-DC68K_BYTE_SWAP_OPT",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.mx68k.emulator;
+				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../Bridge/MX68K-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		48C314177D891E76AC7E1F9C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		943A75700EC5950F1918D4D8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GCC_C_LANGUAGE_STANDARD = c17;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../Bridge",
+					"$(SRCROOT)/../Core/px68k",
+					"$(SRCROOT)/../Core/px68k/win32api",
+					"$(SRCROOT)/../Core/px68k/x68k",
+					"$(SRCROOT)/../Core/px68k/fmgen",
+					"$(SRCROOT)/../Core/px68k/m68000",
+					"$(SRCROOT)/../Core/c68k",
+				);
+				INFOPLIST_FILE = "iOS/Resources/Info-iOS.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_CFLAGS = (
+					"-DDEBUG=1",
+					"-g",
+					"-O0",
+					"-DC68K_BYTE_SWAP_OPT",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.mx68k.emulator.ios;
+				PRODUCT_NAME = MX68K;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../Bridge/MX68K-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B0E0907D394636ECCC16731D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CODE_SIGN_ENTITLEMENTS = ./MX68K/Resources/MX68K.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GCC_C_LANGUAGE_STANDARD = c17;
+				HEADER_SEARCH_PATHS = (
+					"$(SRCROOT)/../Bridge",
+					"$(SRCROOT)/../Core/px68k",
+					"$(SRCROOT)/../Core/px68k/win32api",
+					"$(SRCROOT)/../Core/px68k/x68k",
+					"$(SRCROOT)/../Core/px68k/fmgen",
+					"$(SRCROOT)/../Core/px68k/m68000",
+					"$(SRCROOT)/../Core/c68k",
+				);
+				INFOPLIST_FILE = MX68K/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				OTHER_CFLAGS = (
+					"-O2",
+					"-DC68K_BYTE_SWAP_OPT",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.mx68k.emulator;
+				SDKROOT = macosx;
+				SWIFT_OBJC_BRIDGING_HEADER = "$(SRCROOT)/../Bridge/MX68K-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		F44803E2B768F29F08048059 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		69FAC9BE6F32CC211CCD32C1 /* Build configuration list for PBXProject "MX68K" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				48C314177D891E76AC7E1F9C /* Debug */,
+				F44803E2B768F29F08048059 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8C9819917A52B6DAC71930FF /* Build configuration list for PBXNativeTarget "MX68K-iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				40CC861C988FF56C662CFB0A /* Release */,
+				943A75700EC5950F1918D4D8 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E209EEA7695C7B30BB64B1BB /* Build configuration list for PBXNativeTarget "MX68K" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				453BD5827D539793FB21F471 /* Debug */,
+				B0E0907D394636ECCC16731D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D903C7F2B8F4CDE442FCF484 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DD6EE063E7E7D9E9615379AB /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D903C7F2B8F4CDE442FCF484 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = E21B5B8B1BA4F62539BD96BC /* Project object */;
+}

@@ -45,10 +45,6 @@ Scripts/test_*
 *.backup/
 *.backup
 
-# Nested/duplicate artifacts
-MX68K/MX68K.xcodeproj/
-MX68K/Bridge/
-
 # macOS resource forks
 ._*
 
