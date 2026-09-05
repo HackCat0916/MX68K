@@ -1,5 +1,13 @@
 import SwiftUI
 
+// P735 — Clock Picker の固定選択肢と Custom 入力欄のバリデーション範囲。
+// ★`kClockCustomSentinel` は Picker 専用の一時的な View State のタグであり、
+//   `settingsViewModel.clockMHz`(= config.json)へは決して書き込まれない。
+private let kClockPickerKnownValues: Set<Int> = [10, 12, 15, 16, 17, 20, 24, 25, 50, 100, 200]
+private let kClockCustomSentinel = -1
+private let kClockCustomMin = 1
+private let kClockCustomMax = 64000
+
 struct HardwareSettingsView: View {
     @EnvironmentObject var settingsViewModel: SettingsViewModel
     #if os(macOS)
@@ -63,6 +71,29 @@ struct HardwareSettingsView: View {
     /// default connection is intentionally a user-interaction-only proposal.
     @State private var machineTypeReady = false
 
+    /// P735 — Clock Picker の選択状態。`settingsViewModel.clockMHz` が固定選択肢に
+    /// 無い値のときだけ `kClockCustomSentinel` になる。値の真の保持先はあくまで
+    /// `settingsViewModel.clockMHz` であり、こちらは表示用の派生状態。
+    @State private var clockPickerSelection: Int = 16
+
+    /// P735 — Custom 入力欄のテキスト。P736 以降、入力のたびに確定する。
+    @State private var customClockText: String = ""
+
+    @FocusState private var isCustomClockFieldFocused: Bool
+
+    /// P735 — `settingsViewModel.clockMHz` から Picker 表示状態を導出する。
+    /// 初回ロード・機種切替・Custom 欄の確定のいずれの発生源でも、`clockMHz` の
+    /// `onChange` 経由でこの 1 箇所を通るため同期漏れが起きない。
+    private func syncClockPickerState(from clockMHz: Int) {
+        // P736: 入力中は Picker を再導出しない(途中入力が固定値と一致した瞬間に
+        // Custom 欄が消えて入力継続不能になるのを防ぐ)。
+        guard !isCustomClockFieldFocused else { return }
+        clockPickerSelection = kClockPickerKnownValues.contains(clockMHz) ? clockMHz : kClockCustomSentinel
+        if clockPickerSelection == kClockCustomSentinel {
+            customClockText = String(clockMHz)
+        }
+    }
+
     var body: some View {
         Form {
             Section(header: Text("Machine Configuration")) {
@@ -97,7 +128,7 @@ struct HardwareSettingsView: View {
                     Text("12 MB").tag(12)
                 }
 
-                Picker("Clock", selection: $settingsViewModel.clockMHz) {
+                Picker("Clock", selection: $clockPickerSelection) {
                     Text("10 MHz").tag(10)
                     Text("12 MHz (ACE mod)").tag(12)
                     Text("15 MHz (PRO mod)").tag(15)
@@ -106,6 +137,54 @@ struct HardwareSettingsView: View {
                     Text("20 MHz (Lucky!)").tag(20)
                     Text("24 MHz (RedZone)").tag(24)
                     Text("25 MHz").tag(25)
+                    Text("50 MHz (Experimental)").tag(50)
+                    Text("100 MHz (Experimental)").tag(100)
+                    Text("200 MHz (Experimental)").tag(200)
+                    Text("Custom...").tag(kClockCustomSentinel)
+                }
+                .onChange(of: clockPickerSelection) { newValue in
+                    if newValue != kClockCustomSentinel {
+                        settingsViewModel.clockMHz = newValue
+                    } else {
+                        customClockText = String(settingsViewModel.clockMHz)
+                    }
+                }
+                .onChange(of: settingsViewModel.clockMHz) { newValue in
+                    syncClockPickerState(from: newValue)
+                }
+                .onAppear {
+                    syncClockPickerState(from: settingsViewModel.clockMHz)
+                }
+
+                if clockPickerSelection == kClockCustomSentinel {
+                    TextField("Custom Clock (MHz)", text: $customClockText)
+                        .focused($isCustomClockFieldFocused)
+                        #if os(iOS)
+                        .keyboardType(.numberPad)
+                        #endif
+                        .onChange(of: customClockText) { newValue in
+                            // P736: 入力のたびに確定する(Return 押下に依存しない)。
+                            // 表示テキストの正規化はカーソル位置を乱さないよう
+                            // フォーカス解除時まで遅延させる。
+                            guard let v = Int(newValue) else { return }
+                            settingsViewModel.clockMHz = min(max(v, kClockCustomMin), kClockCustomMax)
+                        }
+                        .onSubmit {
+                            // Return は TextField のフォーカスを自動解除しないため、
+                            // 明示的に外して下の onChange に正規化・再導出をさせる。
+                            isCustomClockFieldFocused = false
+                        }
+                        .onChange(of: isCustomClockFieldFocused) { focused in
+                            guard !focused else { return }
+                            if let v = Int(customClockText) {
+                                settingsViewModel.clockMHz = min(max(v, kClockCustomMin), kClockCustomMax)
+                            }
+                            syncClockPickerState(from: settingsViewModel.clockMHz)
+                            customClockText = String(settingsViewModel.clockMHz)
+                        }
+                    Text("Enter any value from \(kClockCustomMin) to \(kClockCustomMax) MHz.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
                 Text("Clock speed applies after pressing Apply — no hard reset needed.")
                     .font(.subheadline)
