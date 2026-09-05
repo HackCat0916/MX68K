@@ -2351,6 +2351,66 @@
         }
       }
     },
+    "50 MHz (Experimental)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "50 MHz (実験的)"
+          }
+        }
+      }
+    },
+    "100 MHz (Experimental)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "100 MHz (実験的)"
+          }
+        }
+      }
+    },
+    "200 MHz (Experimental)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "200 MHz (実験的)"
+          }
+        }
+      }
+    },
+    "Custom...": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カスタム..."
+          }
+        }
+      }
+    },
+    "Custom Clock (MHz)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カスタムクロック (MHz)"
+          }
+        }
+      }
+    },
+    "Enter any value from %lld to %lld MHz.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld〜%lld MHzの任意の値を入力してください。"
+          }
+        }
+      }
+    },
     "Button profile (Port 1)": {
       "localizations": {
         "ja": {
