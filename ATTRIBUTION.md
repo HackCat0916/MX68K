@@ -22,10 +22,12 @@ component here is misattributed or mislicensed, please open an issue.
   unaltered.
 
 - **fmgen** (FM sound generator) — `Core/px68k/fmgen/`. Copyright (C) cisc
-  1998, 2003. Distributed under cisc's terms (see source file headers):
-  free to modify/redistribute/use with attribution, as free software, with
-  modifications marked; commercial incorporation requires the author's
-  prior agreement. Included in good faith.
+  1998, 2003. Distributed under cisc's terms (see source file headers and
+  the original [`readme.txt`](LICENSES/fmgen-readme.txt), reproduced here
+  per its own redistribution condition): free to modify/redistribute/use
+  with attribution, as free software, with modifications marked; commercial
+  incorporation requires the author's prior agreement. Included in good
+  faith.
 
 - **win32api compatibility layer** — `Core/px68k/win32api/`. `dosio.c`,
   `dosio.h`, `fake.c` are Copyright (c) 2003 NONAKA Kimihiro (BSD-style,
