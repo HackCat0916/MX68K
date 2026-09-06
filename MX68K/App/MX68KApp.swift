@@ -322,6 +322,20 @@ struct EmulatorCommands: Commands {
             .keyboardShortcut("o", modifiers: [.command, .option])
             .disabled(!runState.isRunning || runState.powerState == .poweringOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)
 
+            // P737 — パネルを介さないクイックセーブ/ロード(iOS版 P725 の逆移植)。
+            // ★観測対象は EmulatorRunState.shared のみ(D-10/D-49、isRecording と同型)。
+            Button("Quick Save State") {
+                emulatorViewModel.quickSaveState()
+            }
+            .keyboardShortcut("s", modifiers: [.command, .shift])
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.isStateOperationPending)
+
+            Button("Quick Load State") {
+                emulatorViewModel.quickLoadState()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.isStateOperationPending)
+
             // P578 — 旧「新規FDイメージを作成…」は Tools メニュー(ToolsCommands)の
             // 「イメージ作成」へ移設した(FD/SASI/SCSI の 3 導線を 1 箇所へ集約)。
         }

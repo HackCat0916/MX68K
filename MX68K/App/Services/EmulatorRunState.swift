@@ -13,4 +13,7 @@ final class EmulatorRunState: ObservableObject {
     /// status 等の毎秒更新で Commands 全体が再評価される(D-10/D-49)ため、
     /// isRunning/powerState と同じ軽量ミラーとしてここに置く。
     @Published var isRecording = false
+    /// P737 — クイックセーブ/ロード操作の実行中か。Quick Save/Quick Load State
+    /// メニュー項目の`.disabled`判定に使う。isRecordingと同じ理由の軽量ミラー。
+    @Published var isStateOperationPending = false
 }
