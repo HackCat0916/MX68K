@@ -135,9 +135,16 @@ struct KeyRemapView: View {
         case 0x3d: return "RIGHT →"
         default: break
         }
-        let flattened = key.label
+        var flattened = key.label
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
+        // P739: F1〜F9 は実機キートップ印字に合わせ `softKeyLayout` 側で
+        // "F 1"〜"F 9"(1桁を2桁のF10と揃えるための空白入り)になっているが、
+        // オンスクリーンキーボードと違いこの一覧はキートップの見た目を
+        // 再現する場ではないため、空白だけ詰める(softKeyLayout自体は無変更)。
+        if flattened.count == 3, flattened.hasPrefix("F "), let last = flattened.last, last.isNumber {
+            flattened = "F" + String(last)
+        }
         if !flattened.isEmpty {
             return numpadScancodes.contains(key.scancode) ? "テンキー " + flattened : flattened
         }
