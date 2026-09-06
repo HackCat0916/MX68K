@@ -207,24 +207,24 @@ X68000 uses a JIS keyboard layout. macOS keycodes are mapped to X68000 scan code
 
 ## ライセンス・法的事項 / License & Legal Notice
 
-本プロジェクトはC68K(MC68000 CPUコア)のGPL-2.0-or-laterを含む結合著作物のため、
-**GPL-2.0-or-later**の下でソースコードを公開しています。各コンポーネントの由来・
-ライセンスは [LICENSE](LICENSE)・[ATTRIBUTION.md](ATTRIBUTION.md) を、XM6由来
-コードの許諾経緯は [NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md) を参照してください。
+本プロジェクトは**GPL-2.0-or-later**の下でソースコードを公開しています
+(C68Kを静的リンクしているため)。各コンポーネントの由来・ライセンスは
+[LICENSE](LICENSE)・[ATTRIBUTION.md](ATTRIBUTION.md) を、XM6由来コードの
+許諾経緯は [NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md) を参照してください。
 
-- **SHARP純正のBIOS ROMは含まれていません。** ご自身で合法的に入手したものをご利用ください。
-- Human68k自体は2000年にシャープ・ハドソン等の権利各社により無償公開されましたが、これは使用許諾であり著作権の移転ではありません。著作権は権利各社に帰属したままで、**パブリックドメインではありません**。使用は実機X68000/X68030シリーズおよびそのエミュレータ上に限られます。詳細は[許諾条件](http://retropc.net/x68000/software/sharp/license.htm)を参照してください。
+- SHARP純正のBIOS ROMは含まれていません。実機から吸い出したものをご利用ください。
+- Human68k自体は2000年にシャープ・ハドソン等により無償配布が許諾されていますが、著作権の移転ではありません。詳細は[許諾条件](http://retropc.net/x68000/software/sharp/license.htm)を参照してください。
 
 **English:**
 
-Because this project statically links C68K (the MC68000 CPU core), which is
-licensed under GPL-2.0-or-later, MX68K's source code is published under
-**GPL-2.0-or-later**. See [LICENSE](LICENSE) and [ATTRIBUTION.md](ATTRIBUTION.md)
-for the provenance and license of each component, and
-[NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md) for the XM6 permission.
+This project's source code is published under **GPL-2.0-or-later** (it
+statically links C68K). See [LICENSE](LICENSE) and
+[ATTRIBUTION.md](ATTRIBUTION.md) for the provenance and license of each
+component, and [NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md) for the XM6
+permission.
 
-- **Genuine SHARP BIOS ROMs are NOT included.** Users must provide their own legally obtained copies.
-- Human68k itself was freely released in 2000 by Sharp, Hudson, and other rights holders — this is a usage license, not a transfer of copyright. Sharp/Hudson retain copyright, and it is **not** public domain. Use is limited to genuine X68000/X68030 hardware and emulators thereof. See the [license terms](http://retropc.net/x68000/software/sharp/license.htm) (Japanese) for details.
+- Genuine SHARP BIOS ROMs are not included. Dump your own from real hardware.
+- Human68k itself was freely released in 2000 by Sharp, Hudson, and other rights holders — this is not a transfer of copyright. See the [license terms](http://retropc.net/x68000/software/sharp/license.htm) (Japanese) for details.
 
 ---
 

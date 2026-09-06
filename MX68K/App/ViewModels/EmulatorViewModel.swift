@@ -22,6 +22,10 @@ class EmulatorViewModel: ObservableObject {
     /// メニュー側は EmulatorViewModel を観測できない(D-10/D-49)ため、
     /// `EmulatorRunState.shared.isRecording` へ軽量ミラーする。
     @Published var isRecording = false
+    /// P737 — クイックセーブ/ロード操作の実行中か。⌘⇧S の連打で保存操作が
+    /// 多重キューされるのを防ぐ。isRecording と同型で
+    /// `EmulatorRunState.shared.isStateOperationPending` へ軽量ミラーする。
+    @Published var isStateOperationPending: Bool = false
     /// P555 — ターボ ON 時に使う目標倍率(2〜5)。config.json から復元される。
     /// P556 — `kTurboNoWaitMultiplier`(= -1)のときは「ノーウェイト」
     /// (倍率上限なし、専用スレッドでホスト CPU が許す限り高速実行)を意味する。
@@ -946,6 +950,71 @@ class EmulatorViewModel: ObservableObject {
         awaitStateOp(seq0, isLoad: true, name: url.lastPathComponent)
     }
 
+    /// ⌘⇧S — パネルを介さず、タップ一つで自動命名保存する(iOS版P725の逆移植)。
+    func quickSaveState() {
+        guard !isPaused else {
+            presentStateError(String(localized: "Cannot save state while paused. Resume first."))
+            return
+        }
+        let dir = statesDirectory()
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyyMMdd_HHmmss"
+        let name = "mx68k_\(fmt.string(from: Date())).mxstate"
+        let url = dir.appendingPathComponent(name)
+        let seq0 = mx68k_state_op_seq()
+        guard mx68k_save_state(url.path) == 0 else {
+            presentStateError(String(localized: "Failed to save state."))
+            return
+        }
+        showTransientMessage(String(localized: "Saving state…"))
+        awaitStateOp(seq0, isLoad: false, name: name)
+    }
+
+    /// ⌘⇧O — 直近に保存されたステートを問答無用で即座に読み込む
+    /// (XM6のAlt+F1相当。ただしMXはスロット上書きではなくタイムスタンプ命名の
+    /// 履歴を保持するため、「最新のファイルを選ぶ」処理で疑似的に同じ体験を作る)。
+    func quickLoadState() {
+        guard !isPaused else {
+            presentStateError(String(localized: "Cannot load state while paused. Resume first."))
+            return
+        }
+        guard let url = listSavedStates().first else {
+            presentStateError(String(localized: "No saved states"))
+            return
+        }
+        let seq0 = mx68k_state_op_seq()
+        guard mx68k_load_state(url.path) == 0 else {
+            presentStateError(String(localized: "Failed to load state."))
+            return
+        }
+        showTransientMessage(String(localized: "Loading state…"))
+        awaitStateOp(seq0, isLoad: true, name: url.lastPathComponent)
+    }
+
+    func listSavedStates() -> [URL] {
+        let dir = statesDirectory()
+        do {
+            let files = try FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil)
+            return files
+                .filter { $0.pathExtension == "mxstate" }
+                .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        } catch {
+            mx68k_log("[Swift][P737-STATE] listSavedStates contentsOfDirectory failed: \(error)")
+            return []
+        }
+    }
+
+    func deleteState(url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+            mx68k_log("[Swift][P737-STATE] deleteState name=\(url.lastPathComponent) result=ok")
+        } catch {
+            mx68k_log("[Swift][P737-STATE] deleteState name=\(url.lastPathComponent) result=fail error=\(error)")
+        }
+    }
+
     /// P481 (D-42) — キューした save/load の完了をポーリングで待ち、実際の rc に
     /// 応じて成功トースト / エラーダイアログを出す。saveState()/loadState() の
     /// `defer { releaseAutoPause() }` が走って再開した後にタイマーが回るため、
@@ -954,12 +1023,16 @@ class EmulatorViewModel: ObservableObject {
 
     private func awaitStateOp(_ seq0: UInt32, isLoad: Bool, name: String) {
         stateOpTimer?.invalidate()
+        isStateOperationPending = true
+        EmulatorRunState.shared.isStateOperationPending = true   // P546 と同型のメニューゲート用ミラー
         let deadline = Date().addingTimeInterval(2.0)
         stateOpTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
             if mx68k_state_op_seq() != seq0 {
                 t.invalidate()
                 self.stateOpTimer = nil
+                self.isStateOperationPending = false
+                EmulatorRunState.shared.isStateOperationPending = false
                 let rc = mx68k_last_state_rc()
                 if rc == 0 {
                     self.showTransientMessage(isLoad
@@ -971,6 +1044,8 @@ class EmulatorViewModel: ObservableObject {
             } else if Date() >= deadline {
                 t.invalidate()
                 self.stateOpTimer = nil
+                self.isStateOperationPending = false
+                EmulatorRunState.shared.isStateOperationPending = false
                 self.presentStateError(String(localized:
                     "State operation did not complete (emulation stopped or paused)."))
             }

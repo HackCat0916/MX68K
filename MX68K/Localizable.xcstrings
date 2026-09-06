@@ -4941,6 +4941,26 @@
         }
       }
     },
+    "Quick Save State": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートをクイック保存"
+          }
+        }
+      }
+    },
+    "Quick Load State": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステートをクイック読込"
+          }
+        }
+      }
+    },
     "No saved states": {
       "localizations": {
         "ja": {
