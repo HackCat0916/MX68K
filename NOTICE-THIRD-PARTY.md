@@ -77,12 +77,12 @@ XM6 `vm/` license's blanket commercial-use prohibition quoted above.
 
 To resolve this, HackCat0916 (the MX68K author) contacted ＰＩ．, the original
 author of XM6, and requested permission to use the four ported files listed
-above under GPL-compatible terms. By email dated 2026-09, ＰＩ．granted this
+above under GPL-compatible terms. In September 2026, ＰＩ．granted this
 permission: scsi.h, scsi.cpp, disk.h and disk.cpp may be treated as
 GPL2-licensed, on the condition that this documentation record that the
-license-change permission was granted by the original author. (The
-correspondence itself is kept on file by the MX68K author and is not
-reproduced verbatim here.)
+license-change permission was granted by the original author. (A record of
+this exchange is kept on file by the MX68K author and is not reproduced
+verbatim here.)
 
 **`Bridge/scsi_disk.cpp`, `Bridge/scsi_disk.h`, `Bridge/scsi_spc.cpp` and
 `Bridge/scsi_spc.h` (ported from XM6 `vm/disk.cpp`, `vm/disk.h`,
