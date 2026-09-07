@@ -169,7 +169,7 @@ struct DisassemblyMonitorView: View {
         }
         .font(.system(.body, design: .monospaced))
         .padding()
-        .frame(minWidth: 560, minHeight: 520, alignment: .topLeading)
+        .frame(minWidth: 670, minHeight: 520, alignment: .topLeading)
         .onAppear {
             syncAddressText()
             model.startPolling(engine: engine)
@@ -211,7 +211,7 @@ struct DisassemblyMonitorView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 0) {
                 Text("Address").frame(width: 80, alignment: .leading)
-                Text("Bytes").frame(width: 150, alignment: .leading)
+                Text("Bytes").frame(width: 260, alignment: .leading)
                 Text("Instruction").frame(maxWidth: .infinity, alignment: .leading)
             }
             .foregroundColor(.secondary)
@@ -221,7 +221,7 @@ struct DisassemblyMonitorView: View {
                     Text(String(format: "%06X", line.address))
                         .frame(width: 80, alignment: .leading)
                     Text(line.bytesText)
-                        .frame(width: 150, alignment: .leading)
+                        .frame(width: 260, alignment: .leading)
                     Text(line.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
