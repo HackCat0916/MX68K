@@ -121,6 +121,15 @@ struct MX68KApp: App {
             MemoryMapMonitorView()
         }
 
+        // P740 — disassembly viewer. Unlike the two P600 windows above, this one
+        // reaches the guest through cpu_readmem24 (Core's Debabelizer), so it must
+        // serialize against the emulation thread — it needs EmulatorViewModel purely
+        // to obtain `engine` for `withEmulationLock`.
+        Window("Disassembly", id: "monitor-disasm") {
+            DisassemblyMonitorView()
+                .environmentObject(emulatorViewModel)
+        }
+
         // P286 — developer monitor panels (CRTC / Video Controller / BG・Sprite).
         Window("CRTC", id: "monitor-crtc") {
             CRTCMonitorView()
@@ -555,6 +564,11 @@ struct MonitorCommands: Commands {
                     .keyboardShortcut("2", modifiers: [.command, .option])
                 Button("Memory Map Viewer") { openWindow(id: "monitor-memory-map") }
                     .keyboardShortcut("r", modifiers: [.command, .option])
+                // P740 — 逆アセンブルビューア(⌘⌥A、"disAssembly")。
+                // ★"D" は macOS システム標準の ⌥⌘D(Dock の自動的に非表示/表示)と
+                //   衝突するため既存コードで既に忌避されている(P692 参照)。
+                Button("Disassembly Viewer") { openWindow(id: "monitor-disasm") }
+                    .keyboardShortcut("a", modifiers: [.command, .option])
             }
 
             // Device(表示制御系レジスタ/状態モニタ)

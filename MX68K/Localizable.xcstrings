@@ -4970,6 +4970,96 @@
           }
         }
       }
+    },
+    "Disassembly": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "逆アセンブル"
+          }
+        }
+      }
+    },
+    "Disassembly Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "逆アセンブルビューア"
+          }
+        }
+      }
+    },
+    "Address": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アドレス"
+          }
+        }
+      }
+    },
+    "Bytes": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "バイト列"
+          }
+        }
+      }
+    },
+    "Instruction": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令"
+          }
+        }
+      }
+    },
+    "Goto": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移動"
+          }
+        }
+      }
+    },
+    "Next ▶": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次 ▶"
+          }
+        }
+      }
+    },
+    "Follow PC": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PC に追従"
+          }
+        }
+      }
+    },
+    "Read-only. Backward paging is not available because 68000 instructions are variable length — use Goto Address to move back.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み取り専用。68000 は可変長命令のため前ページへは戻れません — 戻る場合はアドレスを直接指定してください。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
