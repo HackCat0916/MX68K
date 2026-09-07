@@ -295,6 +295,9 @@ extern void mx68k_set_membound(int mb); /* P220b: defined in m68000_bridge.c */
 extern uint8_t MIDI_MODULE;
 #include "../Core/px68k/fmgen/fmg_wrap.h"
 #include "../Core/px68k/x68k/m68000.h"
+/* P740: Core 同梱の MC68000 逆アセンブラ(Debabelizer)。ビルドには元から
+ * 登録されていたが呼び出し元がゼロだった — mx68k_disassemble_line() で配線する。 */
+#include "../Core/px68k/x68k/d68k.h"
 #include "../Core/px68k/x68k/sram.h"
 #include "../Core/px68k/x68k/prop.h"
 #include "../Core/c68k/c68k.h"
@@ -9974,6 +9977,51 @@ static uint8_t p600_effective_kind(const P600Region* r) {
     if (!r) return MX68K_MEMKIND_BUSERR;
     if (!p600_gate_open(r->gate)) return MX68K_MEMKIND_NOT_INSTALLED;
     return r->kind;
+}
+
+/* P740: 逆アセンブル 1 命令。Core 同梱の Debabelizer(m68k_disassemble())は
+ * オペコード語+拡張語を連続して読み進むが、その過程で領域境界を一切意識しない。
+ * 開始アドレスだけを安全領域と確認しても、命令が長い場合は読取りの終端が隣接する
+ * 未安全領域(例: TVRAM $E7FFFF の直後にある内蔵I/O $E80000)へはみ出しうる
+ * ——そこを塞ぐため、開始アドレスが属する領域の残りバイト数が最悪ケース命令長を
+ * 下回る場合は、たとえ領域内であっても m68k_disassemble() を一切呼ばずに拒否する。
+ *
+ * MX68K_DASM_MAX_INSN_BYTES の導出 [training knowledge]: 68000 の最長命令は
+ * MOVE.L $abs32,$abs32(オペコード 2B + ソース 4B + デスティネーション 4B = 10B)。
+ * これに 2 バイトの安全余裕を足して 12 とした(書籍ページでの直接裏取りは未実施)。 */
+#define MX68K_DASM_MAX_INSN_BYTES 12u
+
+uint32_t mx68k_disassemble_line(uint32_t addr, char* out_text, uint32_t out_text_len) {
+    if (!out_text || out_text_len == 0) return 2;  /* 68000 命令の最小長 */
+
+    uint32_t a = addr & 0x00FFFFFFu;   /* 24bit 空間、他の P600 アクセサと同じ規約 */
+    const P600Region* r = p600_find_region(a);
+    uint8_t kind = p600_effective_kind(r);
+
+    /* ★安全ゲート: cpu_readmem24 経由の副作用(I/O ハンドシェイク進行等)を避けるため、
+     * Memory Viewer(P600)が「読める」と分類する領域(FLAT_SWAP/FLAT_RAW/DECODED =
+     * RAM/GVRAM/TVRAM/SRAM/CGROM/IPL-ROM)に限定し、IO_UNSAFE/BUSERR/NOT_INSTALLED は
+     * m68k_disassemble() を一切呼ばずプレースホルダを返す。加えて、開始アドレスが
+     * 安全領域内でもその領域の残りバイト数が最悪ケース命令長未満なら同様に拒否する。 */
+    if (!(kind == MX68K_MEMKIND_FLAT_SWAP ||
+          kind == MX68K_MEMKIND_FLAT_RAW  ||
+          kind == MX68K_MEMKIND_DECODED) ||
+        !r ||
+        (a - r->base) + MX68K_DASM_MAX_INSN_BYTES > r->size) {
+        snprintf(out_text, out_text_len, "(unreadable)");
+        return 2;
+    }
+
+    /* d68k.c は内部の g_dasm_str[100] + g_helper_str[100] を sprintf で連結するため
+     * 呼出し側バッファは 256 バイト以上を推奨(d68k.c:169-170)。 */
+    char buf[256];
+    buf[0] = '\0';
+    int32_t len = m68k_disassemble(buf, (int32_t)a);
+    if (len < 2) len = 2;  /* 防御的フロア。68000 命令は常に偶数長・最小 2 バイト */
+
+    strncpy(out_text, buf, (size_t)out_text_len - 1);
+    out_text[out_text_len - 1] = '\0';
+    return (uint32_t)len;
 }
 
 /* 1 バイト読む。成功=1 / 実体が無い・境界外=0(呼出し側が 0xFF + BUSERR へ倒す)。 */

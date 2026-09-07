@@ -1048,6 +1048,19 @@ typedef struct {
  * 同じ基準にするため。 */
 int mx68k_get_region_map(MX68KRegionInfo* out, int max);
 
+/* P740: addr の 1 命令を逆アセンブルして out_text へ書き、その命令長(バイト数)を返す。
+ * 中身は Core 同梱の Debabelizer(d68k.c、m68k_disassemble())で、読み取りは
+ * cpu_readmem24 を経由する。そのため上の mx68k_read_memory_bytes() とは異なり
+ *   (a) P600 のリージョン分類で「読める」種別(FLAT_SWAP / FLAT_RAW / DECODED)に
+ *       限定し、I/O 窓・未装着・未マップ窓では逆アセンブラを一切呼ばない
+ *   (b) 命令が領域境界を越えて隣の未安全領域まで読み進むことが無いよう、
+ *       領域末尾から最悪ケース命令長ぶんの余裕が無い開始アドレスも拒否する
+ * という 2 段の安全ゲートを内側に持つ。拒否時は out_text に "(unreadable)" を書き 2 を返す。
+ * ★呼出し側は必ず EmulatorEngine.withEmulationLock で囲むこと — cpu_readmem24 は
+ *   グローバル可変状態(BusErrFlag)を無条件にリセットするため、mx68k_run_frame() 実行中の
+ *   DMAC/MIDI/SCSI がそのフラグを読む処理と競合しうる。 */
+uint32_t mx68k_disassemble_line(uint32_t addr, char* out_text, uint32_t out_text_len);
+
 /* P211: current guest VSYNC rate in Hz (CRTC R20 bit4: hi-res 55.46 / lo-res 61.46).
  * Used by the Swift frame driver to pace mx68k_run_frame() to wall-clock. */
 double mx68k_get_vsync_hz(void);
