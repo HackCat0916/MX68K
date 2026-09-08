@@ -194,7 +194,7 @@ struct LogViewerView: View {
     private var controls: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                TextField("Filter (e.g. P657, DMAC)", text: $filterText)
+                TextField("Filter (e.g. FDD, SCSI)", text: $filterText)
                     .frame(width: 220)
                 Picker("Max lines", selection: $model.maxLines) {
                     ForEach(LogViewerModel.maxLinesOptions, id: \.self) { n in
