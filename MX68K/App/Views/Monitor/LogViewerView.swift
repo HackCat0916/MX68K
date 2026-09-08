@@ -21,8 +21,15 @@ struct LogLine: Identifiable {
 final class LogViewerModel: ObservableObject {
     /// 初回シード読み込みの上限。大きすぎるログでも起動が重くならない安全マージン。
     static let seedBytes: UInt64 = 64 * 1024
-    /// 表示保持行数の上限。超過分は古い行から捨てる。
-    static let maxLines = 2000
+    /// Picker 用の保持行数プリセット。
+    static let maxLinesOptions: [Int] = [500, 1000, 2000, 5000, 10000, 20000]
+
+    /// 表示保持行数の上限。超過分は古い行から捨てる(P745 でユーザー可変化)。
+    /// ★`didSet` で即座に切り詰める: 上限を下げた場合、次のポーリング(0.5 秒)を
+    ///   待たずにその場で古い行が消えることをユーザーは期待する。
+    @Published var maxLines: Int = 2000 {
+        didSet { trimToMaxLines() }
+    }
 
     @Published private(set) var lines: [LogLine] = []
     @Published private(set) var fileMissing = false
@@ -60,6 +67,19 @@ final class LogViewerModel: ObservableObject {
 
     func clearDisplay() {
         lines = []
+    }
+
+    /// 配列を保持上限まで切り詰めて返す(`lines` へは書き込まない)。
+    /// ★`ingest()` が `lines` へ 1 回だけ代入する構造を保つための純関数
+    ///   ——ここで `lines` を直接触ると `@Published` の二重 publish になる。
+    private func trimmed(_ array: [LogLine]) -> [LogLine] {
+        guard array.count > maxLines else { return array }
+        return Array(array.suffix(maxLines))
+    }
+
+    /// Picker で上限が下げられた直後に、既存の `lines` をその場で切り詰める専用パス。
+    private func trimToMaxLines() {
+        lines = trimmed(lines)
     }
 
     private func openAndSeed() {
@@ -129,10 +149,7 @@ final class LogViewerModel: ObservableObject {
             newLines.append(LogLine(id: nextID, text: p))
             nextID += 1
         }
-        if newLines.count > Self.maxLines {
-            newLines.removeFirst(newLines.count - Self.maxLines)
-        }
-        lines = newLines
+        lines = trimmed(newLines)
     }
 }
 
@@ -140,6 +157,10 @@ struct LogViewerView: View {
     @StateObject private var model = LogViewerModel()
     @State private var filterText = ""
     @State private var autoScroll = true
+    /// Clear/Copy の操作結果を短時間だけ表示する(P745)。
+    @State private var statusMessage: String? = nil
+    /// 連打時に古いタイマーが新しいメッセージを消さないための世代カウンタ。
+    @State private var statusGeneration = 0
 
     private var filteredLines: [LogLine] {
         guard !filterText.isEmpty else { return model.lines }
@@ -159,7 +180,7 @@ struct LogViewerView: View {
             } else {
                 logList
             }
-            Text("\(filteredLines.count) / \(model.lines.count) lines shown (last \(LogViewerModel.maxLines) retained)")
+            Text("\(filteredLines.count) / \(model.lines.count) lines shown (last \(model.maxLines) retained)")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -171,15 +192,61 @@ struct LogViewerView: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 8) {
-            TextField("Filter (e.g. P657, DMAC)", text: $filterText)
-                .frame(width: 220)
-            Toggle(isOn: $autoScroll) { Text("Auto-scroll") }
-            Toggle(isOn: $model.isPaused) {
-                model.isPaused ? Text("Resume") : Text("Pause")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                TextField("Filter (e.g. P657, DMAC)", text: $filterText)
+                    .frame(width: 220)
+                Picker("Max lines", selection: $model.maxLines) {
+                    ForEach(LogViewerModel.maxLinesOptions, id: \.self) { n in
+                        Text("\(n)").tag(n)
+                    }
+                }
+                .frame(width: 140)
+                .help("Number of most-recent lines retained in this window. Lowering this immediately discards older lines; debug.log itself is untouched.")
+                Toggle(isOn: $autoScroll) { Text("Auto-scroll") }
+                    .help("Automatically scrolls to the newest line as it arrives.")
+                Toggle(isOn: $model.isPaused) {
+                    model.isPaused ? Text("Resume") : Text("Pause")
+                }
+                .help("Pauses live tailing. Log rotation (e.g. debug.log being cleared) is still detected and refreshes the view even while paused.")
+                Button("Clear") {
+                    let n = model.lines.count
+                    model.clearDisplay()
+                    showStatus(String(localized: "Cleared \(n) lines from view"))
+                }
+                .help("Clears the lines currently shown in this window. debug.log itself is untouched — tailing continues, so new lines keep appearing.")
+                Button("Copy") {
+                    let n = filteredLines.count
+                    guard n > 0 else {
+                        showStatus(String(localized: "Nothing to copy"))
+                        return
+                    }
+                    copyToClipboard()
+                    let message = n == 1
+                        ? String(localized: "Copied 1 line to clipboard")
+                        : String(localized: "Copied \(n) lines to clipboard")
+                    showStatus(message)
+                }
+                .help("Copies the lines currently visible (after the filter above) to the clipboard as plain text.")
             }
-            Button("Clear") { model.clearDisplay() }
-            Button("Copy") { copyToClipboard() }
+            // 出現/消失でレイアウトが揺れないよう、常に 1 行ぶんの高さを確保する。
+            Text(statusMessage ?? " ")
+                .font(.caption)
+                .foregroundColor(.accentColor)
+                .frame(height: 14, alignment: .leading)
+        }
+    }
+
+    /// 操作結果メッセージを 1.5 秒だけ表示する。世代カウンタにより、連打時に
+    /// 古いタイマーが新しいメッセージを消してしまうことを防ぐ。
+    private func showStatus(_ text: String) {
+        statusMessage = text
+        statusGeneration += 1
+        let generation = statusGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            if statusGeneration == generation {
+                statusMessage = nil
+            }
         }
     }
 

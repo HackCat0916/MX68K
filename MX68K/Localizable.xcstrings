@@ -5250,6 +5250,106 @@
           }
         }
       }
+    },
+    "Max lines": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保持行数"
+          }
+        }
+      }
+    },
+    "Cleared %lld lines from view": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "表示から %lld 行をクリアしました"
+          }
+        }
+      }
+    },
+    "Copied 1 line to clipboard": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 行をクリップボードへコピーしました"
+          }
+        }
+      }
+    },
+    "Copied %lld lines to clipboard": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 行をクリップボードへコピーしました"
+          }
+        }
+      }
+    },
+    "Nothing to copy": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピーする行がありません"
+          }
+        }
+      }
+    },
+    "Number of most-recent lines retained in this window. Lowering this immediately discards older lines; debug.log itself is untouched.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このウィンドウに保持する最新行の数。値を下げると古い行は即座に破棄されます(debug.log 自体は変更されません)。"
+          }
+        }
+      }
+    },
+    "Automatically scrolls to the newest line as it arrives.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新しい行が届くたびに自動で最新行までスクロールします。"
+          }
+        }
+      }
+    },
+    "Pauses live tailing. Log rotation (e.g. debug.log being cleared) is still detected and refreshes the view even while paused.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ライブテールを一時停止します。ログのローテーション(debug.log がクリアされた場合など)は一時停止中でも検出され、表示が再読み込みされます。"
+          }
+        }
+      }
+    },
+    "Clears the lines currently shown in this window. debug.log itself is untouched — tailing continues, so new lines keep appearing.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このウィンドウに表示中の行をクリアします。debug.log 自体は変更されず、テールも継続するため新しい行は表示され続けます。"
+          }
+        }
+      }
+    },
+    "Copies the lines currently visible (after the filter above) to the clipboard as plain text.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在表示中の行(上のフィルタ適用後)をプレーンテキストとしてクリップボードへコピーします。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
