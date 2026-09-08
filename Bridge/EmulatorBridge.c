@@ -9216,6 +9216,36 @@ void mx68k_get_crtc_status(MX68KCRTCStatus* status) {
     status->crtc_vend     = CRTC_VEND;
 }
 
+/* P742: DMAC レジスタモニタ。Core の dmac_ch DMA[4](Core/px68k/x68k/dmac.h)を
+ * 4ch 分そのままコピーするだけの read-only アクセサ。DMA[] へ書き込むのは
+ * Core 側の DMA_Read/DMA_Write/DMA_Exec のみで、それらはエミュレーション
+ * スレッド上で動く —— 本関数もエミュレーションスレッドから毎フレーム
+ * (dmacVisible が立っている間だけ)呼ばれるため、追加のロックは不要。 */
+void mx68k_get_dmac_status(MX68KDMACStatus* status) {
+    if (!status) return;
+    memset(status, 0, sizeof(*status));
+    for (int i = 0; i < 4; i++) {
+        status->ch[i].csr = DMA[i].CSR;
+        status->ch[i].cer = DMA[i].CER;
+        status->ch[i].dcr = DMA[i].DCR;
+        status->ch[i].ocr = DMA[i].OCR;
+        status->ch[i].scr = DMA[i].SCR;
+        status->ch[i].ccr = DMA[i].CCR;
+        status->ch[i].mtc = DMA[i].MTC;
+        status->ch[i].mar = DMA[i].MAR;
+        status->ch[i].dar = DMA[i].DAR;
+        status->ch[i].btc = DMA[i].BTC;
+        status->ch[i].bar = DMA[i].BAR;
+        status->ch[i].niv = DMA[i].NIV;
+        status->ch[i].eiv = DMA[i].EIV;
+        status->ch[i].mfc = DMA[i].MFC;
+        status->ch[i].cpr = DMA[i].CPR;
+        status->ch[i].dfc = DMA[i].DFC;
+        status->ch[i].bfc = DMA[i].BFC;
+        status->ch[i].gcr = DMA[i].GCR;
+    }
+}
+
 void mx68k_get_vc_status(MX68KVCStatus* status) {
     if (!status) return;
     memset(status, 0, sizeof(*status));

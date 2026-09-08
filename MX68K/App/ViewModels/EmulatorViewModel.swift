@@ -47,6 +47,9 @@ class EmulatorViewModel: ObservableObject {
     @Published var crtcStatus = MX68KCRTCStatus()   // P286
     @Published var vcStatus = MX68KVCStatus()        // P286
     @Published var bgStatus = MX68KBGStatus()        // P286
+    /// P742 — DMAC(HD63450)4ch の生レジスタ値。
+    /// パネル表示中のみ毎フレーム更新される(EmulatorEngine.dmacVisible)。
+    @Published var dmacStatus = MX68KDMACStatus()    // P742
     /// P550 — パレットモニタ(テキスト面256色/グラフィック面256色/コントラスト)。
     /// パネル表示中のみ毎フレーム更新される(EmulatorEngine.paletteVisible)。
     @Published var paletteStatus = MX68KPaletteStatus()   // P550
@@ -325,6 +328,9 @@ class EmulatorViewModel: ObservableObject {
         }
         engine.onBGStatusUpdate = { [weak self] s in
             self?.bgStatus = s
+        }
+        engine.onDMACStatusUpdate = { [weak self] s in   // P742
+            self?.dmacStatus = s
         }
         engine.onPaletteStatusUpdate = { [weak self] s in   // P550
             self?.paletteStatus = s

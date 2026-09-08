@@ -70,6 +70,9 @@ class EmulatorEngine: ObservableObject {
     var vcVisible: Bool = false        // ⌘⌥5
     var bgVisible: Bool = false        // ⌘⌥6
     var perfVisible: Bool = false      // ⌘⌥7
+    /* P742: DMACレジスタモニタ専用の可視性ゲート。CRTC/VC/BG と同じく
+     * DMACMonitorView の .onAppear/.onDisappear が設定する。 */
+    var dmacVisible: Bool = false      // ⌘⌥U
     /* P550: パレットモニタ専用の可視性フラグ。CRTC/VC/BG と同じく、
      * PaletteMonitorView の .onAppear/.onDisappear が設定する。他モニタの
      * フラグに相乗りしない(相乗りすると「BG Viewer を開いている間だけ
@@ -210,6 +213,7 @@ class EmulatorEngine: ObservableObject {
     var onCRTCStatusUpdate: ((MX68KCRTCStatus) -> Void)?   // P286
     var onVCStatusUpdate: ((MX68KVCStatus) -> Void)?       // P286
     var onBGStatusUpdate: ((MX68KBGStatus) -> Void)?       // P286
+    var onDMACStatusUpdate: ((MX68KDMACStatus) -> Void)?   // P742
     var onPaletteStatusUpdate: ((MX68KPaletteStatus) -> Void)?   // P550
     var onStorageStatusUpdate: ((EmulatorStorageStatus) -> Void)?   // P692
     var onMidiStatusUpdate: ((EmulatorMIDIStatus) -> Void)?         // P693
@@ -764,6 +768,13 @@ class EmulatorEngine: ObservableObject {
             var crtcStatus = MX68KCRTCStatus()
             mx68k_get_crtc_status(&crtcStatus)
             DispatchQueue.main.async { [weak self] in self?.onCRTCStatusUpdate?(crtcStatus) }
+        }
+        // P742: DMACレジスタモニタ。CRTC等と同型(可視時のみ、同一フレーム内で
+        // エミュレーションスレッド自身がスナップショットし main へディスパッチ)。
+        if dmacVisible {
+            var dmacStatus = MX68KDMACStatus()
+            mx68k_get_dmac_status(&dmacStatus)
+            DispatchQueue.main.async { [weak self] in self?.onDMACStatusUpdate?(dmacStatus) }
         }
         if vcVisible {
             var vcStatus = MX68KVCStatus()
