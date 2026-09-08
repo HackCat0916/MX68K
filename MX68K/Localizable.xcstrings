@@ -191,6 +191,36 @@
         }
       }
     },
+    "DMAC": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DMAC"
+          }
+        }
+      }
+    },
+    "DMAC Registers": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DMAC レジスタ"
+          }
+        }
+      }
+    },
+    "DMAC Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DMACビューア"
+          }
+        }
+      }
+    },
     "Performance": {
       "localizations": {
         "ja": {

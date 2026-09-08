@@ -693,6 +693,29 @@ typedef struct {
 } MX68KBGStatus;
 void mx68k_get_bg_status(MX68KBGStatus* status);
 
+/* P742: DMAC(HD63450 / MC68450 相当)レジスタモニタ。
+ * 既存モニタ API(mx68k_get_crtc_status 等)と同じ「Core の extern 実体を
+ * ロックなしでスナップショットコピーする」契約。read-only —— Core 状態は
+ * 一切変更しない(dmac_ch DMA[4] の単純なメンバ読み出しのみで、
+ * Memory_ReadB / BusErrFlag のいずれも経由しない)。
+ * 値は生のレジスタ値をそのまま渡す(ビット単位の意味的デコードは
+ * 本サイクルのスコープ外 —— Swift 側で 16 進表示する)。 */
+typedef struct {
+    uint8_t  csr, cer, dcr, ocr, scr, ccr;
+    uint16_t mtc;
+    uint32_t mar;
+    uint32_t dar;
+    uint16_t btc;
+    uint32_t bar;
+    uint8_t  niv, eiv, mfc, cpr, dfc, bfc, gcr;
+} MX68KDMACChannelStatus;
+
+typedef struct {
+    MX68KDMACChannelStatus ch[4];
+} MX68KDMACStatus;
+
+void mx68k_get_dmac_status(MX68KDMACStatus* status);
+
 /* P550: パレットモニタ。既存モニタAPI(mx68k_get_crtc_status 等)と同じ
  * 「ロックなしスナップショットコピー」契約。read-only(Core状態は一切変更しない)。
  * text_pal/grph_pal の各要素は px68k ネイティブの 32bit パレット語 0xRRGGBB0A —

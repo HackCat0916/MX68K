@@ -135,6 +135,11 @@ struct MX68KApp: App {
             CRTCMonitorView()
                 .environmentObject(emulatorViewModel)
         }
+        // P742 — DMAC(HD63450)4ch の生レジスタダンプ。
+        Window("DMAC", id: "monitor-dmac") {
+            DMACMonitorView()
+                .environmentObject(emulatorViewModel)
+        }
         Window("Video Controller", id: "monitor-vc") {
             VideoControllerMonitorView()
                 .environmentObject(emulatorViewModel)
@@ -585,6 +590,13 @@ struct MonitorCommands: Commands {
                 // P550 — パレットモニタ(⌘⌥P、未使用キーを新規割当)。
                 Button("Palette Viewer") { openWindow(id: "monitor-palette") }
                     .keyboardShortcut("p", modifiers: [.command, .option])
+                // P742 — DMACレジスタモニタ(⌘⌥U、未使用キーを新規割当)。
+                // ★"D"(DMAC の頭文字)は macOS システム標準の ⌥⌘D(Dock の自動的に
+                //   非表示/表示)と衝突するため、P692(Storage Viewer)の前例に倣い採らない。
+                //   "M" も同じく ⌥⌘M(ウインドウをしまう)と衝突する。残る未使用キー
+                //   {f/h/j/q/u/v/w/x/z} はいずれも語呂合わせが無いため機械的に "U" を選んだ。
+                Button("DMAC Viewer") { openWindow(id: "monitor-dmac") }
+                    .keyboardShortcut("u", modifiers: [.command, .option])
             }
 
             // Sound(音源系モニタ) — P696 で Device から分離。
