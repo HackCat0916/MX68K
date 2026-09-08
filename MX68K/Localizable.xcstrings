@@ -251,6 +251,66 @@
         }
       }
     },
+    "Log Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ログビューア"
+          }
+        }
+      }
+    },
+    "Filter (e.g. P657, DMAC)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フィルタ(例: P657、DMAC)"
+          }
+        }
+      }
+    },
+    "Auto-scroll": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動スクロール"
+          }
+        }
+      }
+    },
+    "Resume": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再開"
+          }
+        }
+      }
+    },
+    "Copy": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピー"
+          }
+        }
+      }
+    },
+    "debug.log not found yet (Debug builds only — Release builds do not write this file).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "debug.log はまだ存在しません(Debug ビルド専用 — Release ビルドではこのファイルは書き出されません)。"
+          }
+        }
+      }
+    },
     "MFP — Interrupt": {
       "localizations": {
         "ja": {
