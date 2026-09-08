@@ -152,8 +152,23 @@ void debug_log(const char* fmt, ...) {
     s_debug_log_call_count++;   /* P529 */
     debug_log_init();
 
+    /* P747: 各行に発生時刻(ミリ秒精度)を付与——ログビューワー(P744)
+     * での可読性向上のためのユーザー要望。ウォールクロック
+     * (CLOCK_REALTIME)を使い、実際にdebug_log()が呼ばれた瞬間の
+     * 時刻を記録する(スタックローカル変数のみで完結するためロック
+     * 不要——localtime_r()はリエントラント版)。 */
+    struct timespec p747_ts;
+    clock_gettime(CLOCK_REALTIME, &p747_ts);
+    struct tm p747_tm;
+    localtime_r(&p747_ts.tv_sec, &p747_tm);
+    char p747_ts_buf[16];
+    snprintf(p747_ts_buf, sizeof(p747_ts_buf), "%02d:%02d:%02d.%03ld",
+             p747_tm.tm_hour, p747_tm.tm_min, p747_tm.tm_sec,
+             (long)(p747_ts.tv_nsec / 1000000));
+
     va_list args;
     va_start(args, fmt);
+    fprintf(stderr, "[%s] ", p747_ts_buf);
     vfprintf(stderr, fmt, args);
     va_end(args);
 
@@ -161,6 +176,7 @@ void debug_log(const char* fmt, ...) {
         pthread_mutex_lock(&debug_log_mutex);
         va_list args2;
         va_start(args2, fmt);
+        fprintf(debug_log_file, "[%s] ", p747_ts_buf);
         vfprintf(debug_log_file, fmt, args2);
         va_end(args2);
         fflush(debug_log_file);
