@@ -239,6 +239,11 @@ struct MX68KApp: App {
             PerformanceMonitorView()
                 .environmentObject(emulatorViewModel)
         }
+        // P744 — log viewer (live tail of debug.log). Reads only the log file on
+        // disk, so it needs no environment objects and calls no bridge functions.
+        Window("Log Viewer", id: "monitor-log") {
+            LogViewerView()
+        }
 
         // P228 — on-screen software keyboard (full JIS replica). Talks to the
         // guest directly through the C bridge, so it needs no environment objects.
@@ -563,6 +568,10 @@ struct MonitorCommands: Commands {
             Menu("System") {
                 Button("Performance Viewer") { openWindow(id: "monitor-perf") }
                     .keyboardShortcut("7", modifiers: [.command, .option])
+                // P744 — ログビューワー(⌘⌥V、"log Viewer")。特定のサブシステムに
+                // 紐付かないメタ診断ツールのため Performance Viewer と同じ System へ。
+                Button("Log Viewer") { openWindow(id: "monitor-log") }
+                    .keyboardShortcut("v", modifiers: [.command, .option])
             }
 
             Menu("Processor") {
