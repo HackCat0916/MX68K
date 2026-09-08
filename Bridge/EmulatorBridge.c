@@ -482,6 +482,81 @@ static _Atomic unsigned int g_state_op_seq  = 0;   /* monotonically increasing, 
 static char         g_pending_state_path[1024] = {0};
 static int          do_save_state(const char* path);
 static int          do_load_state(const char* path);
+
+/* ---- P748: 実行制御(ブレークポイント/ステップ) ----------------------------
+ * ★同期方式は上の g_pending_* 群のどちらの流儀とも異なる第3の流儀である。
+ *   古い方(g_pending_hard_reset 等)は Swift 側がロック無しでセットする
+ *   fire-and-forget の plain volatile int、新しい方(P198/P481 の g_pending_save
+ *   等)は Swift 側がロック区間の**外**でポーリングするため _Atomic を要する。
+ *   P748 は Swift 側が必ず engine.withEmulationLock 区間内で読み書きし、
+ *   C 側も必ず mx68k_run_frame() / m68000_execute()(= 同じロック区間の内側)
+ *   でのみ触る。上記2パターンより厳格なので volatile で十分(_Atomic 不要)。 */
+volatile int      g_mx68k_dbg_active        = 0;
+volatile int      g_mx68k_dbg_stopped       = 0;
+volatile int      g_mx68k_dbg_bp_armed      = 0;
+volatile uint32_t g_mx68k_dbg_bp_addr       = 0;
+volatile int      g_mx68k_dbg_step_pending  = 0;
+volatile int      g_mx68k_dbg_bp_skip_once  = 0;
+volatile int      g_mx68k_dbg_stop_reason   = MX68K_DEBUG_STOP_NONE;
+volatile uint32_t g_mx68k_dbg_stop_pc       = 0;
+volatile uint64_t g_mx68k_dbg_bp_hits       = 0;
+volatile uint64_t g_mx68k_dbg_steps         = 0;
+volatile uint64_t g_mx68k_dbg_armed_chunks  = 0;
+
+/* ★単一の再計算点。active はここ以外で書かない
+ * (唯一の例外は m68000_bridge.c の mx68k_dbg_stop() で、stopped を 1 にすると
+ *  同時に active も 1 になるという同じ不変条件をその場で満たすためである)。 */
+static void dbg_recalc_active(void) {
+    g_mx68k_dbg_active = (g_mx68k_dbg_bp_armed ||
+                          g_mx68k_dbg_step_pending ||
+                          g_mx68k_dbg_stopped) ? 1 : 0;
+}
+
+void mx68k_debug_set_breakpoint(uint32_t addr) {
+    g_mx68k_dbg_bp_addr  = addr & 0x00FFFFFFu;
+    g_mx68k_dbg_bp_armed = 1;
+    dbg_recalc_active();
+    debug_log("[P748-DBG] set bp=0x%06x\n", (unsigned)g_mx68k_dbg_bp_addr);
+}
+
+void mx68k_debug_clear_breakpoint(void) {
+    g_mx68k_dbg_bp_armed = 0;
+    dbg_recalc_active();
+    debug_log("[P748-DBG] clear bp\n");
+}
+
+void mx68k_debug_request_step(void) {
+    g_mx68k_dbg_step_pending = 1;
+    g_mx68k_dbg_bp_skip_once = 1;   /* 停止中の PC に立っている bp で即再停止しない */
+    g_mx68k_dbg_stopped      = 0;
+    g_mx68k_dbg_stop_reason  = MX68K_DEBUG_STOP_NONE;
+    dbg_recalc_active();
+    debug_log("[P748-DBG] step requested\n");
+}
+
+void mx68k_debug_request_continue(void) {
+    g_mx68k_dbg_step_pending = 0;
+    g_mx68k_dbg_bp_skip_once = 1;   /* ★同上。これが無いと continue が即座に同じ bp を再ヒットし進まない */
+    g_mx68k_dbg_stopped      = 0;
+    g_mx68k_dbg_stop_reason  = MX68K_DEBUG_STOP_NONE;
+    dbg_recalc_active();
+    debug_log("[P748-DBG] continue\n");
+}
+
+int mx68k_debug_is_stopped(void) { return g_mx68k_dbg_stopped; }
+
+void mx68k_debug_get_status(MX68KDebugStatus* out) {
+    if (!out) return;
+    out->armed        = g_mx68k_dbg_bp_armed;
+    out->bp_addr      = g_mx68k_dbg_bp_addr;
+    out->stopped      = g_mx68k_dbg_stopped;
+    out->stop_reason  = g_mx68k_dbg_stop_reason;
+    out->stop_pc      = g_mx68k_dbg_stop_pc;
+    out->cpu_halted   = mx68k_debug_cpu_halted();   /* m68000_bridge.c 側の小関数、C68K を直接見る */
+    out->bp_hit_count = g_mx68k_dbg_bp_hits;
+    out->step_count   = g_mx68k_dbg_steps;
+    out->armed_chunks = g_mx68k_dbg_armed_chunks;
+}
 static int  g_machine_type    = 0;
 /* P268: 実際に配線を確定した機種(scsi_in_bridge_install 実行時に記録)。
  * g_machine_type は設定「適用」で即時書き換わるが、実配線は次の init/hard_reset
@@ -1776,6 +1851,19 @@ static void p504_dump_sram_boot_fields(const char* tag) {
 // ---- reset ----
 void mx68k_reset_hard(void) {
     debug_log("[MX68K] mx68k_reset_hard() START\n");
+
+    /* P748: 実行制御の「一時的」な状態だけをリセットで解除する。
+     * 停止中に ⌘R を押した場合、これが無いとリセット後も CPU が止まったままで、
+     * しかも Swift 側は自分が pause させたと思っていないため状態不整合になる。
+     * ★武装アドレス(g_mx68k_dbg_bp_addr / _bp_armed)とカウンタ類は**保持**する
+     *   —— 「リセットして同じ所へ再度到達するのを見る」使い方が自然なため。
+     * mx68k_reset_soft() は本関数を呼ぶだけなので(:2593)、ここ 1 箇所で
+     * ハード/ソフト両方のリセット経路を覆う。 */
+    g_mx68k_dbg_stopped      = 0;
+    g_mx68k_dbg_step_pending = 0;
+    g_mx68k_dbg_bp_skip_once = 0;
+    g_mx68k_dbg_stop_reason  = MX68K_DEBUG_STOP_NONE;
+    dbg_recalc_active();
 
     /* P146/P221b: Config.XVIMode is never initialized in the MX Bridge
      * (Config={0} in winx68k_compat.c), so it must be set explicitly. The IPLROM

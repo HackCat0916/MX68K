@@ -29823,6 +29823,33 @@ static void mx68k_synth_buserror(uint32_t fault_addr)
 }
 #endif
 
+/* ====================================================================
+ *  P748: 実行制御(ブレークポイント / ステップ実行)のヘルパ。
+ *  状態そのものは EmulatorBridge.c 側のグローバルに置き、ここには
+ *  C68K を直接触る必要がある 2 つの小関数だけを置く。
+ * ==================================================================== */
+
+/* 停止の唯一の記録点。停止理由と「実際に読まれた生の PC」を対で残す
+ * (bp_addr との一致を標本自身が証明できるようにするため — Fix Plan
+ *  §自己反証可能性「条件付きトリガが依存する生値の併記」)。 */
+static void mx68k_dbg_stop(int reason, uint32_t pc) {
+    g_mx68k_dbg_stop_reason = reason;
+    g_mx68k_dbg_stop_pc     = pc;
+    g_mx68k_dbg_stopped     = 1;
+    g_mx68k_dbg_active      = 1;   /* stopped は active の構成要素 */
+    debug_log("[P748-DBG] stop reason=%d pc=0x%06x hits=%llu steps=%llu armed_chunks=%llu\n",
+              reason, (unsigned)pc,
+              (unsigned long long)g_mx68k_dbg_bp_hits,
+              (unsigned long long)g_mx68k_dbg_steps,
+              (unsigned long long)g_mx68k_dbg_armed_chunks);
+}
+
+/* EmulatorBridge.c は C68K を持たないため、HALT/WAIT 状態の取得だけここに置く。
+ * 読み取り専用・副作用ゼロ。 */
+int mx68k_debug_cpu_halted(void) {
+    return (C68K.Status & (C68K_HALTED | C68K_WAITING)) ? 1 : 0;
+}
+
 // P14-FIX: chunk size for per-chunk PC guard (large enough for performance,
 // small enough that a runaway PC cannot escape 24-bit space between checks).
 // At 16 MHz / 60 fps = ~266672 cycles/frame; 4096 cycles ≈ ~1000 instructions.
@@ -29850,6 +29877,54 @@ int32_t m68000_execute(int32_t cycles)
 #endif /* P82W_ENABLE */
     while (remaining > 0) {
         int32_t c = (remaining < chunk) ? remaining : chunk;
+
+        /* ===== P748: 実行制御ゲート ==========================================
+         * ★無武装(既定)では g_mx68k_dbg_active == 0 であり、このブロックは
+         *   「1回のロード + 分岐不成立」だけで抜ける。c にも chunk にも
+         *   触れないので、C68k_Exec へ渡す予算・命令列・割込み配送点・
+         *   per-chunk プローブ(P47-D ring / P47-D-DIAG-I-PCHIST / P602)の
+         *   観測タイミングはすべて従来とバイト同一である。
+         * ★上の chunk 決定(g_trace_enable)には**絶対に触れない**。
+         *   直上の P82-W コメントが警告するとおり、chunk 自体を縮めると
+         *   全 per-chunk プローブの観測タイミングが変わってしまう。
+         *   P748 はループ本体内の c のみを、武装時に限って書き換える。 */
+        if (g_mx68k_dbg_active) {
+            /* (1) 停止中: CPU を一切前進させない。
+             *     ★return ではなく break —— 唯一の return 経路直前にある
+             *     s_p657_in_execute = 0 の後始末を必ず通すため。 */
+            if (g_mx68k_dbg_stopped) break;
+
+            if (C68K.Status & (C68K_HALTED | C68K_WAITING)) {
+                /* (2) HALTED/WAITING: C68k_Exec は予算全額を返して何も実行しない
+                 *     (c68kexec.c:279)。ここで c=1 にすると executed=1 のまま
+                 *     PC が永久に動かず、step が無反応になる。step 要求は
+                 *     消費して「HALTED で止まっている」と明示的に報告する。 */
+                if (g_mx68k_dbg_step_pending) {
+                    g_mx68k_dbg_step_pending = 0;
+                    mx68k_dbg_stop(MX68K_DEBUG_STOP_HALTED, MX68KQ_GUEST_PC());
+                    break;
+                }
+                /* bp 武装のみの場合は c を変えず通常実行へ流す
+                 * (HALT 中は PC が変化しないので取りこぼす bp は無い)。 */
+            } else {
+                /* (3) ブレークポイント判定は C68k_Exec の**前**。
+                 *     = 「指定アドレスの命令を実行する前に止まる」という仕様。 */
+                if (g_mx68k_dbg_bp_armed && !g_mx68k_dbg_bp_skip_once &&
+                    MX68KQ_GUEST_PC() == g_mx68k_dbg_bp_addr) {
+                    g_mx68k_dbg_bp_hits++;
+                    mx68k_dbg_stop(MX68K_DEBUG_STOP_BREAKPOINT, g_mx68k_dbg_bp_addr);
+                    break;
+                }
+                g_mx68k_dbg_bp_skip_once = 0;   /* 1チャンクだけ有効 */
+
+                /* (4) 単命令粒度へ。★c は必ず 1 以上
+                 *     (c68kexec.c:217-223 — 0 以下は何も実行せず即 return し、
+                 *      既存の if (executed <= 0) break で CPU が停止する)。 */
+                c = 1;
+                g_mx68k_dbg_armed_chunks++;   /* 自己反証用の分母 */
+            }
+        }
+        /* ===== P748 ここまで ================================================= */
 #if P106_ENABLE
         /* P106-SINGLESTEP-ANCHOR: gate。実 flip 捕捉 (s_p106_done) までは、live A7==$1FF8 を
          * 検出した chunk だけ 1 命令に縮め (gated single-step)、各 step 境界で entry_pc を exact 取得。
@@ -31828,6 +31903,20 @@ int32_t m68000_execute(int32_t cycles)
 #endif /* P82R_ENABLE */
         remaining -= executed;
         if (executed > 0) s_p657_exec_consumed += executed;   /* P657 */
+
+        /* P748: step 1命令ぶん実行し終えた → ここで停止する。
+         * ★CHECK_INT(c68kexec.c:232/348)により、この1ステップが
+         *   ユーザー命令ではなく例外エントリになっていることがある。
+         *   本サイクルはそれを**許容し、隠さない**——停止後の PC を
+         *   そのまま表示・逆アセンブルするので、例外ハンドラへ飛んだ
+         *   ことが画面上で見える(Fix Plan §3(d) / 残留リスク R-5)。
+         * ★ここも return ではなく break(s_p657_in_execute の後始末を通す)。 */
+        if (g_mx68k_dbg_active && g_mx68k_dbg_step_pending && !g_mx68k_dbg_stopped) {
+            g_mx68k_dbg_step_pending = 0;
+            g_mx68k_dbg_steps++;
+            mx68k_dbg_stop(MX68K_DEBUG_STOP_STEP, MX68KQ_GUEST_PC());
+            break;
+        }
 
         /* P47-D-DIAG-I-PCHIST: detect short-stack-frame push by SSP decrement
          * of 6 bytes (SR + 32-bit PC). Aggregate the upper byte of pushed PC

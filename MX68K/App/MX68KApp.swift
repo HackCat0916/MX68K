@@ -130,6 +130,14 @@ struct MX68KApp: App {
                 .environmentObject(emulatorViewModel)
         }
 
+        // P748 — 実行制御デバッガ(ブレークポイント / ステップ実行)。
+        // ★本アプリ唯一の「読取専用でない」モニタ。逆アセンブル経路を使うため
+        //   P740 と同じく EmulatorViewModel(= withEmulationLock の供給元)が要る。
+        Window("Debugger", id: "monitor-debugger") {
+            DebuggerView()
+                .environmentObject(emulatorViewModel)
+        }
+
         // P286 — developer monitor panels (CRTC / Video Controller / BG・Sprite).
         Window("CRTC", id: "monitor-crtc") {
             CRTCMonitorView()
@@ -597,6 +605,19 @@ struct MonitorCommands: Commands {
                 //   §5.4.3 の債務行「割込レベル 7-1」がプロセッサ系統の行であるため。
                 Button("Interrupt Registers Viewer") { openWindow(id: "monitor-intregs") }
                     .keyboardShortcut("f", modifiers: [.command, .option])
+                // P748 — 実行制御デバッガ(⌘⌥J)。
+                // ★"D"(Debugger の頭文字)は macOS システム標準の ⌥⌘D
+                //   (Dock を自動的に非表示/表示)と衝突するため使えない
+                //   —— P692 / P740 / P742 が独立に同じ理由で回避済み。
+                //   "H"/"W" も ⌥⌘H(ほかを隠す)・⌥⌘W(すべてのウインドウを
+                //   閉じる)と衝突する(P743 が記録済み)。残る未使用は
+                //   {j/q/x/z} で、"Q" は Quit 系、"X" は Cut 系、"Z" は Undo 系との
+                //   混同を避け、P742(DMAC で "U")の先例に倣い機械的に "J" を採る。
+                // ★配置が Device でなく Processor なのは、本機能が Docs/01 §5.4 の
+                //   プロセッサ系統に新規行を起こすものであり、かつ逆アセンブラ
+                //   (⌘⌥A)と隣接させることに実用上の意味があるため。
+                Button("Debugger") { openWindow(id: "monitor-debugger") }
+                    .keyboardShortcut("j", modifiers: [.command, .option])
             }
 
             // Device(表示制御系レジスタ/状態モニタ)
