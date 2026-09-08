@@ -261,12 +261,12 @@
         }
       }
     },
-    "Filter (e.g. P657, DMAC)": {
+    "Filter (e.g. FDD, SCSI)": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "フィルタ(例: P657、DMAC)"
+            "value": "フィルタ(例: FDD, SCSI)"
           }
         }
       }
