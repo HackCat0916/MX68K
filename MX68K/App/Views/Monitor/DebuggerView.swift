@@ -244,7 +244,7 @@ struct DebuggerView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 0) {
                 Text("Address").frame(width: 80, alignment: .leading)
-                Text("Bytes").frame(width: 200, alignment: .leading)
+                Text("Bytes").frame(width: 260, alignment: .leading)
                 Text("Instruction").frame(maxWidth: .infinity, alignment: .leading)
             }
             .foregroundColor(.secondary)
@@ -254,7 +254,7 @@ struct DebuggerView: View {
                     Text(String(format: "%06X", line.address))
                         .frame(width: 80, alignment: .leading)
                     Text(line.bytesText)
-                        .frame(width: 200, alignment: .leading)
+                        .frame(width: 260, alignment: .leading)
                     Text(line.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

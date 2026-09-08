@@ -372,6 +372,7 @@ class EmulatorViewModel: ObservableObject {
             self.engine.pause()
             self.statusText = "Paused"
             self.adpcmStatus.peak_level = 0
+            self.isPausedByDebugger = true   // P749: この一時停止はデバッガ由来。
             self.isPaused = true
         }
         engine.onSpriteListUpdate = { [weak self] entries in   // P326
@@ -757,12 +758,14 @@ class EmulatorViewModel: ObservableObject {
         audio.initialize(sampleRate: Double(mx68k_get_audio_sample_rate()))
         audio.start()
         mx68k_schedule_hard_reset()   // フレーム境界で安全にリセット(直接 mx68k_reset_hard は run_frame とレース)。
+        resumeIfPausedByDebugger()    // P749: リセットは Core 側のデバッガ停止を消すので Swift 側も同期させる。
         InputManager.shared.requestMouseHoming()   // P196: reset でゲストポインタ位置が失われるため原点合わせ。
         showTransientMessage(String(localized: "Hard Reset"))
     }
 
     func softReset() {
         mx68k_schedule_soft_reset()   // フレーム境界で安全にリセット(直接 mx68k_reset_soft は run_frame とレース)。
+        resumeIfPausedByDebugger()    // P749: リセットは Core 側のデバッガ停止を消すので Swift 側も同期させる。
         InputManager.shared.requestMouseHoming()   // P196: reset でゲストポインタ位置が失われるため原点合わせ。
         showTransientMessage(String(localized: "Soft Reset"))
     }
@@ -1131,6 +1134,17 @@ class EmulatorViewModel: ObservableObject {
     private var autoPauseRequests = 0
     private var didAutoPause = false
 
+    /// P749 — デバッガによる一時停止であることを追跡する専用フラグ。
+    /// ハード/ソフトリセットは Core 側のデバッガ停止状態を無条件でクリアする
+    /// (mx68k_reset_hard() 内、P748)。このフラグが立ったままだと Swift 側の
+    /// 一時停止が解除されず、エンジンが永久にフレームを実行しなくなる
+    /// (P748 T-8 で発見された回帰)。
+    /// ★didAutoPause とは別物である点が要: onDebuggerStopped は P229 の自動
+    /// 一時停止カウンタを乱さないため didAutoPause を false のままにする
+    /// (P748 Fix Plan §5)——この既存設計は変えずに、デバッガ由来の一時停止
+    /// だけをここで独立に追跡する。
+    private var isPausedByDebugger = false
+
     /// モーダル UI(設定シート・ファイル選択ダイアログ等)を開く直前に呼ぶ。
     func requestAutoPause() {
         autoPauseRequests += 1
@@ -1155,6 +1169,12 @@ class EmulatorViewModel: ObservableObject {
 
     func togglePause() {
         didAutoPause = false   // P229: 手動トグルは自動一時停止の追跡から所有権を奪う。
+        /* P749: 同じ「手動トグルは所有権を奪う」原則をデバッガ由来の一時停止にも
+         * 適用する。これが無いと、デバッガ停止 → Continue/Step ではなく一般の
+         * 一時停止トグルで再開 → 無関係な手動一時停止 → ハードリセット、という
+         * 経路でフラグが孤立して残り、後続のリセットが無関係な手動一時停止を
+         * 誤って強制解除してしまう(Code Review 指摘)。 */
+        isPausedByDebugger = false
         if isPaused {
             engine.resume()
             statusText = "Running"
@@ -1223,9 +1243,21 @@ class EmulatorViewModel: ObservableObject {
     private func resumeFromDebuggerStop() {
         guard isPaused else { return }
         didAutoPause = false
+        isPausedByDebugger = false   // P749: デバッガ由来の一時停止はここで解消。
         engine.resume()
         statusText = "Running"
         isPaused = false
+    }
+
+    /// P749 — ハード/ソフトリセットは Core 側のデバッガ停止状態を無条件で
+    /// クリアする(mx68k_reset_hard() 内)。Swift 側がデバッガ由来の一時停止の
+    /// ままだとエンジンが永久にフレームを実行しなくなるため、その場合に限り
+    /// 同期して解除する。★ユーザーが手動で一時停止した場合(isPausedByDebugger
+    /// == false)は一切触らない——手動一時停止までリセットで強制解除すると、
+    /// 「一時停止したままリセットしてゆっくり見たい」という既存の使い方を壊す。
+    private func resumeIfPausedByDebugger() {
+        guard isPausedByDebugger else { return }
+        resumeFromDebuggerStop()
     }
 
     /// P555 — ターボ(等倍 ⇔ 目標倍率)のワンタッチ切替。WebX68k の方式に倣い、
