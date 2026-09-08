@@ -354,6 +354,26 @@ class EmulatorViewModel: ObservableObject {
         engine.onKeyLEDUpdate = { [weak self] led in   // P695
             self?.keyLED = led
         }
+        /* P748 — 実行制御(ブレークポイント/ステップ)で CPU が止まったときの通知。
+         * 停止そのものは C 側で完結しているので、ここでやるのは Swift 側の
+         * 一時停止状態を実態に合わせることだけ。副作用の組は togglePause() の
+         * 「一時停止する側」と同一にし、didAutoPause は false のままにする
+         * (= 手動一時停止と同じ所有権。P229 の自動一時停止とは混ぜない)。 */
+        engine.onDebuggerStopped = { [weak self] in
+            guard let self else { return }
+            guard !self.isPaused else { return }
+            /* ★通知は main へ hop してから届くので、その間にユーザーが Step /
+             * Continue を押して既に再開している可能性がある。その場合に
+             * ここで pause してしまうと「stopped ではないのにフレームが
+             * 回らない」状態になるため、C 側が今も停止中であることを
+             * 確認してから一時停止する。 */
+            guard self.debuggerStatus().stopped != 0 else { return }
+            self.didAutoPause = false
+            self.engine.pause()
+            self.statusText = "Paused"
+            self.adpcmStatus.peak_level = 0
+            self.isPaused = true
+        }
         engine.onSpriteListUpdate = { [weak self] entries in   // P326
             self?.spriteList = entries
         }
@@ -1144,6 +1164,68 @@ class EmulatorViewModel: ObservableObject {
             adpcmStatus.peak_level = 0   // P484c: 一時停止中はサウンドモニタの Peak Level を表示上 0 にする
         }
         isPaused.toggle()
+    }
+
+    // MARK: - P748 実行制御デバッガ(ブレークポイント / ステップ実行)
+
+    /* すべて engine.withEmulationLock 区間で行う。C 側の状態は
+     * mx68k_run_frame() / m68000_execute()(= 同じロック区間の内側)からしか
+     * 触られないため、この規律を守る限り _Atomic は要らない(Fix Plan §2)。 */
+
+    func debuggerSetBreakpoint(_ addr: UInt32) {
+        engine.withEmulationLock { mx68k_debug_set_breakpoint(addr) }
+    }
+
+    func debuggerClearBreakpoint() {
+        engine.withEmulationLock { mx68k_debug_clear_breakpoint() }
+    }
+
+    func debuggerStatus() -> MX68KDebugStatus {
+        var s = MX68KDebugStatus()
+        engine.withEmulationLock { mx68k_debug_get_status(&s) }
+        return s
+    }
+
+    /// 1 命令だけ実行して再び停止する。
+    /// ★「C 側フラグを立ててからエンジンを再開する」の 2 段構えである点が要:
+    ///   一時停止中の駆動元は mx68k_run_frame() を呼ばず mx68k_pump_pending()
+    ///   だけを呼ぶため、step を pending 操作として積むと**永久に実行されない**
+    ///   (Fix Plan「調査スケッチからの意図的な逸脱」)。再開後 1 フレーム
+    ///   (約18ms)で 1 命令実行して再停止するので、体感は即時。
+    func debuggerStep() {
+        engine.withEmulationLock {
+            mx68k_debug_request_step()
+            engine.resetDebuggerStopLatch()
+        }
+        resumeFromDebuggerStop()
+    }
+
+    /// 停止を解除して通常実行へ戻る(次に bp に当たればまた止まる)。
+    func debuggerContinue() {
+        engine.withEmulationLock {
+            mx68k_debug_request_continue()
+            engine.resetDebuggerStopLatch()
+        }
+        resumeFromDebuggerStop()
+    }
+
+    /// 実行中に次の命令境界で止める。step 要求を立てるだけで実現できる
+    /// (エンジンは動いたままなので resume は不要)。
+    func debuggerBreakNow() {
+        engine.withEmulationLock {
+            mx68k_debug_request_step()
+            engine.resetDebuggerStopLatch()
+        }
+    }
+
+    /// 実行制御による停止からの再開。onDebuggerStopped が行った一時停止の
+    /// 副作用を逆に戻すだけの薄い関数(togglePause() の「再開する側」と同型)。
+    private func resumeFromDebuggerStop() {
+        guard isPaused else { return }
+        didAutoPause = false
+        engine.resume()
+        statusText = "Running"
+        isPaused = false
     }
 
     /// P555 — ターボ(等倍 ⇔ 目標倍率)のワンタッチ切替。WebX68k の方式に倣い、

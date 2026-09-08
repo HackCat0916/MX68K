@@ -442,6 +442,47 @@ class EmulatorEngine: ObservableObject {
                                geoMode: Int(mx68k_get_display_geo_mode()))
     }
 
+    // MARK: - P748 実行制御(ブレークポイント / ステップ実行)の停止通知
+
+    /// P748 — 実行制御による停止を ViewModel へ伝えるコールバック。
+    /// ★停止そのものは C 側(m68000_execute のゲート)で起きる。ここは
+    ///   「起きたことを Swift 側の一時停止状態へ反映する」ためだけの配線。
+    var onDebuggerStopped: (() -> Void)?
+
+    /// 立ち上がりエッジだけを通知するためのラッチ(停止中は毎フレーム
+    /// stopped==true が観測されるので、これが無いと通知が毎フレーム飛ぶ)。
+    ///
+    /// ★このプロパティへのアクセスは**必ず emulationLock 区間の内側**で行う。
+    ///   読み書きするのはエミュレーションスレッド(markDebuggerStopEdge)と
+    ///   メインスレッド(resetDebuggerStopLatch)の 2 者であり、ロック外だと
+    ///   データ競合になる。
+    private var debuggerStopNotified = false
+
+    /// P748 — 停止状態の立ち上がりエッジを検出し、「今回通知すべきか」を返す。
+    /// ★呼び出しは必ず emulationLock 区間の内側から(上記ラッチの規約)。
+    private func markDebuggerStopEdge(_ stopped: Bool) -> Bool {
+        if stopped {
+            if debuggerStopNotified { return false }
+            debuggerStopNotified = true
+            return true
+        }
+        debuggerStopNotified = false
+        return false
+    }
+
+    /// P748 — step / continue で C 側の stopped を倒すときに、同じロック区間で
+    /// エッジ検出ラッチも倒すための入口。
+    ///
+    /// ★これが無いと 2 回目以降の停止が通知されない: 停止 → pause の後は
+    ///   フレーム自体が回らないため「stopped == false」を観測する機会が無く、
+    ///   ラッチが立ったままになる。すると Step を押しても engine が再び
+    ///   pause されず、CPU は止まっているのにフレームだけが空転し続け
+    ///   (MFP/RTC が進み続け)、UI も "Running" のままになる。
+    /// ★呼び出し側は必ず withEmulationLock 区間の内側で呼ぶこと。
+    func resetDebuggerStopLatch() {
+        debuggerStopNotified = false
+    }
+
     private func runFrame() {
         /* P556: ノーウェイト中は駆動元を専用スレッドへ完全に委譲し、CVDisplayLink 側は
          * 本体(アキュムレータループ・モニタ取得・pending 消費)を一切実行しない。
@@ -521,8 +562,17 @@ class EmulatorEngine: ObservableObject {
              * (定常時は非競合なのでコストは無視できる)。ロック区間は
              * mx68k_run_frame() のみ——この関数の内部で render_begin/end と
              * pending-ops の消費が完結しており、Swift 側にそれらの別呼出しは無い。 */
-            emulationLock.withLock {
+            /* P748: 停止判定を mx68k_run_frame() と**同一のロック区間**で読む。
+             * 別区間で読むと 1 命令ぶんずれた瞬間の状態を見うる。コストは
+             * volatile 読み 1 回で、チャンク毎ではなくフレーム毎(約55回/秒)。
+             * エッジ検出も同区間で行う(ラッチの同期規約)。UI 通知だけは
+             * ロックの外で main へ hop する。 */
+            let notifyDebuggerStop: Bool = emulationLock.withLock {
                 mx68k_run_frame()
+                return markDebuggerStopEdge(mx68k_debug_is_stopped() != 0)
+            }
+            if notifyDebuggerStop {
+                DispatchQueue.main.async { [weak self] in self?.onDebuggerStopped?() }
             }
             let frameElapsed = CFAbsoluteTimeGetCurrent() - frameStart
             /* P556: perf カウンタの加算は共有メソッドへ抽出済み(ノーウェイトループ
@@ -1049,8 +1099,15 @@ class EmulatorEngine: ObservableObject {
                 continue
             }
             let frameStart = CFAbsoluteTimeGetCurrent()
-            emulationLock.withLock {
+            /* P748: ★駆動元は 2 系統あるので、こちらにも同じ停止判定を置く。
+             * 片方だけに配線するとノーウェイト/ターボ中だけブレークポイントが
+             * 効かないという欠陥になる(Fix Plan 残留リスク R-7 / テスト T-9)。 */
+            let notifyDebuggerStop: Bool = emulationLock.withLock {
                 mx68k_run_frame()
+                return markDebuggerStopEdge(mx68k_debug_is_stopped() != 0)
+            }
+            if notifyDebuggerStop {
+                DispatchQueue.main.async { [weak self] in self?.onDebuggerStopped?() }
             }
             let frameElapsed = CFAbsoluteTimeGetCurrent() - frameStart
             /* countOverBudget: false — ノーウェイトは意図的な最大速度実行であり

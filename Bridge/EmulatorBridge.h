@@ -3634,6 +3634,65 @@ void p602_workarea_snapshot(const char* tag);
 void p602_periodic_dump(void);
 #endif
 
+/* ================= P748: 実行制御(ブレークポイント / ステップ実行) =================
+ * ★設計の中核: 無武装時(既定)は g_mx68k_dbg_active == 0 であり、CPU 実行の
+ *   ホットパスに追加されるのは「1回のロード + 分岐不成立」のみ。チャンクサイズ
+ *   c にも chunk にも一切触れないため、ゲストの命令列・割込み配送点・
+ *   per-chunk プローブの観測タイミングはすべて従来とバイト同一に保たれる。
+ *   ——これは g_trace_enable(m68000_bridge.c:29838)が chunk そのものを 100 へ
+ *   縮めて全 per-chunk プローブの観測タイミングを変えてしまうのとは対照的であり、
+ *   その危険は m68000_bridge.c:29840-29845 の P82-W コメントが明示的に警告している。
+ *   P748 は同じ轍を踏まない。 */
+
+#define MX68K_DEBUG_BP_MAX           1   /* 本サイクルは同時1点のみ(将来拡張余地) */
+
+#define MX68K_DEBUG_STOP_NONE        0
+#define MX68K_DEBUG_STOP_BREAKPOINT  1
+#define MX68K_DEBUG_STOP_STEP        2
+#define MX68K_DEBUG_STOP_HALTED      3   /* STOP 命令等で CPU が停止中に step 要求された */
+
+typedef struct {
+    int      armed;         /* ブレークポイント武装中か */
+    uint32_t bp_addr;       /* 武装アドレス(24bit マスク済) */
+    int      stopped;       /* 実行制御により停止中か */
+    int      stop_reason;   /* MX68K_DEBUG_STOP_* */
+    uint32_t stop_pc;       /* ★停止時に実際に読まれた生の PC(bp_addr とは別欄) */
+    int      cpu_halted;    /* C68K.Status & (C68K_HALTED|C68K_WAITING) */
+    uint64_t bp_hit_count;  /* 分子: アドレス一致回数(累積) */
+    uint64_t step_count;    /* step により実行した命令の累計 */
+    uint64_t armed_chunks;  /* ★分母: 武装状態で単命令実行したチャンク総数 */
+} MX68KDebugStatus;
+
+/* すべて EmulatorEngine.withEmulationLock 区間から呼ぶこと。 */
+void mx68k_debug_set_breakpoint(uint32_t addr);   /* 武装(24bit へマスクして保持) */
+void mx68k_debug_clear_breakpoint(void);          /* 武装解除 */
+void mx68k_debug_request_step(void);              /* 1命令だけ実行して再停止する */
+void mx68k_debug_request_continue(void);          /* 停止を解除して実行再開 */
+void mx68k_debug_get_status(MX68KDebugStatus* out);
+
+/* ★これだけは毎フレーム呼ばれる。単純な volatile 読みで、副作用ゼロ。 */
+int  mx68k_debug_is_stopped(void);
+
+/* C68K を直接持つ m68000_bridge.c 側の小関数(EmulatorBridge.c からは C68K が
+ * 見えないため、cpu_halted の取得だけはあちらに置く)。 */
+int  mx68k_debug_cpu_halted(void);
+
+/* m68000_bridge.c のホットパスから読む共有状態(定義は EmulatorBridge.c)。
+ * g_mx68k_dbg_active は「bp 武装 or step 要求中 or 停止中」を setter 側で
+ * 合成した**単一フラグ**である。ホットパスで 3 つの条件を OR すると
+ * ロードが 3 回になるため、意図的に事前合成する。 */
+extern volatile int      g_mx68k_dbg_active;
+extern volatile int      g_mx68k_dbg_stopped;
+extern volatile int      g_mx68k_dbg_bp_armed;
+extern volatile uint32_t g_mx68k_dbg_bp_addr;
+extern volatile int      g_mx68k_dbg_step_pending;
+extern volatile int      g_mx68k_dbg_bp_skip_once;
+extern volatile int      g_mx68k_dbg_stop_reason;
+extern volatile uint32_t g_mx68k_dbg_stop_pc;
+extern volatile uint64_t g_mx68k_dbg_bp_hits;
+extern volatile uint64_t g_mx68k_dbg_steps;
+extern volatile uint64_t g_mx68k_dbg_armed_chunks;
+
 // ---- Debug Logging ----
 extern void debug_log(const char* fmt, ...);
 void mx68k_log(const char* msg);
