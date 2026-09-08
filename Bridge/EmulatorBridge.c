@@ -9246,6 +9246,36 @@ void mx68k_get_dmac_status(MX68KDMACStatus* status) {
     }
 }
 
+/* P743: 割込み系レジスタモニタ。Core の MFP[24](Core/px68k/x68k/mfp.h)・
+ * IOC_IntStat / IOC_IntVect(ioc.h)・SysPort[7](sysport.h)・C68K.IRQLine
+ * (Core/c68k/c68k.h:143)をそのままコピーするだけの read-only アクセサ。
+ * これらへ書き込むのは Core 側の MFP_Read/MFP_Write・IOC_Read/IOC_Write・
+ * SysPort_Read/SysPort_Write・CPU コア本体のみで、いずれもエミュレーション
+ * スレッド上で動く —— 本関数も intRegsVisible が立っている間だけ同スレッドから
+ * 毎フレーム呼ばれるため、追加のロックは不要(P742 DMAC と同型)。
+ *
+ * ★アクセサ関数(MFP_Read() / IOC_Read())を経由せず生のグローバル変数を直接
+ *   読むのは意図的な設計判断である。これは「実機の 68901 なら副作用があるかも
+ *   しれない」という一般論ではなく、MX 自身の Core に実際に副作用が存在すること
+ *   を確認済みであるため:
+ *     - Core/px68k/x68k/mfp.c の MFP_Read() は Reg23(UDR)読取り時に
+ *       `KeyIntFlag = 0;` を実行する(mfp.c:221-223)。
+ *     - Core/px68k/x68k/ioc.c の IOC_Read() は adr==0xe9c001 読取り時に
+ *       IOC_IntStat の bit 0x20(プリンタ Busy)をセット/クリアでトグルする
+ *       (ioc.c:70-83)。
+ *   つまりアクセサ経由でモニタ用の読取りを行うと、ゲストから見える状態
+ *   (キー割込みフラグ・プリンタ Busy ビット)をモニタを開いているだけで
+ *   毎フレーム変えてしまう。生変数の直接読取りはこの副作用を構造的に回避する。 */
+void mx68k_get_int_regs_status(MX68KIntRegsStatus* status) {
+    if (!status) return;
+    memset(status, 0, sizeof(*status));   /* 構造体パディングまで含めて初期化(P742 と同型) */
+    memcpy(status->mfp, MFP, sizeof(status->mfp));
+    status->ioc_int_stat = IOC_IntStat;
+    status->ioc_int_vect = IOC_IntVect;
+    memcpy(status->sysport, SysPort, sizeof(status->sysport));
+    status->cpu_irq_line = C68K.IRQLine;
+}
+
 void mx68k_get_vc_status(MX68KVCStatus* status) {
     if (!status) return;
     memset(status, 0, sizeof(*status));

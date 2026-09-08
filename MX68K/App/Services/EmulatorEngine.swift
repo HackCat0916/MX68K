@@ -73,6 +73,10 @@ class EmulatorEngine: ObservableObject {
     /* P742: DMACレジスタモニタ専用の可視性ゲート。CRTC/VC/BG と同じく
      * DMACMonitorView の .onAppear/.onDisappear が設定する。 */
     var dmacVisible: Bool = false      // ⌘⌥U
+    /* P743: 割込み系レジスタモニタ(MFP/IOC/システムポート/IRQLine)専用の
+     * 可視性ゲート。CRTC/VC/BG/DMAC と同じく InterruptRegistersMonitorView の
+     * .onAppear/.onDisappear が設定する。 */
+    var intRegsVisible: Bool = false   // ⌘⌥F
     /* P550: パレットモニタ専用の可視性フラグ。CRTC/VC/BG と同じく、
      * PaletteMonitorView の .onAppear/.onDisappear が設定する。他モニタの
      * フラグに相乗りしない(相乗りすると「BG Viewer を開いている間だけ
@@ -214,6 +218,7 @@ class EmulatorEngine: ObservableObject {
     var onVCStatusUpdate: ((MX68KVCStatus) -> Void)?       // P286
     var onBGStatusUpdate: ((MX68KBGStatus) -> Void)?       // P286
     var onDMACStatusUpdate: ((MX68KDMACStatus) -> Void)?   // P742
+    var onIntRegsStatusUpdate: ((MX68KIntRegsStatus) -> Void)?   // P743
     var onPaletteStatusUpdate: ((MX68KPaletteStatus) -> Void)?   // P550
     var onStorageStatusUpdate: ((EmulatorStorageStatus) -> Void)?   // P692
     var onMidiStatusUpdate: ((EmulatorMIDIStatus) -> Void)?         // P693
@@ -775,6 +780,14 @@ class EmulatorEngine: ObservableObject {
             var dmacStatus = MX68KDMACStatus()
             mx68k_get_dmac_status(&dmacStatus)
             DispatchQueue.main.async { [weak self] in self?.onDMACStatusUpdate?(dmacStatus) }
+        }
+        // P743: 割込み系レジスタモニタ(MFP/IOC/システムポート/IRQLine)。
+        // CRTC/DMAC と同型(可視時のみ、同一フレーム内でエミュレーションスレッド
+        // 自身がスナップショットし main へディスパッチ)。
+        if intRegsVisible {
+            var intRegsStatus = MX68KIntRegsStatus()
+            mx68k_get_int_regs_status(&intRegsStatus)
+            DispatchQueue.main.async { [weak self] in self?.onIntRegsStatusUpdate?(intRegsStatus) }
         }
         if vcVisible {
             var vcStatus = MX68KVCStatus()

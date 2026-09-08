@@ -221,6 +221,106 @@
         }
       }
     },
+    "Interrupt / MFP / IOC": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "割込み / MFP / IOC"
+          }
+        }
+      }
+    },
+    "Interrupt Registers": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "割込みレジスタ"
+          }
+        }
+      }
+    },
+    "Interrupt Registers Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "割込みレジスタビューア"
+          }
+        }
+      }
+    },
+    "MFP — Interrupt": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MFP — 割込み"
+          }
+        }
+      }
+    },
+    "MFP — GPIO": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MFP — GPIO"
+          }
+        }
+      }
+    },
+    "MFP — Timer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MFP — タイマー"
+          }
+        }
+      }
+    },
+    "MFP — Serial": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MFP — シリアル"
+          }
+        }
+      }
+    },
+    "I/O Controller": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I/O コントローラ"
+          }
+        }
+      }
+    },
+    "System Port": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システムポート"
+          }
+        }
+      }
+    },
+    "CPU": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU"
+          }
+        }
+      }
+    },
     "Performance": {
       "localizations": {
         "ja": {

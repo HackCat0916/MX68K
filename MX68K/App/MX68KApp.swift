@@ -140,6 +140,11 @@ struct MX68KApp: App {
             DMACMonitorView()
                 .environmentObject(emulatorViewModel)
         }
+        // P743 — 割込み系レジスタ(MFP / IOC / システムポート / CPU IRQLine)の生値ダンプ。
+        Window("Interrupt / MFP / IOC", id: "monitor-intregs") {
+            InterruptRegistersMonitorView()
+                .environmentObject(emulatorViewModel)
+        }
         Window("Video Controller", id: "monitor-vc") {
             VideoControllerMonitorView()
                 .environmentObject(emulatorViewModel)
@@ -574,6 +579,15 @@ struct MonitorCommands: Commands {
                 //   衝突するため既存コードで既に忌避されている(P692 参照)。
                 Button("Disassembly Viewer") { openWindow(id: "monitor-disasm") }
                     .keyboardShortcut("a", modifiers: [.command, .option])
+                // P743 — 割込みレジスタビューア(⌘⌥F、未使用キーを新規割当)。
+                // ★"I"(Interrupt の頭文字)は ⌘⌥I が Input Viewer(P551)で使用済み。
+                //   残る未使用キー {f/h/j/q/v/w/x/z} のうち "H"/"W" は macOS システム
+                //   標準の ⌥⌘H(ほかを隠す)・⌥⌘W(すべてのウインドウを閉じる)と衝突
+                //   するため採らない。"F" は MFP の頭文字であり語呂合わせが効く。
+                // ★配置が Device でなく Processor なのは、本モニタが解消する Docs/01
+                //   §5.4.3 の債務行「割込レベル 7-1」がプロセッサ系統の行であるため。
+                Button("Interrupt Registers Viewer") { openWindow(id: "monitor-intregs") }
+                    .keyboardShortcut("f", modifiers: [.command, .option])
             }
 
             // Device(表示制御系レジスタ/状態モニタ)
