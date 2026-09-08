@@ -160,6 +160,7 @@
 		A187C0A00000000000000001 /* MemoryDumpMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A00000000000000002 /* MemoryDumpMonitorView.swift */; };
 		A187C0A80000000000000001 /* DisassemblyMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A80000000000000002 /* DisassemblyMonitorView.swift */; };
 		A187C0A90000000000000001 /* DMACMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A90000000000000002 /* DMACMonitorView.swift */; };
+		A187C0AA0000000000000001 /* InterruptRegistersMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0AA0000000000000002 /* InterruptRegistersMonitorView.swift */; };
 		A187C0A10000000000000001 /* MemoryMapMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A10000000000000002 /* MemoryMapMonitorView.swift */; };
 		A187C0A20000000000000001 /* OPMSynthesizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A20000000000000002 /* OPMSynthesizerView.swift */; };
 		A187C0A30000000000000001 /* StorageMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A30000000000000002 /* StorageMonitorView.swift */; };
@@ -413,6 +414,7 @@
 		A187C0A00000000000000002 /* MemoryDumpMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDumpMonitorView.swift; sourceTree = "<group>"; };
 		A187C0A80000000000000002 /* DisassemblyMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisassemblyMonitorView.swift; sourceTree = "<group>"; };
 		A187C0A90000000000000002 /* DMACMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DMACMonitorView.swift; sourceTree = "<group>"; };
+		A187C0AA0000000000000002 /* InterruptRegistersMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterruptRegistersMonitorView.swift; sourceTree = "<group>"; };
 		A187C0A10000000000000002 /* MemoryMapMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryMapMonitorView.swift; sourceTree = "<group>"; };
 		A187C0A20000000000000002 /* OPMSynthesizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMSynthesizerView.swift; sourceTree = "<group>"; };
 		A187C0A30000000000000002 /* StorageMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageMonitorView.swift; sourceTree = "<group>"; };
@@ -855,6 +857,7 @@
 				A187C0A10000000000000002 /* MemoryMapMonitorView.swift */,
 				A187C0A80000000000000002 /* DisassemblyMonitorView.swift */,
 				A187C0A90000000000000002 /* DMACMonitorView.swift */,
+				A187C0AA0000000000000002 /* InterruptRegistersMonitorView.swift */,
 				A187C0A30000000000000002 /* StorageMonitorView.swift */,
 				A187C0A50000000000000002 /* MIDIMonitorView.swift */,
 				A187C0A70000000000000002 /* RTCMonitorView.swift */,
@@ -1169,6 +1172,7 @@
 				A187C0A00000000000000001 /* MemoryDumpMonitorView.swift in Sources */,
 				A187C0A80000000000000001 /* DisassemblyMonitorView.swift in Sources */,
 				A187C0A90000000000000001 /* DMACMonitorView.swift in Sources */,
+				A187C0AA0000000000000001 /* InterruptRegistersMonitorView.swift in Sources */,
 				A187C0A10000000000000001 /* MemoryMapMonitorView.swift in Sources */,
 				A187C0A30000000000000001 /* StorageMonitorView.swift in Sources */,
 				A187C0A50000000000000001 /* MIDIMonitorView.swift in Sources */,

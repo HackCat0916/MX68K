@@ -716,6 +716,22 @@ typedef struct {
 
 void mx68k_get_dmac_status(MX68KDMACStatus* status);
 
+/* P743: 割込み系レジスタモニタ(MFP MC68901 / I/O コントローラ / システムポート /
+ * CPU の現在割込みレベル)。既存モニタ API と同じ「Core の extern 実体をロック
+ * なしでスナップショットコピーする」契約。read-only —— Core 状態は一切変更しない。
+ * 値は生のレジスタ値をそのまま渡す(ビット単位の意味的デコードは本サイクルの
+ * スコープ外 —— Swift 側で 16 進表示する)。 */
+typedef struct {
+    uint8_t mfp[24];        /* MFP[24]。添字は Core/px68k/x68k/mfp.h の
+                             * MFP_GPIP(0)〜MFP_UDR(23) オフセット定数に対応。 */
+    uint8_t ioc_int_stat;   /* IOC_IntStat */
+    uint8_t ioc_int_vect;   /* IOC_IntVect */
+    uint8_t sysport[7];     /* SysPort[7] */
+    int32_t cpu_irq_line;   /* C68K.IRQLine —— 現在 CPU が認識している割込みレベル(0-7) */
+} MX68KIntRegsStatus;
+
+void mx68k_get_int_regs_status(MX68KIntRegsStatus* status);
+
 /* P550: パレットモニタ。既存モニタAPI(mx68k_get_crtc_status 等)と同じ
  * 「ロックなしスナップショットコピー」契約。read-only(Core状態は一切変更しない)。
  * text_pal/grph_pal の各要素は px68k ネイティブの 32bit パレット語 0xRRGGBB0A —

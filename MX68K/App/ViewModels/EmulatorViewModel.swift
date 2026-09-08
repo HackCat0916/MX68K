@@ -50,6 +50,10 @@ class EmulatorViewModel: ObservableObject {
     /// P742 — DMAC(HD63450)4ch の生レジスタ値。
     /// パネル表示中のみ毎フレーム更新される(EmulatorEngine.dmacVisible)。
     @Published var dmacStatus = MX68KDMACStatus()    // P742
+    /// P743 — 割込み系レジスタ(MFP MC68901 全24本 / IOC IntStat・IntVect /
+    /// システムポート7バイト / CPU の現在 IRQLine)の生値。
+    /// パネル表示中のみ毎フレーム更新される(EmulatorEngine.intRegsVisible)。
+    @Published var intRegsStatus = MX68KIntRegsStatus()   // P743
     /// P550 — パレットモニタ(テキスト面256色/グラフィック面256色/コントラスト)。
     /// パネル表示中のみ毎フレーム更新される(EmulatorEngine.paletteVisible)。
     @Published var paletteStatus = MX68KPaletteStatus()   // P550
@@ -331,6 +335,9 @@ class EmulatorViewModel: ObservableObject {
         }
         engine.onDMACStatusUpdate = { [weak self] s in   // P742
             self?.dmacStatus = s
+        }
+        engine.onIntRegsStatusUpdate = { [weak self] s in   // P743
+            self?.intRegsStatus = s
         }
         engine.onPaletteStatusUpdate = { [weak self] s in   // P550
             self?.paletteStatus = s
