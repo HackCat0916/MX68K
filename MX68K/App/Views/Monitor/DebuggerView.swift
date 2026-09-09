@@ -177,17 +177,21 @@ struct DebuggerView: View {
         }
     }
 
+    /// ★`String(format:)` で組んだプレーンな `String` を `Text(_:)` へ渡すと
+    ///   `StringProtocol` オーバーロードへ解決され、カタログ参照が一切行われない
+    ///   (P745 で一度発見・修正した落とし穴と同型)。呼出し側で
+    ///   `String(localized:)` を構築しておくことで実際にローカライズが効く。
     private var stateText: String {
-        guard isStopped else { return "Running" }
-        return String(format: "Stopped: %@ @ $%06X", reasonText, model.debug.stop_pc)
+        guard isStopped else { return String(localized: "Running") }
+        return String(localized: "Stopped: \(reasonText) @ $\(String(format: "%06X", model.debug.stop_pc))")
     }
 
     private var reasonText: String {
         switch model.debug.stop_reason {
-        case Int32(MX68K_DEBUG_STOP_BREAKPOINT): return "BREAKPOINT"
-        case Int32(MX68K_DEBUG_STOP_STEP):       return "STEP"
-        case Int32(MX68K_DEBUG_STOP_HALTED):     return "CPU HALTED"
-        default:                                 return "NONE"
+        case Int32(MX68K_DEBUG_STOP_BREAKPOINT): return String(localized: "BREAKPOINT")
+        case Int32(MX68K_DEBUG_STOP_STEP):       return String(localized: "STEP")
+        case Int32(MX68K_DEBUG_STOP_HALTED):     return String(localized: "CPU HALTED")
+        default:                                 return String(localized: "NONE")
         }
     }
 
@@ -209,14 +213,14 @@ struct DebuggerView: View {
             //   bp_addr と stop_pc は別欄として並べる。
             HStack(spacing: 16) {
                 Text(model.debug.armed != 0
-                     ? String(format: "armed: yes  bp_addr $%06X", model.debug.bp_addr)
-                     : "armed: no")
+                     ? String(localized: "armed: yes  bp_addr $\(String(format: "%06X", model.debug.bp_addr))")
+                     : String(localized: "armed: no"))
                 Text("hits: \(model.debug.bp_hit_count)")
                 Text("stepped chunks: \(model.debug.armed_chunks)")
                 Text("steps: \(model.debug.step_count)")
                 Text(isStopped
-                     ? String(format: "stop_pc $%06X", model.debug.stop_pc)
-                     : "stop_pc —")
+                     ? String(localized: "stop_pc $\(String(format: "%06X", model.debug.stop_pc))")
+                     : String(localized: "stop_pc —"))
                 Spacer()
             }
             .font(.system(size: 11, design: .monospaced))

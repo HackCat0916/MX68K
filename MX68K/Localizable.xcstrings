@@ -5350,6 +5350,216 @@
           }
         }
       }
+    },
+    "CPU: HALTED/WAITING": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU: 停止中/待機中"
+          }
+        }
+      }
+    },
+    "armed: yes  bp_addr $%@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "武装中: はい  bp_addr $%@"
+          }
+        }
+      }
+    },
+    "armed: no": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "武装中: いいえ"
+          }
+        }
+      }
+    },
+    "stop_pc $%@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "stop_pc $%@"
+          }
+        }
+      }
+    },
+    "stop_pc —": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "stop_pc —"
+          }
+        }
+      }
+    },
+    "Debugger": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デバッガ"
+          }
+        }
+      }
+    },
+    "Breakpoint $": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブレークポイント $"
+          }
+        }
+      }
+    },
+    "Set": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "セット"
+          }
+        }
+      }
+    },
+    "Step": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステップ"
+          }
+        }
+      }
+    },
+    "Continue": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "続行"
+          }
+        }
+      }
+    },
+    "Break Now": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今すぐ中断"
+          }
+        }
+      }
+    },
+    "hits: %llu": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ヒット数: %llu"
+          }
+        }
+      }
+    },
+    "stepped chunks: %llu": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "単命令チャンク数: %llu"
+          }
+        }
+      }
+    },
+    "steps: %llu": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステップ数: %llu"
+          }
+        }
+      }
+    },
+    "Step may land on an exception entry when an interrupt is taken at the instruction boundary — the stopped PC and the listing below always show where execution actually is.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令境界で割込みが入った場合、ステップ実行が例外ハンドラの入口へ着地することがあります — 停止後の PC と下の逆アセンブル表示は、常に実際の実行位置を示します。"
+          }
+        }
+      }
+    },
+    "BREAKPOINT": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブレークポイント"
+          }
+        }
+      }
+    },
+    "STEP": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ステップ実行"
+          }
+        }
+      }
+    },
+    "CPU HALTED": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU 停止中"
+          }
+        }
+      }
+    },
+    "NONE": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "なし"
+          }
+        }
+      }
+    },
+    "Running": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実行中"
+          }
+        }
+      }
+    },
+    "Stopped: %@ @ $%@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止: %@ @ $%@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
