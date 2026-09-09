@@ -5366,7 +5366,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "武装中: はい  bp_addr $%@"
+            "value": "セット済み: はい  bp_addr $%@"
           }
         }
       }
@@ -5376,7 +5376,7 @@
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "武装中: いいえ"
+            "value": "セット済み: いいえ"
           }
         }
       }
