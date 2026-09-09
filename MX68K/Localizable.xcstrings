@@ -4828,6 +4828,12 @@
             "state": "translated",
             "value": "負論理: ビットが 0 のとき点灯(緑)。ソフトウェアキーボードの LED 表示と同じ生値を見ている"
           }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Negative logic: lit (green) when the bit is 0. This is the same raw value shown by the on-screen keyboard's LEDs"
+          }
         }
       }
     },
@@ -5557,6 +5563,588 @@
           "stringUnit": {
             "state": "translated",
             "value": "停止: %@ @ $%@"
+          }
+        }
+      }
+    },
+    "48000 Hz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "48000 Hz"
+          }
+        }
+      }
+    },
+    "62500 Hz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "62500 Hz"
+          }
+        }
+      }
+    },
+    "88200 Hz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "88200 Hz"
+          }
+        }
+      }
+    },
+    "96000 Hz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "96000 Hz"
+          }
+        }
+      }
+    },
+    "10 MHz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "10 MHz"
+          }
+        }
+      }
+    },
+    "16 MHz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "16 MHz"
+          }
+        }
+      }
+    },
+    "25 MHz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "25 MHz"
+          }
+        }
+      }
+    },
+    "BG0 表示": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show BG0"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BG0 表示"
+          }
+        }
+      }
+    },
+    "BG1 表示": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show BG1"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BG1 表示"
+          }
+        }
+      }
+    },
+    "BGタイルマップ+パターンの生内容。透過ドットは黒背景。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raw contents of the BG tilemap and patterns. Transparent dots are shown on a black background."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BGタイルマップ+パターンの生内容。透過ドットは黒背景。"
+          }
+        }
+      }
+    },
+    "エミュレーション未実行": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emulation not running"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エミュレーション未実行"
+          }
+        }
+      }
+    },
+    "最終合成前のBG+スプライト面。透過ドットは黒。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The BG and sprite planes before final compositing. Transparent dots are black."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最終合成前のBG+スプライト面。透過ドットは黒。"
+          }
+        }
+      }
+    },
+    "拡張VRAM配置(CRTC R20 D11)を検出 — 色解釈は参考表示です(実機仕様の裏付け未確認)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extended VRAM layout (CRTC R20 D11) detected — the color interpretation is shown for reference only (not yet verified against the real-hardware spec)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拡張VRAM配置(CRTC R20 D11)を検出 — 色解釈は参考表示です(実機仕様の裏付け未確認)"
+          }
+        }
+      }
+    },
+    "エミュレーション未実行、または16色1024×1024モード(モニタ非対応)です": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emulation is not running, or this is 16-color 1024×1024 mode (not supported by this monitor)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エミュレーション未実行、または16色1024×1024モード(モニタ非対応)です"
+          }
+        }
+      }
+    },
+    "Raw: -- (未送出)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raw: -- (not sent)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raw: -- (未送出)"
+          }
+        }
+      }
+    },
+    "このポートからはまだ 1 度も送出されていない": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing has ever been sent from this port"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このポートからはまだ 1 度も送出されていない"
+          }
+        }
+      }
+    },
+    "Raw (bank1): -- (未送出)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raw (bank1): -- (not sent)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raw (bank1): -- (未送出)"
+          }
+        }
+      }
+    },
+    "追加ボタンはまだ 1 度も送出されていない": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The extra buttons have never been sent"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "追加ボタンはまだ 1 度も送出されていない"
+          }
+        }
+      }
+    },
+    "有効": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enabled"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "有効"
+          }
+        }
+      }
+    },
+    "無効": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disabled"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無効"
+          }
+        }
+      }
+    },
+    "Position: N/A (相対モード)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Position: N/A (relative mode)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Position: N/A (相対モード)"
+          }
+        }
+      }
+    },
+    "相対モードは移動量のみを送出するため、絶対座標は追跡されない(仕様)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relative mode sends movement deltas only, so absolute coordinates are not tracked (by design)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "相対モードは移動量のみを送出するため、絶対座標は追跡されない(仕様)"
+          }
+        }
+      }
+    },
+    "なし": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "なし"
+          }
+        }
+      }
+    },
+    "読み取り専用。値の書き換え機能はありません。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read-only. Values cannot be edited."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み取り専用。値の書き換え機能はありません。"
+          }
+        }
+      }
+    },
+    "◀ 前": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "◀ Prev"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "◀ 前"
+          }
+        }
+      }
+    },
+    "次 ▶": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next ▶"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "次 ▶"
+          }
+        }
+      }
+    },
+    "――（専用モニタパネルを参照）": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "―― (see the dedicated monitor panel)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "――（専用モニタパネルを参照）"
+          }
+        }
+      }
+    },
+    "帯をクリックするとメモリビューア(⌘⌥2)がその領域の先頭へジャンプします。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click a band to jump the Memory Viewer (⌘⌥2) to the start of that region."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "帯をクリックするとメモリビューア(⌘⌥2)がその領域の先頭へジャンプします。"
+          }
+        }
+      }
+    },
+    "※ V(音量)は推定値です — キャリアの TL から算出した「設定上の最大音量の目安」であり、実チップのエンベロープ位相は反映されません": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ V (volume) is an estimate — it is derived from the carrier TL as a guide to the configured maximum volume, and does not reflect the real chip's envelope phase"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ V(音量)は推定値です — キャリアの TL から算出した「設定上の最大音量の目安」であり、実チップのエンベロープ位相は反映されません"
+          }
+        }
+      }
+    },
+    "※ CSM(reg $14)使用時はキーオン表示が実チップと一致しない場合があります": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ While CSM (reg $14) is in use, the key-on display may not match the real chip"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ CSM(reg $14)使用時はキーオン表示が実チップと一致しない場合があります"
+          }
+        }
+      }
+    },
+    "※ KCF は KC(reg $28+ch)と KF(reg $30+ch)の生バイトを連結した値です": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ KCF is the raw KC (reg $28+ch) and KF (reg $30+ch) bytes concatenated"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ KCF は KC(reg $28+ch)と KF(reg $30+ch)の生バイトを連結した値です"
+          }
+        }
+      }
+    },
+    "並びは左上 #0 → 右下 #255(16×16)。マウスオーバーで RGB 値を表示。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ordered #0 at top left → #255 at bottom right (16×16). Hover to show the RGB value."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "並びは左上 #0 → 右下 #255(16×16)。マウスオーバーで RGB 値を表示。"
+          }
+        }
+      }
+    },
+    "Waveform (直近256サンプル / Lch)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waveform (last 256 samples / Lch)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waveform (直近256サンプル / Lch)"
+          }
+        }
+      }
+    },
+    "Mercury Unit 未装着": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mercury Unit not installed"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mercury Unit 未装着"
+          }
+        }
+      }
+    },
+    "※ セッション累積(リセットされません)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ Cumulative for this session (never reset)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ セッション累積(リセットされません)"
+          }
+        }
+      }
+    },
+    "全128スロットのパターン画像(未使用スロットは淡色表示)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pattern images for all 128 slots (unused slots are dimmed)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全128スロットのパターン画像(未使用スロットは淡色表示)"
+          }
+        }
+      }
+    },
+    "背景色描画(XM6互換)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Draw the backdrop color (XM6-compatible)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "背景色描画(XM6互換)"
+          }
+        }
+      }
+    },
+    "グラフィック面(%@)の生内容。透過ドットは黒背景。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raw contents of the graphics plane (%@). Transparent dots are shown on a black background."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グラフィック面(%@)の生内容。透過ドットは黒背景。"
+          }
+        }
+      }
+    },
+    "この範囲は読み出し自体がハードウェアの状態を進めてしまうため、ダンプビューアからはアクセスしません。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading this range would itself advance the hardware state, so the dump viewer does not access it."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この範囲は読み出し自体がハードウェアの状態を進めてしまうため、ダンプビューアからはアクセスしません。"
           }
         }
       }

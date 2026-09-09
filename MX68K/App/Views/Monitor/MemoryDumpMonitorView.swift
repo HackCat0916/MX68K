@@ -245,8 +245,7 @@ struct MemoryDumpMonitorView: View {
             if let hint = Self.panelHint(model.baseAddress, kind) {
                 Text(hint).foregroundColor(.secondary)
             }
-            Text("この範囲は読み出し自体がハードウェアの状態を進めてしまうため、"
-                 + "ダンプビューアからはアクセスしません。")
+            Text("この範囲は読み出し自体がハードウェアの状態を進めてしまうため、ダンプビューアからはアクセスしません。")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
