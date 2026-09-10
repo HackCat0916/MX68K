@@ -12,7 +12,7 @@
 //
 //	The ported disk classes originate from:
 //	  X68000 EMULATOR "XM6"
-//	  Copyright (C) 2001-2006 PI.(ytanaka@ipc-tokai.or.jp)
+//	  Copyright (C) 2001-2006 PI.(Twitter: @xm6_original)
 //	See NOTICE-THIRD-PARTY.md at the repository root.
 //
 //---------------------------------------------------------------------------
