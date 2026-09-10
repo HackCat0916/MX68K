@@ -227,6 +227,15 @@ class EmulatorViewModel: ObservableObject {
     func startEmulation(config: EmulatorConfig, fdd0: String = "", fdd1: String = "",
                         fdd2: String = "", fdd3: String = "") {
         guard !isRunning else { return }
+
+        // P753: Release ビルドのみ、config.json の永続設定を Bridge 側の実行時
+        // フラグへ反映する。Debug ビルドは常にスキップし Bridge 側の既定(ON)を
+        // 使う——smoke_test.sh の must-stay-green パイプライン(pollution guard
+        // 含む)がこの不変性に依存している。
+        if mx68k_is_debug_build() == 0 {
+            mx68k_set_debug_log_enabled(config.performance.debugLogEnabled ? 1 : 0)
+        }
+
         mx68k_log("[Swift] startEmulation begin")
 
         // P268: 機種による HDD I/F 排他。SCSI 機(=4)では内蔵 SCSI のみ配線され、

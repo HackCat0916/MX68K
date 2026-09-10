@@ -403,6 +403,11 @@ struct PerformanceConfig: Codable {
     // 1 = ターボ OFF は「目標倍率」としては選べない(OFF は isTurboActive 側で表す)。
     var turboTargetMultiplier: Int = 3
 
+    // P753: Release ビルドでの debug_log() 有効/無効の永続設定。
+    // Debug ビルドはこの値を無視し、常に Bridge 側のコンパイル時既定(ON)を使う
+    // (判定は mx68k_is_debug_build() で Bridge 側に一本化してある)。
+    var debugLogEnabled: Bool = false
+
     init() {}   // init(from:) を書くとメンバワイズ init が消えるため必須
 
     init(from decoder: Decoder) throws {
@@ -412,6 +417,7 @@ struct PerformanceConfig: Codable {
         // UI の選択肢(2x〜5x + ノーウェイト)の範囲外に出ないようクランプする。
         // P556: クランプは共通ヘルパーへ集約(3 箇所の実装ずれを防ぐ)。
         turboTargetMultiplier = clampTurboMultiplier(m)
+        debugLogEnabled = try c.decodeIfPresent(Bool.self, forKey: .debugLogEnabled) ?? false
     }
 }
 

@@ -3694,6 +3694,10 @@ extern volatile uint64_t g_mx68k_dbg_steps;
 extern volatile uint64_t g_mx68k_dbg_armed_chunks;
 
 // ---- Debug Logging ----
+/* P753: debug_log() の実行時ON/OFF。Debugビルドは既定ON、Releaseは既定OFF。 */
+void mx68k_set_debug_log_enabled(int enabled);
+int  mx68k_get_debug_log_enabled(void);
+int  mx68k_is_debug_build(void);
 extern void debug_log(const char* fmt, ...);
 void mx68k_log(const char* msg);
 void mx68k_dump_framebuffer(void);

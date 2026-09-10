@@ -301,12 +301,32 @@
         }
       }
     },
-    "debug.log not found yet (Debug builds only — Release builds do not write this file).": {
+    "debug.log not found yet. Check that Logging is enabled above, then generate some activity (e.g. start emulation).": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "debug.log はまだ存在しません(Debug ビルド専用 — Release ビルドではこのファイルは書き出されません)。"
+            "value": "debug.log はまだ存在しません。上の「ログ記録」が有効になっていることを確認し、エミュレーションを開始するなどしてログを発生させてください。"
+          }
+        }
+      }
+    },
+    "Logging": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ログ記録"
+          }
+        }
+      }
+    },
+    "Enables or disables writing to debug.log. In a Debug build this always starts on and only this control changes it for the current session. In a Release build your choice is remembered for next launch.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "debug.log への書き出しを有効/無効にします。Debug ビルドでは常に有効な状態で起動し、この操作はそのセッション中にのみ効きます。Release ビルドでは選択した状態が次回起動時にも引き継がれます。"
           }
         }
       }

@@ -100,6 +100,18 @@ static inline unsigned short p135_mem1ff6(void);
 static FILE* debug_log_file = NULL;
 static char DEBUG_LOG_PATH[1024] = "";
 static pthread_mutex_t debug_log_mutex = PTHREAD_MUTEX_INITIALIZER;
+/* P753: debug_log() の実行時ON/OFFフラグ。初期値のみコンパイル時に決まる
+ * (Debug既定ON/Release既定OFF)——mx68k_set_debug_log_enabled() で以後
+ * いつでも変更できる。書き手はSwiftメインスレッド(ログビューワーの
+ * トグル操作)・読み手はエミュレーションスレッド双方がありうるため
+ * _Atomic 必須(mutex 外・関数先頭でチェックするため mutex では
+ * 代替できない)。 */
+static _Atomic(int) s_debug_log_enabled =
+#ifdef DEBUG
+    1;
+#else
+    0;
+#endif
 /* P529: debug_log() の総呼出し回数。[P424-HOTPATH] が毎フレーム
  * mx68k_diag_get_and_reset_log_calls() で読み出し＋ゼロクリアするため、
  * ログ行に出るのは「そのフレーム中の debug_log() 呼出し回数」。
@@ -125,7 +137,6 @@ static int s_p53_shutdown_done = 0;
 static int s_p53_atexit_registered = 0;
 
 static void debug_log_init(void) {
-#ifdef DEBUG
     if (debug_log_file == NULL) {
         ensure_app_support_dir();
         pthread_mutex_lock(&debug_log_mutex);
@@ -144,12 +155,17 @@ static void debug_log_init(void) {
         }
         pthread_mutex_unlock(&debug_log_mutex);
     }
-#endif
 }
 
 void debug_log(const char* fmt, ...) {
-#ifdef DEBUG
-    s_debug_log_call_count++;   /* P529 */
+    /* P753: OFF なら mutex を一切取らずに即return(「OFFなら安い」ことが
+     * 目的のため、チェックはmutexの外・関数の最初に置く)。 */
+    if (!atomic_load_explicit(&s_debug_log_enabled, memory_order_relaxed)) {
+        return;
+    }
+    s_debug_log_call_count++;   /* P529: OFF時は計上しない(=実際に出力した
+                                 * 行数を表す方が [P424-HOTPATH] の log_calls=
+                                 * の名前と一致する)。 */
     debug_log_init();
 
     /* P747: 各行に発生時刻(ミリ秒精度)を付与——ログビューワー(P744)
@@ -182,9 +198,6 @@ void debug_log(const char* fmt, ...) {
         fflush(debug_log_file);
         pthread_mutex_unlock(&debug_log_mutex);
     }
-#else
-    (void)fmt;
-#endif
 }
 
 /* P529: debug_log() 呼出し回数を読み出して同時にゼロクリアする
@@ -1371,7 +1384,9 @@ extern void mx68k_p565_fill_illegal(void *dst, size_t bytes);
 
 // ---- init / shutdown ----
 int mx68k_init(void) {
-    debug_log_init();
+    /* P753: ここにあった debug_log_init() の単独呼出しは削除した。次行の
+     * debug_log() が実行時フラグを見た上で内部で同じ初期化を行うため冗長で
+     * あり、残すと OFF のときも debug.log が生成されてしまう。 */
     debug_log("[MX68K] mx68k_init() called\n");
 
     /* P633: ここにあった P490 の packetList 付け替え(欠陥 A 対策)は、CoreMIDI
@@ -10314,6 +10329,25 @@ void mx68k_set_memory_size(int mb) { mx68k_set_memory_mb(mb); }
 void mx68k_set_clock(int mhz)      { mx68k_set_clock_mhz(mhz); }
 
 // ---- Debug helpers ----
+void mx68k_set_debug_log_enabled(int enabled) {
+    atomic_store_explicit(&s_debug_log_enabled, enabled ? 1 : 0, memory_order_relaxed);
+}
+
+int mx68k_get_debug_log_enabled(void) {
+    return atomic_load_explicit(&s_debug_log_enabled, memory_order_relaxed);
+}
+
+/* P753: Swift側が「今Debugビルドか」をBridgeへ問い合わせるための関数。
+ * SWIFT_ACTIVE_COMPILATION_CONDITIONS の target/project 間継承に依存せず、
+ * debug_log() 自身と同じ #ifdef DEBUG を直接参照するため、より頑健。 */
+int mx68k_is_debug_build(void) {
+#ifdef DEBUG
+    return 1;
+#else
+    return 0;
+#endif
+}
+
 void mx68k_log(const char* msg) {
     debug_log("%s\n", msg);
 }
