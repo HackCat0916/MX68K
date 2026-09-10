@@ -247,10 +247,14 @@ struct MX68KApp: App {
             PerformanceMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P744 — log viewer (live tail of debug.log). Reads only the log file on
-        // disk, so it needs no environment objects and calls no bridge functions.
+        // P744 — log viewer (live tail of debug.log). Its display data comes only
+        // from the log file on disk. P753 added a Logging toggle, so it now needs
+        // configManager to persist that choice (and calls the three
+        // mx68k_*_debug_log_enabled / mx68k_is_debug_build bridge functions —
+        // it still never touches emulation state).
         Window("Log Viewer", id: "monitor-log") {
             LogViewerView()
+                .environmentObject(configManager)
         }
 
         // P228 — on-screen software keyboard (full JIS replica). Talks to the

@@ -4,15 +4,16 @@ import AppKit
 /// P744 — ログビューワー(⌘⌥V)。`~/Library/Application Support/MX68K/debug.log`
 /// をライブテール表示する。
 ///
-/// 既存モニタとの決定的な違いは **Bridge 関数を一切呼ばない** 点
+/// データ源はファイル読み取りのみで完結する
 /// (`MemoryMapMonitorView`(P600)と同型の「ObservableObject + Timer ポーリング」
-/// 構造だけを踏襲し、データ源はファイル読み取りのみで完結する)。
-/// エミュレーションスレッド・`debug_log_mutex` のいずれにも触れないため、
-/// ウィンドウを開かない限り本ファイルのコードは一度も実行されない。
+/// 構造)。エミュレーションスレッド・`debug_log_mutex` のいずれにも触れない。
+/// P753 で追加した Logging トグルだけが例外的に Bridge を呼ぶが、
+/// `mx68k_get/set_debug_log_enabled` ・ `mx68k_is_debug_build` の
+/// 3 つのみで、エミュレーション本体の状態には触れない。
 ///
-/// `debug_log()` は `#ifdef DEBUG` ブロック内でのみ実体を持つ
-/// (`Bridge/EmulatorBridge.c`)。Release ビルドでは debug.log 自体が生成されない
-/// ため、その場合は空状態メッセージを表示する。
+/// P753 以降、`debug_log()` は常時コンパイルされ、実行時フラグで ON/OFF する。
+/// Debug ビルドは既定 ON(`Scripts/smoke_test.sh` がこれに依存)、Release ビルドは
+/// 既定 OFF で、ユーザーの選択を config.json へ永続化する。
 struct LogLine: Identifiable {
     let id: Int
     let text: String
@@ -154,6 +155,7 @@ final class LogViewerModel: ObservableObject {
 }
 
 struct LogViewerView: View {
+    @EnvironmentObject private var configManager: ConfigManager
     @StateObject private var model = LogViewerModel()
     @State private var filterText = ""
     @State private var autoScroll = true
@@ -161,6 +163,22 @@ struct LogViewerView: View {
     @State private var statusMessage: String? = nil
     /// 連打時に古いタイマーが新しいメッセージを消さないための世代カウンタ。
     @State private var statusGeneration = 0
+
+    /// Bridge 側の実行時フラグへ直接読み書きする binding。永続化するのは Release
+    /// ビルドでの変更のみ——Debug ビルドでの手動操作を config.json へ書くと、
+    /// 一時的な OFF 操作が後で起動する Release ビルドの既定値へ意図せず波及する。
+    private var loggingBinding: Binding<Bool> {
+        Binding(
+            get: { mx68k_get_debug_log_enabled() != 0 },
+            set: { newValue in
+                mx68k_set_debug_log_enabled(newValue ? 1 : 0)
+                if mx68k_is_debug_build() == 0 {
+                    configManager.config.performance.debugLogEnabled = newValue
+                    configManager.save()
+                }
+            }
+        )
+    }
 
     private var filteredLines: [LogLine] {
         guard !filterText.isEmpty else { return model.lines }
@@ -173,7 +191,7 @@ struct LogViewerView: View {
             controls
             Divider()
             if model.fileMissing {
-                Text("debug.log not found yet (Debug builds only — Release builds do not write this file).")
+                Text("debug.log not found yet. Check that Logging is enabled above, then generate some activity (e.g. start emulation).")
                     .foregroundColor(.secondary)
                     .padding()
                 Spacer()
@@ -203,6 +221,8 @@ struct LogViewerView: View {
                 }
                 .frame(width: 140)
                 .help("Number of most-recent lines retained in this window. Lowering this immediately discards older lines; debug.log itself is untouched.")
+                Toggle(isOn: loggingBinding) { Text("Logging") }
+                    .help("Enables or disables writing to debug.log. In a Debug build this always starts on and only this control changes it for the current session. In a Release build your choice is remembered for next launch.")
                 Toggle(isOn: $autoScroll) { Text("Auto-scroll") }
                     .help("Automatically scrolls to the newest line as it arrives.")
                 Toggle(isOn: $model.isPaused) {
