@@ -12,7 +12,7 @@ below), see `ATTRIBUTION.md`; for the overall license structure, see
 
 ## XM6 (version 2.06)
 
-**Copyright (C) 2001-2006 ＰＩ．(ytanaka@ipc-tokai.or.jp)**
+**Copyright (C) 2001-2006 ＰＩ．(Twitter: @xm6_original)**
 
 The following MX68K source files are ported from the `vm/` directory of the
 XM6 source distribution (X68000 EMULATOR "XM6" version 2.06):

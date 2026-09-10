@@ -2,7 +2,7 @@
 //
 //	X68000 EMULATOR "XM6"
 //
-//	Copyright (C) 2001-2006 ＰＩ．(ytanaka@ipc-tokai.or.jp)
+//	Copyright (C) 2001-2006 ＰＩ．(Twitter: @xm6_original)
 //	[ SCSI(MB89352) ]
 //
 //---------------------------------------------------------------------------
