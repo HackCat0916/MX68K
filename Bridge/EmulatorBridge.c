@@ -112,6 +112,11 @@ static _Atomic(int) s_debug_log_enabled =
 #else
     0;
 #endif
+/* P754: debug.log の起動時サイズ上限。超過していれば debug.log.old へ
+ * 退避してから新規ファイルを開く(単一ファイルへの無制限追記による肥大を
+ * 防ぐ——固定パスのまま運用することで Scripts/smoke_test.sh の rm -f +
+ * grep パイプラインへの影響をゼロに保つ)。 */
+#define MX68K_DEBUG_LOG_MAX_BYTES (20 * 1024 * 1024)
 /* P529: debug_log() の総呼出し回数。[P424-HOTPATH] が毎フレーム
  * mx68k_diag_get_and_reset_log_calls() で読み出し＋ゼロクリアするため、
  * ログ行に出るのは「そのフレーム中の debug_log() 呼出し回数」。
@@ -148,6 +153,22 @@ static void debug_log_init(void) {
                              "%s/Library/Application Support/MX68K/debug.log", home);
                 }
             }
+
+            /* P754: 既存ファイルが上限を超えていれば .old へ退避
+             * (rename() は POSIX で既存の宛先を原子的に上書きするため、
+             * 前回の .old は自然に1世代だけ残る)。stat() 失敗(未存在等)
+             * や rename() 失敗時は何もしない——単に追記を続けるだけで
+             * 既存の挙動と同じフォールバックになる。 */
+            if (DEBUG_LOG_PATH[0] != '\0') {
+                struct stat st;
+                if (stat(DEBUG_LOG_PATH, &st) == 0 &&
+                    st.st_size >= (off_t)MX68K_DEBUG_LOG_MAX_BYTES) {
+                    char old_path[1024 + 4];
+                    snprintf(old_path, sizeof(old_path), "%s.old", DEBUG_LOG_PATH);
+                    rename(DEBUG_LOG_PATH, old_path);
+                }
+            }
+
             debug_log_file = fopen(DEBUG_LOG_PATH, "a");
             if (!debug_log_file) {
                 fprintf(stderr, "[MX68K] Failed to open debug log: %s\n", DEBUG_LOG_PATH);
