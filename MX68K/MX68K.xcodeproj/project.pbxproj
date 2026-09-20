@@ -113,7 +113,7 @@
 		76196DA3A2E2E0223D7A66BB /* irqh.c in Sources */ = {isa = PBXBuildFile; fileRef = BDAC3FBEE78AA464E3E8E0C5 /* irqh.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		77D718D0D8D8FD3587B7F50B /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BFC1F52D2711E2E89A9C223C /* AVFoundation.framework */; };
 		796372A4D28103891D0BA90C /* fmg_wrap.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A75AC4881AA8220927B8473A /* fmg_wrap.cpp */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
-		796D3F7F1E4840F8B7C2CAA2 /* X68KDisplay.metal in Sources */ = {isa = PBXBuildFile; fileRef = DADCD8856444453B8BEC6EF0 /* X68KDisplay.metal */; };
+		796D3F7F1E4840F8B7C2CAA2 /* Resources/Shaders/X68KDisplay.metal in Sources */ = {isa = PBXBuildFile; fileRef = DADCD8856444453B8BEC6EF0 /* Resources/Shaders/X68KDisplay.metal */; };
 		7B34A3DEA2C645EA02568337 /* ppi.c in Sources */ = {isa = PBXBuildFile; fileRef = 4C2011B27976E189DEE8BB0D /* ppi.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		7CF74B00E8DBD99220784ADA /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7899E8DF6EA3A0610DB824B9 /* AudioToolbox.framework */; };
 		7E1809E3D8CAAD388E86E25A /* ToolbarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8572D2B0E96FEDB3D2E0956 /* ToolbarView.swift */; };
@@ -121,7 +121,7 @@
 		7E9A0F527FAD33543058DB33 /* ArchiveEntryPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D06A404FCD1F241586833CA /* ArchiveEntryPickerView.swift */; };
 		842C39341A9366C6FEF45E1E /* sasi_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6A7B8C9D0E1F2 /* sasi_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		85111286384064F85FCB2730 /* c68k_op1.inc in Resources */ = {isa = PBXBuildFile; fileRef = 5BD6D6A79E79E51317CAE385 /* c68k_op1.inc */; };
-		85933D638BB3B550F3F4A537 /* X68KDisplay.metal in Sources */ = {isa = PBXBuildFile; fileRef = DADCD8856444453B8BEC6EF0 /* X68KDisplay.metal */; };
+		85933D638BB3B550F3F4A537 /* Resources/Shaders/X68KDisplay.metal in Sources */ = {isa = PBXBuildFile; fileRef = DADCD8856444453B8BEC6EF0 /* Resources/Shaders/X68KDisplay.metal */; };
 		865667FF0D772F10C3345AF5 /* peace.c in Sources */ = {isa = PBXBuildFile; fileRef = 5D81E7595358D8EF0FD19E4C /* peace.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		86B8D606C26031CB789A9DDD /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 346654C849A99E40853F04C4 /* Metal.framework */; };
 		8713099E28DBAE16E8815B2C /* EmulatorStorageStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A40000000000000002 /* EmulatorStorageStatus.swift */; };
@@ -158,11 +158,6 @@
 		A187C0940000000000000001 /* InputMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0940000000000000002 /* InputMonitorView.swift */; };
 		A187C0950000000000000001 /* ArchiveEntryPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0950000000000000002 /* ArchiveEntryPickerSheet.swift */; };
 		A187C0A00000000000000001 /* MemoryDumpMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A00000000000000002 /* MemoryDumpMonitorView.swift */; };
-		A187C0A80000000000000001 /* DisassemblyMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A80000000000000002 /* DisassemblyMonitorView.swift */; };
-		A187C0A90000000000000001 /* DMACMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A90000000000000002 /* DMACMonitorView.swift */; };
-		A187C0AA0000000000000001 /* InterruptRegistersMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0AA0000000000000002 /* InterruptRegistersMonitorView.swift */; };
-		A187C0AC0000000000000001 /* DebuggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0AC0000000000000002 /* DebuggerView.swift */; };
-		A187C0AB0000000000000001 /* LogViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0AB0000000000000002 /* LogViewerView.swift */; };
 		A187C0A10000000000000001 /* MemoryMapMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A10000000000000002 /* MemoryMapMonitorView.swift */; };
 		A187C0A20000000000000001 /* OPMSynthesizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A20000000000000002 /* OPMSynthesizerView.swift */; };
 		A187C0A30000000000000001 /* StorageMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A30000000000000002 /* StorageMonitorView.swift */; };
@@ -170,9 +165,15 @@
 		A187C0A50000000000000001 /* MIDIMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A50000000000000002 /* MIDIMonitorView.swift */; };
 		A187C0A60000000000000001 /* EmulatorMIDIStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A60000000000000002 /* EmulatorMIDIStatus.swift */; };
 		A187C0A70000000000000001 /* RTCMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A70000000000000002 /* RTCMonitorView.swift */; };
+		A187C0A80000000000000001 /* DisassemblyMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A80000000000000002 /* DisassemblyMonitorView.swift */; };
+		A187C0A90000000000000001 /* DMACMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0A90000000000000002 /* DMACMonitorView.swift */; };
+		A187C0AA0000000000000001 /* InterruptRegistersMonitorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0AA0000000000000002 /* InterruptRegistersMonitorView.swift */; };
+		A187C0AB0000000000000001 /* LogViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0AB0000000000000002 /* LogViewerView.swift */; };
+		A187C0AC0000000000000001 /* DebuggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A187C0AC0000000000000002 /* DebuggerView.swift */; };
 		A188C01D0000000000000001 /* LocalizationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A188C01D0000000000000002 /* LocalizationManager.swift */; };
 		A188C01D0000000000000011 /* GeneralSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A188C01D0000000000000012 /* GeneralSettingsView.swift */; };
 		A188C01D0000000000000021 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A188C01D0000000000000022 /* Localizable.xcstrings */; };
+		A188C01D0000000000000023 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A188C01D0000000000000022 /* Localizable.xcstrings */; };
 		A189C01D0000000000000001 /* ScreenshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A189C01D0000000000000002 /* ScreenshotService.swift */; };
 		A190C01D0000000000000001 /* WindowScaler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A190C01D0000000000000002 /* WindowScaler.swift */; };
 		A191C01D0000000000000001 /* ArchiveMountService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A191C01D0000000000000002 /* ArchiveMountService.swift */; };
@@ -183,7 +184,7 @@
 		A24B7E78B9252F3854AC9A1B /* ioc.c in Sources */ = {isa = PBXBuildFile; fileRef = F5BDE60868F2C06FF9DC0823 /* ioc.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		A273500000000000000000A1 /* SASISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A273500000000000000000A2 /* SASISettingsView.swift */; };
 		A273500000000000000000B1 /* SCSISettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A273500000000000000000B2 /* SCSISettingsView.swift */; };
-		A280C01D0000000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A280C01D0000000000000002 /* Assets.xcassets */; };
+		A280C01D0000000000000001 /* MX68K/Resources/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A280C01D0000000000000002 /* MX68K/Resources/Assets.xcassets */; };
 		A4EBDCF74311192007F1F0FD /* winui.c in Sources */ = {isa = PBXBuildFile; fileRef = C78757E6DA4BBF9653D9A408 /* winui.c */; };
 		A511C01D0000000000000001 /* KeyRemapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A511C01D0000000000000002 /* KeyRemapView.swift */; };
 		A51B54996E12199B1043540B /* disk_dim.c in Sources */ = {isa = PBXBuildFile; fileRef = 0D753CB715B299FD3984E0F1 /* disk_dim.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
@@ -193,7 +194,9 @@
 		A585C01D0000000000000001 /* GamepadRemapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A585C01D0000000000000002 /* GamepadRemapView.swift */; };
 		A697C01D0000000000000001 /* VideoRecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A697C01D0000000000000002 /* VideoRecordingService.swift */; };
 		A701C01D0000000000000001 /* AboutPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A701C01D0000000000000002 /* AboutPanel.swift */; };
+		A761B01D0000000000000003 /* AudioSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A183B01D0000000000000002 /* AudioSettingsView.swift */; };
 		A7B8C9D0E1F2A3B4C5D6E7F8 /* sasi_io_cache.c in Sources */ = {isa = PBXBuildFile; fileRef = B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		A7D1F2E4C8B3906574AE1B25 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE4C39CF44B8C2F975EF16C8 /* AudioEngine.swift */; };
 		A95E1CF3E7A21E8741C1C320 /* palette.c in Sources */ = {isa = PBXBuildFile; fileRef = 3C510AA1114EB4B9ABD94AAC /* palette.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		A9B0C1D2E3F4A5B6C7D8E9F0 /* midi_coremidi.c in Sources */ = {isa = PBXBuildFile; fileRef = B0C1D2E3F4A5B6C7D8E9F0A1 /* midi_coremidi.c */; };
 		AA964734E2BB36022E59E8F5 /* c68k.c in Sources */ = {isa = PBXBuildFile; fileRef = 779402C59F7B53D3EE9A2B74 /* c68k.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing"; }; };
@@ -414,11 +417,6 @@
 		A187C0940000000000000002 /* InputMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputMonitorView.swift; sourceTree = "<group>"; };
 		A187C0950000000000000002 /* ArchiveEntryPickerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveEntryPickerSheet.swift; sourceTree = "<group>"; };
 		A187C0A00000000000000002 /* MemoryDumpMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDumpMonitorView.swift; sourceTree = "<group>"; };
-		A187C0A80000000000000002 /* DisassemblyMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisassemblyMonitorView.swift; sourceTree = "<group>"; };
-		A187C0A90000000000000002 /* DMACMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DMACMonitorView.swift; sourceTree = "<group>"; };
-		A187C0AA0000000000000002 /* InterruptRegistersMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterruptRegistersMonitorView.swift; sourceTree = "<group>"; };
-		A187C0AC0000000000000002 /* DebuggerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebuggerView.swift; sourceTree = "<group>"; };
-		A187C0AB0000000000000002 /* LogViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewerView.swift; sourceTree = "<group>"; };
 		A187C0A10000000000000002 /* MemoryMapMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryMapMonitorView.swift; sourceTree = "<group>"; };
 		A187C0A20000000000000002 /* OPMSynthesizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OPMSynthesizerView.swift; sourceTree = "<group>"; };
 		A187C0A30000000000000002 /* StorageMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageMonitorView.swift; sourceTree = "<group>"; };
@@ -426,6 +424,11 @@
 		A187C0A50000000000000002 /* MIDIMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MIDIMonitorView.swift; sourceTree = "<group>"; };
 		A187C0A60000000000000002 /* EmulatorMIDIStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmulatorMIDIStatus.swift; sourceTree = "<group>"; };
 		A187C0A70000000000000002 /* RTCMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RTCMonitorView.swift; sourceTree = "<group>"; };
+		A187C0A80000000000000002 /* DisassemblyMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisassemblyMonitorView.swift; sourceTree = "<group>"; };
+		A187C0A90000000000000002 /* DMACMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DMACMonitorView.swift; sourceTree = "<group>"; };
+		A187C0AA0000000000000002 /* InterruptRegistersMonitorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterruptRegistersMonitorView.swift; sourceTree = "<group>"; };
+		A187C0AB0000000000000002 /* LogViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewerView.swift; sourceTree = "<group>"; };
+		A187C0AC0000000000000002 /* DebuggerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebuggerView.swift; sourceTree = "<group>"; };
 		A188C01D0000000000000002 /* LocalizationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalizationManager.swift; sourceTree = "<group>"; };
 		A188C01D0000000000000012 /* GeneralSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsView.swift; sourceTree = "<group>"; };
 		A188C01D0000000000000022 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = SOURCE_ROOT; };
@@ -438,7 +441,7 @@
 		A237C01D0000000000000002 /* MouseCaptureState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MouseCaptureState.swift; sourceTree = "<group>"; };
 		A273500000000000000000A2 /* SASISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SASISettingsView.swift; sourceTree = "<group>"; };
 		A273500000000000000000B2 /* SCSISettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SCSISettingsView.swift; sourceTree = "<group>"; };
-		A280C01D0000000000000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = MX68K/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		A280C01D0000000000000002 /* MX68K/Resources/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = MX68K/Resources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		A2B3C4D5E6F7A8B9C0D1E2F3 /* scsi_disk.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = scsi_disk.cpp; sourceTree = "<group>"; };
 		A31AE0C16AD1F7BC6272F376 /* c68k_opE.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = c68k_opE.inc; sourceTree = "<group>"; };
 		A32CDBD88ECEFAFCD7D65C12 /* sasi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sasi.c; sourceTree = "<group>"; };
@@ -501,7 +504,7 @@
 		D79F0F6D2A77F0C78137DEF1 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		D845A4D98A7CDAC5CB51CC95 /* MX68K-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "MX68K-Bridging-Header.h"; sourceTree = "<group>"; };
 		D85CB98CE6346C3B197791D2 /* fmtimer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fmtimer.h; sourceTree = "<group>"; };
-		DADCD8856444453B8BEC6EF0 /* X68KDisplay.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Resources/Shaders/X68KDisplay.metal; sourceTree = SOURCE_ROOT; };
+		DADCD8856444453B8BEC6EF0 /* Resources/Shaders/X68KDisplay.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Resources/Shaders/X68KDisplay.metal; sourceTree = SOURCE_ROOT; };
 		DB5A6767292D29CDF9957030 /* GamePad.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GamePad.h; sourceTree = "<group>"; };
 		DB7F6A52ECAC72DCD1A5B338 /* fmg_wrap.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fmg_wrap.h; sourceTree = "<group>"; };
 		DC75D0DAD4C788F94930E1F5 /* Carbon.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Carbon.framework; path = System/Library/Frameworks/Carbon.framework; sourceTree = SDKROOT; };
@@ -751,7 +754,6 @@
 				CB637B31F299992624215F8B /* IOSArchiveMountService.swift */,
 				4D06A404FCD1F241586833CA /* ArchiveEntryPickerView.swift */,
 			);
-			name = iOS;
 			path = iOS;
 			sourceTree = "<group>";
 		};
@@ -819,16 +821,15 @@
 				3E33BF3F02A826D4E09F282E /* Info-iOS.plist */,
 				563A62908B380F86CA2E8ED5 /* Assets.xcassets */,
 			);
-			name = Resources;
 			path = Resources;
 			sourceTree = "<group>";
 		};
 		91BDE317C6E08FF6146AC788 = {
 			isa = PBXGroup;
 			children = (
-				DADCD8856444453B8BEC6EF0 /* X68KDisplay.metal */,
+				DADCD8856444453B8BEC6EF0 /* Resources/Shaders/X68KDisplay.metal */,
 				A188C01D0000000000000022 /* Localizable.xcstrings */,
-				A280C01D0000000000000002 /* Assets.xcassets */,
+				A280C01D0000000000000002 /* MX68K/Resources/Assets.xcassets */,
 				BE12A35E37234E4E8A7FFA7C /* Resources */,
 				DFA3FC46F8F6F11436A14995 /* App */,
 				230121F6223ABD9DFB2C20BD /* Bridge */,
@@ -1057,8 +1058,6 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
-				TargetAttributes = {
-				};
 			};
 			buildConfigurationList = 69FAC9BE6F32CC211CCD32C1 /* Build configuration list for PBXProject "MX68K" */;
 			developmentRegion = en;
@@ -1090,7 +1089,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A188C01D0000000000000021 /* Localizable.xcstrings in Resources */,
-				A280C01D0000000000000001 /* Assets.xcassets in Resources */,
+				A280C01D0000000000000001 /* MX68K/Resources/Assets.xcassets in Resources */,
 				D851767C843B40662409F8BB /* Resources in Resources */,
 				3DF736E98E0AF3A67FC3A739 /* c68k_ini.inc in Resources */,
 				4CED27CA733881CB001F594F /* c68k_op0.inc in Resources */,
@@ -1119,6 +1118,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				FE65CDE5BE1850B84DE539E5 /* Assets.xcassets in Resources */,
+				A188C01D0000000000000023 /* Localizable.xcstrings in Resources */,
 				AAB96B91D64FC50E29C7F604 /* c68k_ini.inc in Resources */,
 				6B201C82D2B70E858B776636 /* c68k_op0.inc in Resources */,
 				B6B2ADDA5240D475D28CF144 /* c68k_op1.inc in Resources */,
@@ -1272,7 +1272,7 @@
 				E918523C788FEEAC3EC57F70 /* tvram.c in Sources */,
 				647D1C1F536ABB19E42FACBD /* windraw.c in Sources */,
 				A4EBDCF74311192007F1F0FD /* winui.c in Sources */,
-				796D3F7F1E4840F8B7C2CAA2 /* X68KDisplay.metal in Sources */,
+				796D3F7F1E4840F8B7C2CAA2 /* Resources/Shaders/X68KDisplay.metal in Sources */,
 				F5234890F72D17B036D1CF49 /* winx68k_compat.c in Sources */,
 				4337F84ADAFFE653B63ED181 /* DisplayGeometry.swift in Sources */,
 				66BF627547A35D8CB87A80E2 /* X68KRenderer.swift in Sources */,
@@ -1344,8 +1344,9 @@
 				D71C9FD5ACAE4AAFFCF68C9A /* windraw.c in Sources */,
 				CDA46A66870915ACD3368CB4 /* winui.c in Sources */,
 				0CBC0856E71915487F3681F9 /* winx68k_compat.c in Sources */,
-				85933D638BB3B550F3F4A537 /* X68KDisplay.metal in Sources */,
+				85933D638BB3B550F3F4A537 /* Resources/Shaders/X68KDisplay.metal in Sources */,
 				1CB080CC7F112DA4E8D91F1C /* EmulatorEngine.swift in Sources */,
+				A7D1F2E4C8B3906574AE1B25 /* AudioEngine.swift in Sources */,
 				709355CFBC31777AB57E509A /* EmulatorPerfStatus.swift in Sources */,
 				8713099E28DBAE16E8815B2C /* EmulatorStorageStatus.swift in Sources */,
 				8C988B3FC709A861C8F3D59B /* EmulatorMIDIStatus.swift in Sources */,
@@ -1361,6 +1362,7 @@
 				B1FFC70CDE8DBD8D400FF244 /* SettingsView.swift in Sources */,
 				13D816183C7688F965FE9E56 /* BIOSSettingsView.swift in Sources */,
 				3D97BEC13189BE762D610A87 /* HardwareSettingsView.swift in Sources */,
+				A761B01D0000000000000003 /* AudioSettingsView.swift in Sources */,
 				273A3B0841D339A2B3163190 /* IOSSettingsPresentation.swift in Sources */,
 				0476CDA09169A17EA37FBE44 /* SoftKeyboardView.swift in Sources */,
 				E819519B0D00009DD92427B3 /* SASISettingsView.swift in Sources */,

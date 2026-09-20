@@ -94,6 +94,22 @@ struct HardwareSettingsView: View {
         }
     }
 
+    /// P762追補 — ターボ ON/OFF ボタンのラベル。
+    /// ON/OFF の実体は macOS = `EmulatorViewModel` / iOS = `MX68KiOSViewModel` と
+    /// 分かれるが、`Button(_:)` の引数は式であって `#if` を書けないため、
+    /// プラットフォーム分岐をここへ追い出す。
+    private var turboButtonTitle: String {
+        #if os(macOS)
+        return emulatorViewModel.isTurboActive
+            ? String(localized: "Turbo: ON")
+            : String(localized: "Turbo: OFF")
+        #else
+        return iosViewModel.isTurboActive
+            ? String(localized: "Turbo: ON")
+            : String(localized: "Turbo: OFF")
+        #endif
+    }
+
     var body: some View {
         Form {
             Section(header: Text("Machine Configuration")) {
@@ -218,15 +234,18 @@ struct HardwareSettingsView: View {
                 #endif
             }
 
-            // P706 §C-3: 「Speed-up Options」セクションは iOS では丸ごと非表示。
-            // ターボ ON/OFF は Emulator メニュー(⌘⇧T)から行う機能で iOS にメニューが
-            // 無く、`setTurboTargetMultiplier` / `setFDFastAccess` の即時反映経路も
-            // iOS に存在しない。値だけ設定できて効かないトグルは出さない(§0-4 提案(3))。
-            #if os(macOS)
+            // P762: 「Speed-up Options」セクションを iOS でも表示する。
+            // P706 §C-3 の時点では iOS を丸ごと非表示にしていたが、その理由
+            //(「ターボ ON/OFF は Emulator メニュー(⌘⇧T)から行う機能で iOS に
+            // メニューが無く、即時反映経路も iOS に存在しない」)は P762 で解消した
+            // —— `MX68KiOSViewModel` に `toggleTurbo` / `setTurboTargetMultiplier` /
+            // `setFDFastAccess` を実装し、ON/OFF の導線としてこのセクション内に
+            // ボタンを置いた(iOS にメニューが無いため)。
             // P555: ターボ(高速実行)。実機に対応物のない、エミュレータ側だけの
             // 機能なので「Machine Configuration」ではなく独立セクションへ置く。
-            // ここで選ぶのは「ターボを ON にしたときの倍率」で、ON/OFF の切替は
-            // Emulator メニューの「ターボ」(⌘⇧T)から行う。
+            // ここで選ぶのは「ターボを ON にしたときの倍率」。ON/OFF の切替は
+            // P762追補で両 OS ともこのセクション内のボタンから行える(macOS では
+            // 従来どおり Emulator メニューの「ターボ」(⌘⇧T)も使える)。
             // P581: ターボ(P555)と FD アクセス高速化(P557)は、どちらも「実機に無い、
             // エミュレータ側だけの高速化機能」という同じ性質なので 1 セクションへ統合した
             // (ユーザーフィードバック: 解説が別領域に分かれていて読みにくい)。
@@ -241,10 +260,16 @@ struct HardwareSettingsView: View {
                 }
                 .onChange(of: settingsViewModel.turboTargetMultiplier) { newValue in
                     // クロック速度と同じく即時反映(ターボが既に ON の場合のみ意味を持つ)。
+                    #if os(macOS)
                     emulatorViewModel.setTurboTargetMultiplier(newValue)
+                    #else
+                    iosViewModel.setTurboTargetMultiplier(newValue)
+                    #endif
                 }
 
-                Text("Runs the emulator faster than real time. Toggle it from the Emulator menu (⌘⇧T). Sound is muted while turbo is on.")
+                // P762追補: ON/OFF ボタンを両 OS に置いたので、説明文も 1 本へ統合する
+                //(macOS のみ Emulator メニューの ⌘⇧T も使える、という差分を括弧で添える)。
+                Text("Runs the emulator faster than real time. Toggle it with the button below (or ⌘⇧T on macOS).")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -256,6 +281,21 @@ struct HardwareSettingsView: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // P762: macOS で ⌘⇧T が担う ON/OFF 切替の iOS 側の導線。
+                // `Toggle(isOn:)` ではなく `Button` にしているのは、macOS 側と同じく
+                // `toggleTurbo()`(現在値を反転して副作用を実行する命令的 API)を
+                // そのまま呼ぶため —— 値バインディング方式とは相性が悪い。
+                // P762追補: macOS の設定画面にも同じボタンを置く(⌘⇧T は従来どおり残す)。
+                // 両 OS を使う場合に設定画面の見た目が揃っている方が分かりやすい、という
+                // ユーザー要望による。
+                Button(turboButtonTitle) {
+                    #if os(macOS)
+                    emulatorViewModel.toggleTurbo()
+                    #else
+                    iosViewModel.toggleTurbo()
+                    #endif
+                }
+
                 // P557: FD アクセス高速化。実機の FDD 機構そのものではなく「エミュレータ側の
                 // 待ち時間を詰める」機能(XM6 の「フロッピーディスク高速化」設定に相当)。
                 // P581: ターボと同じ「高速化オプション」セクションへ統合。
@@ -264,7 +304,11 @@ struct HardwareSettingsView: View {
                 Toggle("Fast FD Access", isOn: $settingsViewModel.fdFastAccess)
                     .onChange(of: settingsViewModel.fdFastAccess) { newValue in
                         // クロック速度・ターボ倍率と同じく即時反映(リセット不要)。
+                        #if os(macOS)
                         emulatorViewModel.setFDFastAccess(newValue)
+                        #else
+                        iosViewModel.setFDFastAccess(newValue)
+                        #endif
                     }
 
                 // P497: 文字列連結(`+`)は非ローカライズオーバーロードへ解決される
@@ -279,8 +323,7 @@ struct HardwareSettingsView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            #endif   // P706 §C-3: Speed-up Options(macOS のみ)ここまで
+            }   // P762: Speed-up Options(macOS / iOS 共通)ここまで
 
             // P454: バッテリバックアップ SRAM の初期化(工場出荷時設定へ)(Docs/01 2-7)。
             // P505 (D-46): 全ゼロ化から IPL-ROM 内蔵既定値へのシードへ意味論を変更。

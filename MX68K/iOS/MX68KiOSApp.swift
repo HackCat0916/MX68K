@@ -195,7 +195,13 @@ struct MX68KiOSRootView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                         if showSoftKeyboard && canShowKeyboard {
-                            softKeyboardBand(containerSize: geo.size)
+                            // P760 — 側方ボタン帯を避ける。`leadingInset:` は帯の内部の
+                            // 幅計算(スクロール要否・`minWidth`)を実際に使える幅へ
+                            // 合わせる役割、`.padding(.leading:)` は帯をどこへ描画するか
+                            // という位置決めの役割で、両方揃って初めて側方帯のボタンを
+                            // 覆わなくなる(縦向きは `sideW == 0` で従来どおり)。
+                            softKeyboardBand(containerSize: geo.size, leadingInset: sideW)
+                                .padding(.leading, sideW)
                                 .transition(.move(edge: .bottom))
                         }
                     }
@@ -402,14 +408,27 @@ struct MX68KiOSRootView: View {
 
     /// 状態表示の中身。上下配置(`bottomBand`)と側方配置(`sideStatusBand`)で
     /// **同じものを共有**する —— 文言・書式を 2 箇所に複製しない。
-    private var statusLines: some View {
+    /// P766 — `axis` により配置先ごとの並べ方だけを切り替える(文言は共有のまま)。
+    private func statusLines(axis: Axis) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             if let error = viewModel.metalError {
                 Text(error)
                     .foregroundStyle(.red)
             }
-            Text(viewModel.statusText)
-                .foregroundStyle(.green)
+            if viewModel.statusFields.isEmpty {
+                Text(viewModel.statusText)
+                    .foregroundStyle(.green)
+            } else if axis == .vertical {
+                // 側方帯: 項目ごとに1行(要望どおりの縦積み)。
+                ForEach(Array(viewModel.statusFields.enumerated()), id: \.offset) { _, field in
+                    Text(field)
+                        .foregroundStyle(.green)
+                }
+            } else {
+                // 下部帯: 従来どおり2スペース区切りの1行(横画面以外の既存見た目を維持)。
+                Text(viewModel.statusFields.joined(separator: "  "))
+                    .foregroundStyle(.green)
+            }
             // P725 — セーブ/ロード結果(成功/失敗どちらも 1 行で表示)。
             // ★P727改訂——`.secondary`(セマンティック色)は、このファイル内の他の
             //   帯要素(`statusText`=`.green`・`importError`=`.red`、いずれも明示色)
@@ -434,18 +453,19 @@ struct MX68KiOSRootView: View {
     /// macOS `StatusBarView`(下部)に対応する帯——状態表示テキスト
     /// (スクリーンショット判定用、P703以来)。
     private var bottomBand: some View {
-        statusLines
+        statusLines(axis: .horizontal)
             .padding(6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.black.opacity(0.6))
     }
 
     /// P708 §C-4 — `bottomBand` の側方版。右のピラーボックス余白へ置く。
-    /// 幅が狭い(内寸 66pt 前後)ため、`statusText`(約 32 文字)は 1 行に収まらない。
-    /// 半角スペース区切りで複数行へ折り返させ、最長トークン `PC=00FF0048` が
-    /// それでも溢れる場合(残留リスク R-3)の保険として縮小も許す。
+    /// 幅が狭い(内寸 66pt 前後)なので、`statusText` 実行中相当の詳細行は
+    /// P766 で項目(CPU/MEM/Speed/FD0/FD1/HDD)ごとに 1 行へ分けて縦積みする
+    /// (`statusLines(axis: .vertical)`)。それでも項目単体が溢れる場合
+    /// (残留リスク R-3)の保険として縮小も許す。
     private var sideStatusBand: some View {
-        statusLines
+        statusLines(axis: .vertical)
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
             .minimumScaleFactor(0.7)
@@ -471,8 +491,14 @@ struct MX68KiOSRootView: View {
     /// ★`.scrollDisabled(!needsScroll)`はR-1(`SoftKeyButton`の
     ///   `DragGesture(minimumDistance: 0)`とスクロールのパンの競合)への一次防壁として
     ///   維持(実測サイズが収まっていればスクロールジェスチャそのものが無効化される)。
-    private func softKeyboardBand(containerSize: CGSize) -> some View {
-        let needsHScroll = containerSize.width < measuredKeyboardSize.width
+    ///
+    /// P760 —— `leadingInset` は側方ボタン帯の幅(`DisplayViewport.face().x`)。
+    /// 帯を右へずらす `.padding(.leading:)` だけでは内部の幅計算(スクロール要否・
+    /// `minWidth`)が縮小前のフル幅のままになり、需要側と供給側が食い違う。
+    /// `TouchJoystickView(sideInset:)` と同型に、実際に使える幅を引数で受け取る。
+    private func softKeyboardBand(containerSize: CGSize, leadingInset: CGFloat = 0) -> some View {
+        let availableWidth = containerSize.width - leadingInset
+        let needsHScroll = availableWidth < measuredKeyboardSize.width
         let needsVScroll = containerSize.height < measuredKeyboardSize.height
         let needsScroll = needsHScroll || needsVScroll
         let bandHeight = min(measuredKeyboardSize.height, containerSize.height)
@@ -484,7 +510,7 @@ struct MX68KiOSRootView: View {
                     }
                 )
                 // 収まる幅では中央寄せ、収まらない幅では固有幅のままスクロールさせる。
-                .frame(minWidth: containerSize.width, alignment: .center)
+                .frame(minWidth: availableWidth, alignment: .center)
         }
         .onPreferenceChange(SoftKeyboardSizeKey.self) { size in
             // ★ゼロサイズ(未計測/レイアウト前)は既定値のまま保持し、上書きしない。

@@ -202,10 +202,10 @@ enum ImportedFileStore {
     /// 表示用のエラー文言。無言で何も起きない状態を作らないための材料(§B-6)。
     static func message(for error: Error) -> String {
         if case ImportError.sizeMismatch(let src, let dst) = error {
-            return "Import failed: copied \(dst) of \(src) bytes."
+            return String(localized: "Import failed: copied \(dst) of \(src) bytes.")
         }
         let ns = error as NSError
-        return "Import failed: \(ns.localizedDescription) (\(ns.domain):\(ns.code))"
+        return String(localized: "Import failed: \(ns.localizedDescription) (\(ns.domain):\(ns.code))")
     }
 
     // ---- ログ(§自己反証可能性 プローブ P706-IMPORT) ----

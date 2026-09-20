@@ -1153,7 +1153,7 @@ void p214_r2_format_and_reset(char *buf, int len) {
 #endif /* P214_ENABLE */
 
 #ifndef P468_ENABLE
-#define P468_ENABLE 1   /* ★P533: D-40調査(H2)の実測のため、このサイクル限定で一時的に 1 へ戻した。
+#define P468_ENABLE 0   /* ★P533: D-40調査(H2)の実測のため、このサイクル限定で一時的に 1 へ戻した。
                          *   EmulatorBridge.c 側の定義も同じ値(1)へ揃えてある。
                          * --- 以下、P513 時点の経緯 ---
                          * D-35症状2(でたな!!ツインビー遷移時のグラフィック残像)の3仮説
@@ -1166,7 +1166,9 @@ void p214_r2_format_and_reset(char *buf, int len) {
                          *   本サイクルのプローブがそれらの有効/無効に左右されないため。
                          * ★P513で休止(D-35症状2調査は P471(2026-07-31)で既に終了・凍結済み。
                          *   D-39=でたな!!ツインビーのフレーム時間超過の残置プローブ課税仮説の検証)。
-                         *   EmulatorBridge.c 側の定義も同じ値へ揃えること。 */
+                         *   EmulatorBridge.c 側の定義も同じ値へ揃えること。
+                         * ★★P758(2026-09-19): 役目を終えたため0へ復元(EmulatorBridge.c 側も同時に
+                         *   0へ復元済み)。再度D-4x調査が必要になれば両方を1へ戻すこと。 */
 #endif
 #if P468_ENABLE
 /* [P468-GVWR] trace_Memory_WriteB/W の冒頭から、p436_res_write_note と同じ場所で
@@ -24365,23 +24367,14 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
             s_p41_dma_read_count++;
         }
     }
-    /* P509 (D-48): $E94003(FDC データ/結果ポート)read の実測。ST3 の READY
-     * ビット(bit5=0x20)が FDD_IsReady() の生値と整合しているかを直接見る。
-     * frame ゲート無し。先頭 20 件は無条件、以降は (val, cmd, rdy0..3) の
-     * タプルが変化した時だけ出力してログ量を抑える。read-only。 */
+    /* P509 (D-48): $E94003(FDC データ/結果ポート)read の計数。read-only。
+     * ★P758: 毎読み取りの [P509-FDCST3] debug_log() 出力は削除済み(D-48 は解決済み)。
+     * p509_rd_count は [P509-FDCHIST](:772)・[P686-FDCDRV](:806)の分母として
+     * 引き続き使用するため残す。s_p509_n も Fix Plan の指示により残置(再度
+     * [P509-FDCST3] を復活させる際の連番として使う)。 */
     {
         static uint32_t s_p509_n = 0;
-        static uint32_t s_p509_last_tuple = 0;
-        static int s_p509_have_last = 0;
         if ((addr & 0x00FFFFFFu) == 0xE94003u) {
-            int r0 = FDD_IsReady(0) ? 1 : 0;
-            int r1 = FDD_IsReady(1) ? 1 : 0;
-            int r2 = FDD_IsReady(2) ? 1 : 0;
-            int r3 = FDD_IsReady(3) ? 1 : 0;
-            uint32_t tuple = ((uint32_t)(val & 0xFF) << 12)
-                           | ((uint32_t)p509_cmd_mirror << 4)
-                           | (uint32_t)((r0 << 3) | (r1 << 2) | (r2 << 1) | r3);
-            p509_rd_count++;
             /* P686 (D-70): SenseIntStatus(fdc.c:278)の結果 1 バイト目 = ST0
              * (fdc.c:279 `rsp->st0 = fdc.st0;`)。EC = bit4(テクニカルデータブック
              * 印刷 p.157 手順 4)。帰属は直近 Recalibrate 時の drvsel。 */
@@ -24395,15 +24388,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
                 p686_expect_st0 = 0;
             }
             s_p509_n++;
-            if (s_p509_n <= 20 || !s_p509_have_last || tuple != s_p509_last_tuple) {
-                debug_log("[P509-FDCST3] f=%u val=0x%02x pc=0x%06x rdy=%d%d%d%d "
-                          "cmd=0x%02x n=%u\n",
-                          (unsigned)g_mx68k_frame_num, (unsigned)(val & 0xFF),
-                          (unsigned)MX68KQ_GUEST_PC(), r0, r1, r2, r3,
-                          (unsigned)p509_cmd_mirror, s_p509_n);
-            }
-            s_p509_last_tuple = tuple;
-            s_p509_have_last = 1;
+            p509_rd_count++;
         }
         /* P686 (D-70): $E94005(ドライブステータス)read の分母。 */
         if ((addr & 0x00FFFFFFu) == 0xE94005u) p686_e94005_rd++;

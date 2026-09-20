@@ -23,14 +23,18 @@
 //
 //  意図的な非実装(P706 計画 §0-2 の非ゴール表のうち P712 でも扱わない残り、
 //  うっかりの漏れではない):
-//    General/Audio/Input/Windrv の各設定タブ /
-//    ターボ・ノーウェイト / スクリーンショット / 録画 / 音声 / モニタパネル。
-//    (セーブステートは P725 でクイックセーブ/ロード方式として実装済み。)
+//    General/Input/Windrv の各設定タブ /
+//    スクリーンショット / 録画 / モニタパネル。
+//    (セーブステートは P725 でクイックセーブ/ロード方式として実装済み。
+//     音声出力は P757、Audio 設定タブは P761 で実装済み —— ただし
+//     Mercury Unit / MIDI ボード設定は iOS 非対応のまま。
+//     ターボ・ノーウェイト・FD アクセス高速化は P762 で実装済み。)
 //
 
 import Foundation
 import CoreGraphics
 import Combine
+import AVFoundation   // P757: AVAudioSession
 
 /// ★スレッド規約は macOS 側 EmulatorViewModel と同じ —— クラス自体に `@MainActor` は
 /// 付けず、書き込みは常にメインスレッドから行う。X68KRenderer は
@@ -45,7 +49,12 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
 
     // MARK: - 画面に出す 1 行の状態表示
 
-    @Published var statusText: String = "Not started"
+    @Published var statusText: String = String(localized: "Not started")
+    /// P766 — 実行中の詳細ステータス(CPU/MEM/Speed/FD0/FD1/HDD)を項目ごとに
+    /// 保持する。空配列 = 詳細状態なし(`statusText` の単純な状態文言を表示する)。
+    /// side帯は項目ごとに縦積み、bottom帯は結合して横並び表示する——同じデータを
+    /// 配置先ごとに異なるレイアウトへ描画するための構造化(文言の重複定義はしない)。
+    @Published var statusFields: [String] = []
     /// P723 — 状態表示の Speed% 項目。macOS 版 `EmulatorViewModel` と同名・同型・同既定値。
     @Published var speedPercent: Double = 100   // P658: StatusBar常時表示用
     /// P730 — マウント/イジェクト成功のたびにインクリメントするだけの値。
@@ -66,6 +75,11 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     @Published var needsConfiguration: Bool = false
 
     let engine = EmulatorEngine()
+
+    /// P757 — macOS `EmulatorViewModel.audio` と同型。
+    /// P761 — Audio 設定タブの追加により、起動後も UI から値を変更できる
+    /// (下の `setSoundEnabled(_:)` / `setVolume(_:)` 経由)。
+    let audio = AudioEngine()
 
     /// `.task` / `.onAppear` はビューの再生成で複数回発火し得る。engine.start() 自身も
     /// `guard !isRunning` で冪等だが、BIOS 探索や Bridge への push をやり直す意味は
@@ -113,7 +127,8 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
 
         guard missing.isEmpty else {
             needsConfiguration = true
-            statusText = "BIOS not configured — missing \(missing.joined(separator: ", "))"
+            statusText = String(localized: "BIOS not configured — missing \(missing.joined(separator: ", "))")
+            statusFields = []
             mx68k_log("[Swift][iOS] start deferred, missing: \(missing.joined(separator: ", "))")
             return
         }
@@ -126,6 +141,36 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         mx68k_log("[Swift][iOS] calling mx68k_init()")
         mx68k_init()
         mx68k_log("[Swift][iOS] mx68k_init() returned")
+
+        // ------------------------------------------------------------------
+        // P757 — 音声出力の配線。順序を厳守すること:
+        // AVAudioSession の設定は audio.initialize() より必ず先に行う。RemoteIO は
+        // AudioUnitInitialize() 時点でアクティブな AVAudioSession のフォーマットを
+        // 参照するため、順序を誤ると初期化に失敗しうる。
+        // カテゴリはユーザー決定(消音スイッチを無視し、他アプリの音と共存)により
+        // .playback + .mixWithOthers。
+        // ------------------------------------------------------------------
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            // 失敗してもクラッシュ・動作停止はしない(音が出ないだけ)が、原因は残す。
+            mx68k_log("[Swift][iOS] AVAudioSession setup failed: \(error)")
+        }
+
+        // macOS `EmulatorViewModel.startEmulation` と同じく、Bridge 側で実際に受理された
+        // レートを読み戻してから AudioUnit を作る(Swift 側にレート集合を複製しない)。
+        let sr = Double(mx68k_get_audio_sample_rate())
+        audio.initialize(sampleRate: sr)
+        audio.enabled = config.audio.enabled
+        audio.volume = Float(config.audio.volume)
+        // チップ別音量は macOS 側では EmulatorViewModel 専用の 1 行ラッパー
+        // (setAdpcmVolume / setOpmVolume)経由だが、iOS からは流用できないため
+        // 同一のクランプ付きで Bridge 関数を直接呼ぶ。
+        mx68k_set_adpcm_volume(Int32(max(0, min(16, config.audio.adpcmVolume))))
+        mx68k_set_opm_volume(Int32(max(0, min(16, config.audio.opmVolume))))
+        audio.start()
 
         // P706 §D-3: ブートディスクは config 由来。空でも**起動は止めない** ——
         // BIOS さえあれば IPL 画面までは進み、そこから「Boot Disk…」で入れられる。
@@ -153,18 +198,21 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         engine.onStatusUpdate = { [weak self] status in
             // EmulatorEngine 側で DispatchQueue.main.async 済み(メインスレッド)。
             guard let self else { return }
-            self.statusText = String(format: "CPU: %dMHz  MEM: %dMB  Speed: %d%%  FD0=%@  FD1=%@  HDD=%@",
-                                     status.clock_mhz, status.memory_mb, Int(self.speedPercent.rounded()),
-                                     status.fdd0_media_present ? "yes" : "no",
-                                     status.fdd1_media_present ? "yes" : "no",
-                                     (status.hdd0_inserted || status.hdd1_inserted) ? "yes" : "no")
+            self.statusFields = [
+                String(format: String(localized: "CPU: %dMHz"), status.clock_mhz),
+                String(format: String(localized: "MEM: %dMB"), status.memory_mb),
+                String(format: String(localized: "Spd: %d%%"), Int(self.speedPercent.rounded())),
+                String(format: String(localized: "FD0: %@"), status.fdd0_media_present ? String(localized: "yes") : String(localized: "no")),
+                String(format: String(localized: "FD1: %@"), status.fdd1_media_present ? String(localized: "yes") : String(localized: "no")),
+                String(format: String(localized: "HDD: %@"), (status.hdd0_inserted || status.hdd1_inserted) ? String(localized: "yes") : String(localized: "no")),
+            ]
         }
         engine.onSpeedUpdate = { [weak self] pct in   // P658
             self?.speedPercent = pct
         }
 
         engine.start()
-        statusText = "Running"
+        statusText = String(localized: "Running")
     }
 
     // MARK: - 設定の反映
@@ -187,6 +235,89 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         mx68k_log("[Swift][iOS] applySettings -> config pushed (pending reset)")
     }
 
+    // MARK: - 音声制御(P761)
+
+    // macOS `EmulatorViewModel.setSoundEnabled(_:)` 以下 4 メソッドと同一内容。
+    // setVolume(_:) までが Swift 側 AudioEngine のポストミックスゲイン、
+    // setAdpcmVolume/setOpmVolume は Bridge 経由で Core の音量ステートを直接
+    // 書き換える別レイヤー(P512 の macOS 側コメントと同じ区別)。
+    func setSoundEnabled(_ on: Bool) { audio.enabled = on }
+    func setVolume(_ v: Double)      { audio.volume = Float(max(0.0, min(1.0, v))) }
+    func setAdpcmVolume(_ v: Int) { mx68k_set_adpcm_volume(Int32(max(0, min(16, v)))) }
+    func setOpmVolume(_ v: Int)   { mx68k_set_opm_volume(Int32(max(0, min(16, v)))) }
+
+    // MARK: - ターボ / 高速化(P762)
+
+    // macOS `EmulatorViewModel`(:1272-1371)の逐語移植。意図的な差分は 2 点だけ:
+    //   (a) `guard !isRecording`(P697)は移植しない —— iOS に録画機能自体が無い。
+    //   (b) `isRunning` は `didStart` へ置換(P759 で確立した既存パターン)。
+    // ノーウェイト機構(`EmulatorEngine.startNoWaitThread` / `stopNoWaitThread`)は
+    // P703 以来 iOS ターゲットでもコンパイル対象であり、駆動元が CADisplayLink =
+    // メインスレッドであるため、macOS(CVDisplayLink 専用スレッド)に存在する
+    // 「表示リンク側と start/stop 呼出しが重なる窓」が構造的に消える。
+
+    /// ターボ(高速実行)が現在有効か。永続化しない(起動時は常に OFF)。
+    @Published var isTurboActive = false
+
+    /// P762 — ターボ ON 時に使う目標倍率(2〜5、または `kTurboNoWaitMultiplier`)。
+    /// macOS 版 `EmulatorViewModel.swift:32` と同型(config.json から復元、
+    /// `SettingsViewModel` とは別の同期複製)。
+    @Published var turboTargetMultiplier = 3
+
+    func toggleTurbo() {
+        isTurboActive.toggle()
+        applyTurboState()
+        // P556: ノーウェイトは倍率で表現できないため文言を分岐する。
+        showTransientMessage(isTurboActive
+            ? (turboTargetMultiplier == kTurboNoWaitMultiplier
+                ? String(localized: "Turbo: ON (No Wait)")
+                : String(localized: "Turbo: ON (\(turboTargetMultiplier)x)"))
+            : String(localized: "Turbo: OFF"))
+    }
+
+    /// 現在の `isTurboActive` / `turboTargetMultiplier` をフレームループと Bridge へ
+    /// 反映する。**メインスレッドから呼ぶこと**(engine 側の start/stopNoWaitThread が
+    /// メインスレッド限定のため。呼び出し元は toggleTurbo / setTurboTargetMultiplier /
+    /// pushConfig の 3 つで、いずれも UI 由来のメインスレッド実行)。
+    private func applyTurboState() {
+        // `didStart` ガード: エミュレーション未起動(Core 未 init)で専用スレッドを
+        // 走らせると mx68k_run_frame() が無効な Core 状態を触る(macOS の `isRunning`
+        // ガードと同じ役割)。
+        let useNoWait = isTurboActive && turboTargetMultiplier == kTurboNoWaitMultiplier && didStart
+        if useNoWait {
+            engine.setTurboMultiplier(1)
+            engine.startNoWaitThread()
+        } else {
+            // ★先に専用スレッドを確実に合流させてから倍率を反映する。未起動なら実質 no-op。
+            engine.stopNoWaitThread()
+            engine.setTurboMultiplier(isTurboActive ? turboTargetMultiplier : 1)
+        }
+        // ★ノーウェイト判定にここで `useNoWait` を使わないこと: `useNoWait` は
+        //   `didStart` も条件に含むため、未起動状態でノーウェイト設定のままターボ ON に
+        //   すると等倍扱いになり、負の倍率(-1)を渡してしまう。
+        if !isTurboActive {
+            let rate = mx68k_get_audio_sample_rate()
+            mx68k_set_turbo_audio_rate(Int32(
+                rate > 44100 ? MX68K_TURBO_AUDIO_RATE_AUTO : MX68K_TURBO_AUDIO_RATE_UNITY))
+        } else if turboTargetMultiplier == kTurboNoWaitMultiplier {
+            mx68k_set_turbo_audio_rate(Int32(MX68K_TURBO_AUDIO_RATE_AUTO))
+        } else {
+            mx68k_set_turbo_audio_rate(Int32(turboTargetMultiplier) << 16)
+        }
+    }
+
+    /// 設定画面の目標倍率 Picker から呼ばれる。ターボが現在 ON なら即座に反映する。
+    func setTurboTargetMultiplier(_ multiplier: Int) {
+        turboTargetMultiplier = clampTurboMultiplier(multiplier)
+        if isTurboActive { applyTurboState() }
+    }
+
+    /// 設定画面の「Fast FD Access」トグルから呼ばれる。クロック速度やターボ倍率と
+    /// 同じ即時反映(リセット不要)。
+    func setFDFastAccess(_ enabled: Bool) {
+        mx68k_set_fd_fast_access(enabled ? 1 : 0)
+    }
+
     // MARK: - リセット(P706 改訂 1 / 改訂 2)
 
     /// 帯の Hard Reset ボタンが立てる確認ダイアログのフラグ。
@@ -194,9 +325,12 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     @Published var showHardResetConfirm: Bool = false
 
     /// macOS `EmulatorViewModel.hardReset()` のうち、iOS に存在する部分だけ。
-    /// AudioEngine 再初期化(iOS は Audio 設定タブ非実装)と
-    /// `InputManager.shared.requestMouseHoming()`(iOS はマウス非対応)は持ち込まない
-    /// —— 新しい挙動を発明せず、iOS に無い機能への呼び出しを削るだけ。
+    /// AudioEngine 再初期化と `InputManager.shared.requestMouseHoming()`
+    /// (iOS はマウス非対応)は持ち込まない —— 新しい挙動を発明せず、
+    /// iOS に無い機能への呼び出しを削るだけ。
+    /// ★P761 で Audio 設定タブを追加したが、この再初期化は P761 のスコープ外。
+    ///   したがって iOS のサンプルレート変更は macOS のようなハードリセット反映ではなく
+    ///   アプリ再起動で反映される(タブの「takes effect at next launch」表記どおり)。
     func hardReset() {
         mx68k_log("[Swift][iOS] hardReset() -> schedule hard reset")
         mx68k_schedule_hard_reset()
@@ -232,6 +366,53 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     func clearSRAM() {
         mx68k_log("[Swift][iOS] clearSRAM() -> schedule sram clear")
         mx68k_schedule_sram_clear()   // フレーム境界で安全にクリア(直接 mx68k_sram_clear は run_frame とレース)。
+    }
+
+    // MARK: - 一時停止(P759)
+
+    /// P759 — macOS `EmulatorViewModel`(:1157-1196)と同型の一時停止機構。
+    /// P706 以来 iOS には意図的に `isPaused` 概念を持たせていなかったが、その理由は
+    /// 「手動の一時停止/再開 UI が無く、自動一時停止の pair 呼出しの片方だけが失敗すると
+    /// 止まったままになる」ことだった。本サイクルで手動トグルボタンを同時に用意したため
+    /// この前提が解消され、自動一時停止を導入できるようになった。
+    /// `isPausedByDebugger`(macOS P749)は iOS にデバッガ機能が無いため移植しない。
+    @Published var isPaused = false
+    private var autoPauseRequests = 0
+    private var didAutoPause = false
+
+    /// モーダル UI(ファイル選択ダイアログ等)を開く直前に呼ぶ。
+    func requestAutoPause() {
+        autoPauseRequests += 1
+        guard didStart, !isPaused, !didAutoPause else { return }
+        engine.pause()
+        statusText = String(localized: "Paused")
+        statusFields = []
+        isPaused = true
+        didAutoPause = true
+    }
+
+    /// モーダル UI を閉じた直後に呼ぶ。全ての要求が解放され、かつ
+    /// `requestAutoPause()` が実際に一時停止させていた場合のみ再開する。
+    func releaseAutoPause() {
+        autoPauseRequests = max(0, autoPauseRequests - 1)
+        guard autoPauseRequests == 0, didAutoPause else { return }
+        didAutoPause = false
+        engine.resume()
+        statusText = String(localized: "Running")
+        isPaused = false
+    }
+
+    func togglePause() {
+        didAutoPause = false   // macOS 版 P229 と同じ: 手動トグルは自動一時停止の追跡から所有権を奪う。
+        if isPaused {
+            engine.resume()
+            statusText = String(localized: "Running")
+        } else {
+            engine.pause()
+            statusText = String(localized: "Paused")
+            statusFields = []
+        }
+        isPaused.toggle()
     }
 
     // MARK: - State Save/Load (P725)
@@ -460,6 +641,11 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         mx68k_set_memory_size(Int32(config.hardware.memoryMB))
         mx68k_set_clock(Int32(config.hardware.clockMHz))
         mx68k_set_fpu_enabled(config.hardware.fpuEnabled)
+        // P757 — 音声サンプルレート(macOS `EmulatorViewModel.pushConfig` と同一呼出し)。
+        // Core 側チップ(ADPCM / OPM / Mercury)の初期化レートはここで渡した値が
+        // mx68k_init / ハードリセットで確定する。これを呼ばないと Core は常に
+        // 44100 固定で初期化され、AudioEngine 側の読み戻し値と食い違う(P626 と同型)。
+        mx68k_set_audio_sample_rate(Int32(config.audio.sampleRate))
         // ★P706 Step 5b の判断: 以下 2 本は §D-3 の setter 列挙には無いが、
         //   §C-3 の表が iOS でも **表示する**と定めた 2 つのコントロール
         //   (Machine Configuration の「External FDD Unit」と SRAM の「Capacity」)の
@@ -468,6 +654,15 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         //   いるのは SCSI/SASI/MIDI/Mercury/Windrv 系であり、この 2 本は含まれない。
         mx68k_set_ext_fdd_enabled(config.extensions.externalFDDUnit)   // P686
         mx68k_set_sram_64k_enabled(config.extensions.sram64kEnabled)   // P493
+        // P762 — ターボの目標倍率を config から復元する(macOS
+        // `EmulatorViewModel.pushConfig`:669-677 と同内容)。ターボ ON/OFF 自体は
+        // 永続化しないため、ここで反映されるのは「次に ON にしたときの倍率」。
+        // 既に ON の状態で設定を適用した場合だけ即時反映する。
+        turboTargetMultiplier = clampTurboMultiplier(config.performance.turboTargetMultiplier)
+        if isTurboActive { applyTurboState() }
+        // FD アクセス高速化。Bridge 側が毎回読み直す単純グローバルなので即時反映
+        // (リセット不要)。既定 false = 従来挙動。
+        mx68k_set_fd_fast_access(config.fdd.fdFastAccess ? 1 : 0)
 
         // ------------------------------------------------------------------
         // P712 §方針3 — SASI / 内蔵SCSI / MO / CD の再送。
@@ -542,7 +737,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             // 上書きするため、一回限りのエラー通知の宛先としては成立しない
             // (最悪1秒未満で消え、体感上「一度も表示されない」)。文言は据え置き、
             // 表示経路のみ `showTransientMessage`(3秒自動消去)へ変更。
-            showTransientMessage("Failed to mount \((path as NSString).lastPathComponent) on FD\(drive)")
+            showTransientMessage(String(localized: "Failed to mount \((path as NSString).lastPathComponent) on FD\(drive)"))
             return false
         }
         // P730 — 通常ファイル経路・ZIP単一/複数イメージ経路(`mountFDDFromArchive` は

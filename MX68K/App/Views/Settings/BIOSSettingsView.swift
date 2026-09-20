@@ -77,7 +77,7 @@ struct BIOSSettingsView: View {
                         #endif
                     } onError: { message in
                         #if os(iOS)
-                        importError = "CGROM — \(message)"
+                        importError = String(localized: "CGROM — \(message)")
                         #endif
                     }
                 }
@@ -92,7 +92,7 @@ struct BIOSSettingsView: View {
                         #endif
                     } onError: { message in
                         #if os(iOS)
-                        importError = "IPLROM — \(message)"
+                        importError = String(localized: "IPLROM — \(message)")
                         #endif
                     }
                 }
@@ -107,7 +107,7 @@ struct BIOSSettingsView: View {
                         #endif
                     } onError: { message in
                         #if os(iOS)
-                        importError = "IPLROM30 — \(message)"
+                        importError = String(localized: "IPLROM30 — \(message)")
                         #endif
                     }
                 }
@@ -123,7 +123,7 @@ struct BIOSSettingsView: View {
                         #endif
                     } onError: { message in
                         #if os(iOS)
-                        importError = "SCSIINROM — \(message)"
+                        importError = String(localized: "SCSIINROM — \(message)")
                         #endif
                     }
                 }
@@ -138,7 +138,7 @@ struct BIOSSettingsView: View {
                         #endif
                     } onError: { message in
                         #if os(iOS)
-                        importError = "SCSIEXROM — \(message)"
+                        importError = String(localized: "SCSIEXROM — \(message)")
                         #endif
                     }
                 }

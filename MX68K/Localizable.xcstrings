@@ -3171,16 +3171,6 @@
         }
       }
     },
-    "Runs the emulator faster than real time. Toggle it from the Emulator menu (⌘⇧T). Sound is muted while turbo is on.": {
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エミュレータを実時間より速く動作させます。切替は「エミュレータ」メニュー(⌘⇧T)から行います。ターボ中は音声がミュートされます。"
-          }
-        }
-      }
-    },
     "Failed to create the blank disk image.": {
       "localizations": {
         "ja": {
@@ -6165,6 +6155,396 @@
           "stringUnit": {
             "state": "translated",
             "value": "この範囲は読み出し自体がハードウェアの状態を進めてしまうため、ダンプビューアからはアクセスしません。"
+          }
+        }
+      }
+    },
+    "Turbo: ON": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ターボ: ON"
+          }
+        }
+      }
+    },
+    "Runs the emulator faster than real time. Toggle it with the button below (or ⌘⇧T on macOS). Sound is muted while turbo is on.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エミュレータを実時間より速く動作させます。切替は下のボタン(macOSでは⌘⇧Tでも可)から行います。ターボ中は音声がミュートされます。"
+          }
+        }
+      }
+    },
+    "Runs the emulator faster than real time. Toggle it with the button below (or ⌘⇧T on macOS).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エミュレータを実時間より速く動作させます。切替は下のボタン(macOSでは⌘⇧Tでも可)から行います。"
+          }
+        }
+      }
+    },
+    "Hide Software Keyboard": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ソフトキーボードを隠す"
+          }
+        }
+      }
+    },
+    "Show Software Keyboard": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ソフトキーボードを表示"
+          }
+        }
+      }
+    },
+    "Hide Virtual Pad": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仮想パッドを隠す"
+          }
+        }
+      }
+    },
+    "Show Virtual Pad": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仮想パッドを表示"
+          }
+        }
+      }
+    },
+    "Disable Touch Mouse": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タッチマウスを無効化"
+          }
+        }
+      }
+    },
+    "Enable Touch Mouse": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "タッチマウスを有効化"
+          }
+        }
+      }
+    },
+    "Analog stick": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アナログスティック"
+          }
+        }
+      }
+    },
+    "⚠ Expands internal battery-backed SRAM from the standard 16 KB to 64 KB, matching the real-hardware modification. The upper 48 KB is stored separately in sram_ext.dat. Takes effect after pressing Apply and then tapping Hard Reset.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 内蔵バッテリバックアップSRAMを標準16KBから64KBへ拡張します(実機の改造相当)。上位48KBはsram_ext.datに別途保存されます。「適用」を押した後、Hard Resetをタップすることで反映されます。"
+          }
+        }
+      }
+    },
+    "FDD0…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FDD0…"
+          }
+        }
+      }
+    },
+    "FDD1…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FDD1…"
+          }
+        }
+      }
+    },
+    "Not started": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未起動"
+          }
+        }
+      }
+    },
+    "BIOS not configured — missing %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "BIOS未設定 — 不足: %@"
+          }
+        }
+      }
+    },
+    "CPU: %dMHz  MEM: %dMB  Speed: %d%%  FD0=%@  FD1=%@  HDD=%@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU: %dMHz  MEM: %dMB  速度: %d%%  FD0=%@  FD1=%@  HDD=%@"
+          }
+        }
+      }
+    },
+    "yes": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "はい"
+          }
+        }
+      }
+    },
+    "no": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "いいえ"
+          }
+        }
+      }
+    },
+    "Paused": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一時停止中"
+          }
+        }
+      }
+    },
+    "Failed to mount %@ on FD%lld": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ の FD%lld へのマウントに失敗しました"
+          }
+        }
+      }
+    },
+    "Ready": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "準備完了"
+          }
+        }
+      }
+    },
+    "Stopped": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止中"
+          }
+        }
+      }
+    },
+    "Import failed: copied %lld of %lld bytes.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取り込み失敗: %lld バイトをコピー(全 %lld バイト中)。"
+          }
+        }
+      }
+    },
+    "Import failed: %@ (%@:%lld)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取り込み失敗: %@ (%@:%lld)"
+          }
+        }
+      }
+    },
+    "CGROM — %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CGROM — %@"
+          }
+        }
+      }
+    },
+    "IPLROM — %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IPLROM — %@"
+          }
+        }
+      }
+    },
+    "IPLROM30 — %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IPLROM30 — %@"
+          }
+        }
+      }
+    },
+    "SCSIINROM — %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSIINROM — %@"
+          }
+        }
+      }
+    },
+    "SCSIEXROM — %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SCSIEXROM — %@"
+          }
+        }
+      }
+    },
+    "CPU: %dMHz": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CPU: %dMHz"
+          }
+        }
+      }
+    },
+    "MEM: %dMB": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MEM: %dMB"
+          }
+        }
+      }
+    },
+    "Speed: %d%%": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "速度: %d%%"
+          }
+        }
+      }
+    },
+    "Spd: %d%%": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "速度: %d%%"
+          }
+        }
+      }
+    },
+    "FD0=%@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD0=%@"
+          }
+        }
+      }
+    },
+    "FD1=%@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD1=%@"
+          }
+        }
+      }
+    },
+    "HDD=%@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDD=%@"
+          }
+        }
+      }
+    },
+    "FD0: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD0: %@"
+          }
+        }
+      }
+    },
+    "FD1: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD1: %@"
+          }
+        }
+      }
+    },
+    "HDD: %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "HDD: %@"
           }
         }
       }
