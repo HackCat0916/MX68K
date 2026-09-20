@@ -951,6 +951,26 @@
         }
       }
     },
+    "Swap A/B Buttons": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A/Bボタンを入れ替え"
+          }
+        }
+      }
+    },
+    "Swaps which signal the A/B buttons send, without changing their on-screen labels or positions. Applies immediately.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A/Bボタンが送信する信号を入れ替えます(画面上のラベル・位置は変更されません)。即座に反映されます。"
+          }
+        }
+      }
+    },
     "Soft Keyboard Opacity": {
       "localizations": {
         "ja": {
