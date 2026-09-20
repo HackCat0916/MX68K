@@ -63,6 +63,20 @@ struct HardwareSettingsView: View {
     /// 既定 false は既存挙動(連射なし)をそのまま維持するための意図的な選択。
     @AppStorage("triggerAutoFireA") private var triggerAutoFireA: Bool = false
     @AppStorage("triggerAutoFireB") private var triggerAutoFireB: Bool = false
+
+    /// P769 — 表示フィルタ・走査線エフェクト(iOS)。macOS版
+    /// `GeneralSettingsView.swift`と同じ`UserDefaults`キーを共有する
+    /// (`X68KRenderer.swift`が`draw()`内でプラットフォーム非依存に直読みする
+    /// ため、キー名の一致のみで機能する——Bridge/Core側の配線は不要)。
+    /// `DisplayFilter` enum(`EmulatorMetalView.swift`)はそのファイル自体が
+    /// macOSターゲット専用でiOSから参照できないため、ここでは同じrawValue
+    /// ("smooth"/"sharp")を持つ独立したPickerとして実装する。
+    @AppStorage("displayFilter") private var displayFilter: String = "smooth"
+    @AppStorage("scanlineEffect") private var scanlineEffect: Bool = false
+
+    /// P770 — 仮想パッドのA/Bボタン内部入れ替え。`TouchJoystickView.swift`と
+    /// 同じ`UserDefaults`キーを共有する(直接読むため配線は不要)。
+    @AppStorage("virtualPadSwapAB") private var virtualPadSwapAB: Bool = false
     #endif
 
     /// P221b §6-bis(A): armed only after the view is on screen, so a
@@ -452,6 +466,16 @@ struct HardwareSettingsView: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // P770 — A/B ボタンの内部入れ替え。画面上のラベル・位置は不変のまま
+                // 送信する信号ビットだけを入れ替える(既定 OFF の opt-in)。
+                // ★オートファイア設定は意図的に**ラベル側**に対応させたまま
+                //   (入れ替え後も画面上の A ボタンに「Auto-fire A」が効く)。
+                Toggle("Swap A/B Buttons", isOn: $virtualPadSwapAB)
+                Text("Swaps which signal the A/B buttons send, without changing their on-screen labels or positions. Applies immediately.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 // P720 — ソフトキーボードの不透明度。既定 1.0(現状の見た目を維持)。
                 // ★下限は仮想パッドの 0.15 ではなく 0.3 —— キーボードは文字情報が多く、
                 //   透明化しすぎるとキー文字の可読性が直接失われるため、読める手前で止める。
@@ -466,6 +490,26 @@ struct HardwareSettingsView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // P769 — 表示フィルタ・走査線エフェクト。macOS版GeneralSettingsView.swiftの
+            // 該当セクションと同じ@AppStorageキー・同じxcstringsキーを再利用する
+            // (新規ローカライズ追加は不要)。
+            Section(header: Text("表示フィルタ")) {
+                Picker(selection: $displayFilter) {
+                    Text("表示フィルタ・スムーズ").tag("smooth")
+                    Text("表示フィルタ・くっきり").tag("sharp")
+                } label: {
+                    Text("表示フィルタ")
+                }
+                .pickerStyle(.segmented)
+
+                Text("表示フィルタの説明")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("走査線エフェクト", isOn: $scanlineEffect)
             }
             #endif
         }

@@ -443,6 +443,12 @@ struct TouchJoystickView: View {
     @AppStorage("triggerAutoFireA") private var triggerAutoFireA: Bool = false
     @AppStorage("triggerAutoFireB") private var triggerAutoFireB: Bool = false
 
+    /// P770 — A/Bボタンの内部入れ替え。画面上のラベル("A"/"B")・位置は
+    /// 変更せず、実際に送信する信号ビット(`bitTrig1`/`bitTrig2`)だけを
+    /// 入れ替える。`virtualPadOpacity`等と同じ理由で`@AppStorage`
+    /// (ホスト側の純粋な操作設定であり`config.json`管轄外)。
+    @AppStorage("virtualPadSwapAB") private var virtualPadSwapAB: Bool = false
+
     /// 帯(P708 の側方配置時の左右ピラーボックス列)と重ならないための左右インセット。
     /// ルートビューが `DisplayViewport.face()` から得た `sideW` をそのまま渡す ——
     /// ここで幾何計算を再発明しない(単一情報源)。
@@ -521,11 +527,11 @@ struct TouchJoystickView: View {
         HStack(spacing: Self.triggerSpacing) {
             // ★連射設定はラベルに対応させる —— B ボタン(bitTrig2)は
             //   `triggerAutoFireB`、A ボタン(bitTrig1)は `triggerAutoFireA`。
-            TouchPadButton(bit: TouchJoystickInput.bitTrig2, label: "B",
+            TouchPadButton(bit: virtualPadSwapAB ? TouchJoystickInput.bitTrig1 : TouchJoystickInput.bitTrig2, label: "B",
                            iconName: nil,
                            diameter: trigButtonSize, isCircle: true,
                            autoFireEnabled: triggerAutoFireB)
-            TouchPadButton(bit: TouchJoystickInput.bitTrig1, label: "A",
+            TouchPadButton(bit: virtualPadSwapAB ? TouchJoystickInput.bitTrig2 : TouchJoystickInput.bitTrig1, label: "A",
                            iconName: nil,
                            diameter: trigButtonSize, isCircle: true,
                            autoFireEnabled: triggerAutoFireA)
