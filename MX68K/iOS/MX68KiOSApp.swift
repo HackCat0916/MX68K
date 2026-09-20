@@ -197,11 +197,15 @@ struct MX68KiOSRootView: View {
                         if showSoftKeyboard && canShowKeyboard {
                             // P760 — 側方ボタン帯を避ける。`leadingInset:` は帯の内部の
                             // 幅計算(スクロール要否・`minWidth`)を実際に使える幅へ
-                            // 合わせる役割、`.padding(.leading:)` は帯をどこへ描画するか
-                            // という位置決めの役割で、両方揃って初めて側方帯のボタンを
-                            // 覆わなくなる(縦向きは `sideW == 0` で従来どおり)。
-                            softKeyboardBand(containerSize: geo.size, leadingInset: sideW)
-                                .padding(.leading, sideW)
+                            // 合わせる役割(縦向きは `sideW == 0` で従来どおり)。
+                            // ★P772 —— 右側の状態帯も同じ `sideW` 幅なので `trailingInset:`
+                            //   としても渡す。`.padding(.leading, sideW)` は廃止した:
+                            //   `softKeyboardBand` が既に `availableWidth`(= 左右対称に
+                            //   `sideW` ずつ差し引いた幅)ぴったりの `.frame(width:)` を
+                            //   報告するため、位置決めは外側の `ZStack(alignment: .bottom)`
+                            //   (水平方向は中央寄せ)の既定配置に委ねる —— 対称な幅であれば
+                            //   自動的に左右へ `sideW` ずつの余白が残る。
+                            softKeyboardBand(containerSize: geo.size, leadingInset: sideW, trailingInset: sideW)
                                 .transition(.move(edge: .bottom))
                         }
                     }
@@ -496,29 +500,54 @@ struct MX68KiOSRootView: View {
     /// 帯を右へずらす `.padding(.leading:)` だけでは内部の幅計算(スクロール要否・
     /// `minWidth`)が縮小前のフル幅のままになり、需要側と供給側が食い違う。
     /// `TouchJoystickView(sideInset:)` と同型に、実際に使える幅を引数で受け取る。
-    private func softKeyboardBand(containerSize: CGSize, leadingInset: CGFloat = 0) -> some View {
-        let availableWidth = containerSize.width - leadingInset
-        let needsHScroll = availableWidth < measuredKeyboardSize.width
-        let needsVScroll = containerSize.height < measuredKeyboardSize.height
-        let needsScroll = needsHScroll || needsVScroll
-        let bandHeight = min(measuredKeyboardSize.height, containerSize.height)
-        return ScrollView(needsScroll ? [.horizontal, .vertical] : [], showsIndicators: needsScroll) {
+    ///
+    /// P772 —— `trailingInset` は右側状態帯(`sideStatusBand`、左と同じ `sideW` 幅)の分。
+    /// P771 で帯が実際に幅いっぱいへ広がる設計になったことで、右側を差し引いていない
+    /// 従来の `availableWidth` 計算が初めて可視化された(右の状態帯へ重なる)。
+    private func softKeyboardBand(containerSize: CGSize, leadingInset: CGFloat = 0, trailingInset: CGFloat = 0) -> some View {
+        let availableWidth = containerSize.width - leadingInset - trailingInset
+        // P771 —— 幅いっぱいに拡大する倍率。`measuredKeyboardSize`(既存の実測
+        // 機構)を分母に使う。初期値は intrinsic 定数(790pt、ゼロではない)の
+        // ため実質的にこのガードへは到達しないが、0除算に対する最終防壁として
+        // 残す。初回描画後は実測値へ自己更新される。
+        let scale = measuredKeyboardSize.width > 0
+            ? availableWidth / measuredKeyboardSize.width
+            : 1.0
+        let scaledSize = CGSize(width: measuredKeyboardSize.width * scale,
+                                height: measuredKeyboardSize.height * scale)
+        // ★横スクロールは幅いっぱいに拡大するため常に不要になった(P710改訂2までの
+        //   横スクロール分岐を撤廃)。縦方向だけ、極端に背が低いコンテナ(スケール後の
+        //   高さがコンテナ高を超える場合)の保険として残す。
+        let needsVScroll = containerSize.height < scaledSize.height
+        let bandHeight = min(scaledSize.height, containerSize.height)
+        return ScrollView(needsVScroll ? [.vertical] : [], showsIndicators: needsVScroll) {
             SoftKeyboardView()
                 .background(
                     GeometryReader { contentGeo in
                         Color.clear.preference(key: SoftKeyboardSizeKey.self, value: contentGeo.size)
                     }
                 )
-                // 収まる幅では中央寄せ、収まらない幅では固有幅のままスクロールさせる。
-                .frame(minWidth: availableWidth, alignment: .center)
+                // ★実測(上の GeometryReader)は scaleEffect **より前**の非スケール状態の
+                //   サイズを捉える(SwiftUI の background は scaleEffect 適用前のレイアウト
+                //   サイズに追従するため)。よって scale の分母が自分自身の出力に依存する
+                //   循環参照にはならない。
+                .scaleEffect(scale, anchor: .top)
+                // `.scaleEffect` はレイアウトサイズを変えないため、スケール後の占有サイズを
+                // 親レイアウトへ明示的に伝える。
+                .frame(width: scaledSize.width, height: scaledSize.height)
         }
         .onPreferenceChange(SoftKeyboardSizeKey.self) { size in
             // ★ゼロサイズ(未計測/レイアウト前)は既定値のまま保持し、上書きしない。
             guard size.width > 0, size.height > 0 else { return }
             measuredKeyboardSize = size
         }
-        .scrollDisabled(!needsScroll)
-        .frame(height: bandHeight)
+        .scrollDisabled(!needsVScroll)
+        // ★P772 —— `ScrollView` 自体の占有幅を明示的に固定する(SwiftUI の `.frame(width:)` は
+        //   親から提案された幅に関わらず、そのビュー自身が親へ報告する幅を確定させる曖昧さの
+        //   無い決定的な指定 ——「ScrollView が提案幅を貪欲に占有するか」という実装依存の
+        //   暗黙的挙動に一切依存しない)。これが無いと、内部コンテンツ幅だけを縮めても
+        //   `ScrollView` の占有幅は縮まらず、差の半分だけ右帯へ食い込んだままになる。
+        .frame(width: availableWidth, height: bandHeight)
         // P720 — 帯全体へ 1 回だけ適用する(`SoftKeyboardView` 内部の個々のキーには
         // 掛けない)。既定 1.0 のため、スライダーを動かすまで見た目は現状のまま。
         .opacity(softKeyboardOpacity)
