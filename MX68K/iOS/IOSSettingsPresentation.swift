@@ -152,6 +152,19 @@ struct IOSSettingsBarButtons: View {
             .accessibilityLabel("Interrupt")
             .modifier(IOSBarTouchTarget(active: axis == .vertical))
 
+            // P759 — 一時停止/再開。macOS の ⌘P と同じく**確認ダイアログ無しで即時実行**
+            // (Hard Reset のような破壊的操作ではないため)。
+            // FD 選択時の自動一時停止(`requestAutoPause`/`releaseAutoPause`)が片側だけ
+            // 失敗した場合の保険も兼ねる。
+            Button {
+                viewModel.togglePause()
+            } label: {
+                Image(systemName: viewModel.isPaused ? "play.fill" : "pause.fill")
+                    .imageScale(.large)
+            }
+            .accessibilityLabel(viewModel.isPaused ? Text("Resume") : Text("Pause"))
+            .modifier(IOSBarTouchTarget(active: axis == .vertical))
+
             // P713 — FDD0 / FDD1。macOS `ToolbarView` は Select(folder)と
             // Eject(eject)の 2 ボタン構成だが、iOS では同一行に複数 Button を
             // 並べると隣接ボタンが同時発火する不具合を P712 で経験しているため、
@@ -195,8 +208,8 @@ struct IOSSettingsBarButtons: View {
                     Image(systemName: softKeyboardGlyph)
                         .imageScale(.large)
                 }
-                .accessibilityLabel(showSoftKeyboard ? "Hide Software Keyboard"
-                                                     : "Show Software Keyboard")
+                .accessibilityLabel(showSoftKeyboard ? Text("Hide Software Keyboard")
+                                                     : Text("Show Software Keyboard"))
                 .modifier(IOSBarTouchTarget(active: axis == .vertical))
             }
 
@@ -215,7 +228,7 @@ struct IOSSettingsBarButtons: View {
                     .imageScale(.large)
             }
             .disabled(!canToggleVirtualPad)
-            .accessibilityLabel(showVirtualPad ? "Hide Virtual Pad" : "Show Virtual Pad")
+            .accessibilityLabel(showVirtualPad ? Text("Hide Virtual Pad") : Text("Show Virtual Pad"))
             .modifier(IOSBarTouchTarget(active: axis == .vertical))
 
             Button {
@@ -226,7 +239,7 @@ struct IOSSettingsBarButtons: View {
                     // ★ON 状態を色で示す(SF Symbol に fill 対の無いシンボルのため)。
                     .foregroundStyle(mouseModeEnabled ? Color.yellow : Color.green)
             }
-            .accessibilityLabel(mouseModeEnabled ? "Disable Touch Mouse" : "Enable Touch Mouse")
+            .accessibilityLabel(mouseModeEnabled ? Text("Disable Touch Mouse") : Text("Enable Touch Mouse"))
             .modifier(IOSBarTouchTarget(active: axis == .vertical))
 
             Button {
@@ -256,12 +269,19 @@ struct IOSSettingsBarButtons: View {
                 DispatchQueue.main.async {
                     if pendingFDDDrive == dismissedDrive {
                         pendingFDDDrive = nil
+                        // P759 — キャンセル経路(completion が呼ばれなかった)側の解放。
+                        // `if` の中に置くこと: completion が処理済みならそちらが解放済みで、
+                        // ここで二重に解放すると参照カウントが壊れる。
+                        viewModel.releaseAutoPause()
                     }
                 }
             }
         ), allowedContentTypes: [.data], allowsMultipleSelection: false) { result in
             guard let drive = pendingFDDDrive else { return }
             pendingFDDDrive = nil
+            // P759 — 成功/失敗(キャンセル以外)いずれの経路もここを通るため、
+            // 以降の分岐より前に 1 回だけ解放する。
+            viewModel.releaseAutoPause()
             switch result {
             case .success(let urls):
                 guard let url = urls.first else {
@@ -320,6 +340,9 @@ struct IOSSettingsBarButtons: View {
         Menu(titleKey) {
             Button("Select…") {
                 ImportedFileStore.logOpen(destination: .disksDir)
+                // P759 — ダイアログ提示中はエミュレーションを自動で一時停止する。
+                // 解放は body 側の `.fileImporter`(キャンセル経路 / completion 経路)が行う。
+                viewModel.requestAutoPause()
                 pendingFDDDrive = drive
             }
             Button("Eject") {

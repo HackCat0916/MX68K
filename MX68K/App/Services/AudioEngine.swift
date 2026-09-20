@@ -23,9 +23,17 @@ class AudioEngine {
     private static let log = Logger(subsystem: "com.mx68k.emulator", category: "AudioEngine")
 
     func initialize(sampleRate: Double = 44100.0, bufferFrames: UInt32 = 512) {
+        // P757: kAudioUnitSubType_DefaultOutput は iOS SDK では未定義
+        // (AUComponent.h の `#if !TARGET_OS_IPHONE` ガード内)。iOS の
+        // ハードウェア出力ユニットは RemoteIO。
+        #if os(iOS)
+        let outputSubType = kAudioUnitSubType_RemoteIO
+        #else
+        let outputSubType = kAudioUnitSubType_DefaultOutput
+        #endif
         var desc = AudioComponentDescription(
             componentType: kAudioUnitType_Output,
-            componentSubType: kAudioUnitSubType_DefaultOutput,
+            componentSubType: outputSubType,
             componentManufacturer: kAudioUnitManufacturer_Apple,
             componentFlags: 0,
             componentFlagsMask: 0

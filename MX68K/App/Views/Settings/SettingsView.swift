@@ -74,8 +74,10 @@ struct SettingsView: View {
                 // P706 §0-4 提案(3): 未移植のタブは **表示しない**。Browse… が死んだ
                 // タブを見せるより、動く数枚だけを出す方が完成品である。
                 // P712: SASI / SCSI を移植したので追加(タグ番号は macOS と共通)。
+                // P761: Audio を追加(Mercury / MIDI は View 内で `#if os(macOS)` 除外)。
                 Text("BIOS").tag(0)
                 Text("Hardware").tag(1)
+                Text("Audio").tag(2)
                 Text("SASI").tag(4)
                 Text("SCSI").tag(5)
                 #endif
@@ -123,6 +125,8 @@ struct SettingsView: View {
                     BIOSSettingsView()
                 case 1:
                     HardwareSettingsView()
+                case 2:
+                    AudioSettingsView()   // P761
                 case 4:
                     SASISettingsView()   // P712
                 case 5:

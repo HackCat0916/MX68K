@@ -39,7 +39,7 @@ class EmulatorViewModel: ObservableObject {
     /// P204 — 電源ON(cold boot)時に呼ばれる。EmulatorView が config/fdd を注入する
     /// (onFDDMounted 等と同型 = ViewModel が ConfigManager に依存しない)。
     var onPowerOn: (() -> Void)?
-    @Published var statusText = "Ready"
+    @Published var statusText = String(localized: "Ready")
     /// P189 — 下部ステータスバーに数秒だけ一時表示するメッセージ（スクショ完了等）。
     /// nil のとき非表示。showTransientMessage() で世代管理付きに自動クリアする。
     @Published var transientMessage: String? = nil
@@ -379,7 +379,7 @@ class EmulatorViewModel: ObservableObject {
             guard self.debuggerStatus().stopped != 0 else { return }
             self.didAutoPause = false
             self.engine.pause()
-            self.statusText = "Paused"
+            self.statusText = String(localized: "Paused")
             self.adpcmStatus.peak_level = 0
             self.isPausedByDebugger = true   // P749: この一時停止はデバッガ由来。
             self.isPaused = true
@@ -446,7 +446,7 @@ class EmulatorViewModel: ObservableObject {
         // P204-fix: displayDimming は powerOff()/powerOn() が管理する。ここで 0 に
         // しない — cold boot(powerOn)経路では黒幕を維持したまま最初の数フレームを
         // 描かせ、旧フレームのちらつきを防ぐ(新規起動時は既定値 0.0 で画面は可視)。
-        statusText = "Running"
+        statusText = String(localized: "Running")
         /* P556: ターボ状態の再適用。startEmulation 冒頭の pushConfig(178 行)も
          * `if isTurboActive { applyTurboState() }` を通るが、その時点ではまだ
          * isRunning == false なので、applyTurboState の isRunning ガード
@@ -741,7 +741,7 @@ class EmulatorViewModel: ObservableObject {
         mx68k_shutdown()
         isRunning = false
         EmulatorRunState.shared.isRunning = isRunning        // P546: メニューゲート用の軽量ミラー
-        statusText = "Stopped"
+        statusText = String(localized: "Stopped")
     }
 
     func setSoundEnabled(_ on: Bool) { audio.enabled = on }
@@ -1159,7 +1159,7 @@ class EmulatorViewModel: ObservableObject {
         autoPauseRequests += 1
         guard isRunning, powerState == .on, !isPaused, !didAutoPause else { return }
         engine.pause()
-        statusText = "Paused"
+        statusText = String(localized: "Paused")
         isPaused = true
         adpcmStatus.peak_level = 0   // P484c: 一時停止中はサウンドモニタの Peak Level を表示上 0 にする
         didAutoPause = true
@@ -1172,7 +1172,7 @@ class EmulatorViewModel: ObservableObject {
         guard autoPauseRequests == 0, didAutoPause else { return }
         didAutoPause = false
         engine.resume()
-        statusText = "Running"
+        statusText = String(localized: "Running")
         isPaused = false
     }
 
@@ -1186,10 +1186,10 @@ class EmulatorViewModel: ObservableObject {
         isPausedByDebugger = false
         if isPaused {
             engine.resume()
-            statusText = "Running"
+            statusText = String(localized: "Running")
         } else {
             engine.pause()
-            statusText = "Paused"
+            statusText = String(localized: "Paused")
             adpcmStatus.peak_level = 0   // P484c: 一時停止中はサウンドモニタの Peak Level を表示上 0 にする
         }
         isPaused.toggle()
@@ -1254,7 +1254,7 @@ class EmulatorViewModel: ObservableObject {
         didAutoPause = false
         isPausedByDebugger = false   // P749: デバッガ由来の一時停止はここで解消。
         engine.resume()
-        statusText = "Running"
+        statusText = String(localized: "Running")
         isPaused = false
     }
 

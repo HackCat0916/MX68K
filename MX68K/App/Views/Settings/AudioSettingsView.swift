@@ -1,15 +1,27 @@
 import SwiftUI
 
+// P761: iOS へ移植。macOS 側の実効コードパスは変更せず、`#if os(macOS)` 分岐を
+// 追加するだけ(`SASISettingsView` が確立した「宣言自体を `#if` で囲む」流儀を踏襲)。
+// Mercury Unit / MIDI ボード設定は iOS 側に CoreMIDI デバイス一覧取得等の基盤配線が
+// 無いため、セクションごと `#if os(macOS)` で除外する(ユーザー合意済みのスコープ外)。
 struct AudioSettingsView: View {
     @EnvironmentObject var settingsViewModel: SettingsViewModel
+    #if os(macOS)
     @EnvironmentObject var emulatorViewModel: EmulatorViewModel
+    #else
+    @EnvironmentObject var iosViewModel: MX68KiOSViewModel
+    #endif
 
     var body: some View {
         Form {
             Section(header: Text("Sound Settings")) {
                 Toggle("Sound Enabled", isOn: $settingsViewModel.audioEnabled)
                     .onChange(of: settingsViewModel.audioEnabled) { newValue in
+                        #if os(macOS)
                         emulatorViewModel.setSoundEnabled(newValue)
+                        #else
+                        iosViewModel.setSoundEnabled(newValue)
+                        #endif
                     }
                 // P581: 3 本の音量行を `LabeledContent` へ統一する。grouped Form の
                 // ラベル列へ自動整列するので、上下の `Toggle`/`Picker` とも縦位置が
@@ -19,7 +31,11 @@ struct AudioSettingsView: View {
                     HStack {
                         Slider(value: $settingsViewModel.audioVolume, in: 0...1)
                             .onChange(of: settingsViewModel.audioVolume) { newValue in
+                                #if os(macOS)
                                 emulatorViewModel.setVolume(newValue)
+                                #else
+                                iosViewModel.setVolume(newValue)
+                                #endif
                             }
                         Text("\(Int(settingsViewModel.audioVolume * 100))%")
                             .frame(width: 52, alignment: .trailing)
@@ -37,7 +53,11 @@ struct AudioSettingsView: View {
                             get: { Double(settingsViewModel.adpcmVolume) },
                             set: { newValue in
                                 settingsViewModel.adpcmVolume = Int(newValue.rounded())
+                                #if os(macOS)
                                 emulatorViewModel.setAdpcmVolume(settingsViewModel.adpcmVolume)
+                                #else
+                                iosViewModel.setAdpcmVolume(settingsViewModel.adpcmVolume)
+                                #endif
                             }
                         ), in: 0...16, step: 1)
                         Text("\(settingsViewModel.adpcmVolume)/16")
@@ -51,7 +71,11 @@ struct AudioSettingsView: View {
                             get: { Double(settingsViewModel.opmVolume) },
                             set: { newValue in
                                 settingsViewModel.opmVolume = Int(newValue.rounded())
+                                #if os(macOS)
                                 emulatorViewModel.setOpmVolume(settingsViewModel.opmVolume)
+                                #else
+                                iosViewModel.setOpmVolume(settingsViewModel.opmVolume)
+                                #endif
                             }
                         ), in: 0...16, step: 1)
                         Text("\(settingsViewModel.opmVolume)/16")
@@ -75,6 +99,10 @@ struct AudioSettingsView: View {
                 Text("⚠ Sample rate takes effect at next launch")
                     .font(.subheadline).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                // P761: Mercury Unit / MIDI ボード設定は macOS 限定。iOS 側には
+                // CoreMIDI デバイス一覧(`emulatorViewModel.midiOutputDeviceNames` 等)の
+                // 配線が無いため、セクションごとコンパイル対象から外す。
+                #if os(macOS)
                 Toggle("Mercury Unit (16-bit linear PCM)", isOn: $settingsViewModel.mercuryUnit)
                     .disabled(settingsViewModel.midiEnabled)
                 // P581: 日本語リテラル直書き(英語モードでも日本語が出ていた)を
@@ -171,12 +199,15 @@ struct AudioSettingsView: View {
                         }
                     }
                 }
+                #endif
             }
         }
         // P580 — macOS 標準のグループスタイル(Form 自体がスクロール可能)。
         // MIDI 有効時に既定高さを超えるこのタブは、P579 の外側 `ScrollView` ではなく
         // このスタイルでスクロールする。
         .formStyle(.grouped)
+        #if os(macOS)
         .onAppear { emulatorViewModel.refreshMidiDeviceList() }
+        #endif
     }
 }

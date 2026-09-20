@@ -1017,12 +1017,18 @@ class EmulatorEngine: ObservableObject {
     // MARK: - P556: ノーウェイト実行(専用バックグラウンドスレッド)
 
     /* P703 — このセクションは `#if` で切らず、iOS ターゲットでも**そのまま**
-     * コンパイルする(そのまま通る)。iOS にはノーウェイトを有効化する UI が無く
-     * `noWaitActive` は常に false のままなので、stopNoWaitThread() のデッドロック
-     * 非発生の根拠(「ノーウェイト中は表示リンク側が早期 return して emulationLock を
-     * 取らない」)もそのまま成立する。★この前提が崩れるのは「iOS にノーウェイト UI を
-     * 足す」将来サイクルであり、そのときは駆動元がメインスレッド(CADisplayLink)で
-     * ある点と併せて再検討すること。 */
+     * コンパイルする(そのまま通る)。
+     *
+     * P762 — P703 が「将来サイクルで再検討すること」と予告していた
+     * 「iOS にノーウェイト UI を足す」変更を実施した(設定画面 Hardware タブの
+     * Speed-up Options を iOS でも表示し、`MX68KiOSViewModel.applyTurboState()` から
+     * start/stopNoWaitThread() を呼ぶ)。再検討の結論: **iOS の方が macOS より
+     * 排他は単純**。stopNoWaitThread() のデッドロック非発生の根拠
+     * (「ノーウェイト中は表示リンク側が早期 return して emulationLock を取らない」)は
+     * 変わらず成立し、加えて iOS では駆動元の CADisplayLink コールバックも
+     * start/stopNoWaitThread() の呼び出しもどちらもメインスレッドであるため、
+     * macOS(CVDisplayLink 専用スレッド)に存在する「両者が重なる窓」が
+     * 構造的に消える。 */
 
     /// P556 — ノーウェイト専用スレッドを起動する。**メインスレッドからのみ呼ぶこと。**
     /// 起動済みなら何もしない(冪等)。
