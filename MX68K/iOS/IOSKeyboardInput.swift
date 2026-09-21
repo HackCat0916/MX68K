@@ -34,7 +34,26 @@
 //    - 単独修飾キーは **自身の keyCode で届く**(Shift 単独 = `usage=0xE1`、
 //      Ctrl 単独 = `usage=0xE0`)。よって経路 A は生きている。経路 B
 //      (`UIKey.modifierFlags`)は冗長化のために併走させたままにする。
-//    - キーリピートは began の反復として届く(B-6 の「保持中 usage の down は無視」を確定)。
+//    - キーリピートは began の反復として届く。
+//      ★★この T-0 所見は **iPad シミュレータ + Capture Keyboard 環境に固有**であり、
+//        実機ハードウェアキーボード(Bluetooth 等)には当てはまらないことが
+//        P775(2026-09-21, D-76)で確定した。**UIKit は実機では `pressesBegan` を
+//        キー押しっぱなし中に反復配送しない**(ユーザー実機 hands-on 確認 2 回、
+//        クリーンビルド後の再確認を含む)。
+//      ★P774(2026-09-21, D-76)は B-6 の「保持中 usage の down は無視」ガードを
+//        撤去して「反復 began のたびに key_down を送る」方式へ変えたが、
+//        上記の通り実機には反復 began 自体が届かないため症状は解消しなかった。
+//      ★P775 はこれを **Timer ベースの合成キーリピート**で対処する方式へ変更した。
+//        `handleDown` は保持中 usage の重複 down を再び吸収し(反復 began を送る
+//        シミュレータ環境で二重送出にならないための安全策)、リピートの実体は
+//        `startRepeat` / `stopRepeat` が持つ Timer(初回ディレイ後に一定間隔で
+//        `mx68k_key_down` を再送)が担う —— P724 オートファイア機構
+//        (`TouchJoystickView.swift`)と同型のパターンである。
+//        実機 X68000 のオートリピートは 8051 キーボードコントローラが行うが、
+//        MX では Core 側にリピート機構が無く、従来から**ホスト側のイベント配送**が
+//        そのままリピートになる構造。P775 のディレイ / 間隔は実機タイミングの
+//        模倣ではなく、一般的な UX 値として定めたホスト側 UI 規約である
+//        (ユーザーが明示的にこの方針を選択、2026-09-21)。
 //    - **`pressesCancelled` / `resignFirstResponder` はアプリのバックグラウンド遷移で
 //      発火しなかった**。よって押しっぱなし解除の**主たる保証**は
 //      `EmulatorMTKView_iOS` が張る `UIApplication.didEnterBackgroundNotification`
@@ -237,6 +256,18 @@ final class IOSKeyboardInput {
     /// ★修飾キー(M1-M5)はここへ入らない。
     private var heldKeys: [Int: UInt8] = [:]
 
+    /// P775: キー押しっぱなし時の合成キーリピート用タイマー。
+    /// P724 `autoFireTimers`(`TouchJoystickView.swift:111`)と同型のパターン。
+    private var repeatTimers: [Int: Timer] = [:]
+
+    /// リピート開始までの初回ディレイ・リピート間隔。実機X68000のキーボード
+    /// コントローラのオートリピートタイミングに一次情報源は無い(MXは元々
+    /// ホストOSの反復イベント配送回数へ依存する構造、P774投資調査§2参照)。
+    /// 一般的なUX値として本サイクルが新規に定めるホスト側UI規約であり、
+    /// P724 `autoFirePhaseInterval`(`:123`)と同型の扱い(記号表参照)。
+    private static let repeatInitialDelay: TimeInterval = 0.5
+    private static let repeatInterval: TimeInterval = 0.05
+
     /// 経路 A: 現在押されている修飾キーの HID usage → **同時押下数**。
     ///
     /// ★集合ではなく**カウンタ**である理由(T-4a の実測): この環境では
@@ -308,21 +339,52 @@ final class IOSKeyboardInput {
         return unhandled
     }
 
-    /// `InputManager.handleKeyDown`(`:569-575`)の逐語移植 + キーリピート抑止。
+    /// `InputManager.handleKeyDown`(`:569-575`)の逐語移植 + P775合成リピート。
     @discardableResult
     private func handleDown(usage: Int) -> Bool {
         guard let code = Self.keyMap[usage] else { return false }
-        // B-6 / T-0d: iOS は保持中も began を反復配送する。ゲストへ重複した
-        // key_down を送らないよう、既に保持中の usage は無視する。
+        // 既に押下中なら何もしない(UIKitが反復beganを送ってくる環境
+        // ではここで吸収、実体はP775のTimerが担う——シミュレータ/実機
+        // 両方で二重にmx68k_key_downが暴走しないための安全策)。
         if heldKeys[usage] != nil { return true }
         heldKeys[usage] = code
         mx68k_key_down(code)
+        startRepeat(usage: usage, code: code)
         return true
+    }
+
+    /// P775: 指定usageの合成キーリピートを開始する。初回ディレイ経過後、
+    /// 一定間隔でmx68k_key_downを再送する(P724 startAutoFireと同型)。
+    private func startRepeat(usage: Int, code: UInt8) {
+        let initialTimer = Timer(timeInterval: Self.repeatInitialDelay, repeats: false) { [weak self] _ in
+            guard let self, self.heldKeys[usage] != nil else { return }
+            let intervalTimer = Timer(timeInterval: Self.repeatInterval, repeats: true) { [weak self] _ in
+                guard let self, self.heldKeys[usage] != nil else { return }
+                mx68k_key_down(code)
+            }
+            RunLoop.main.add(intervalTimer, forMode: .common)
+            self.repeatTimers[usage] = intervalTimer
+        }
+        // ★`.common`モードで登録する(P724 `:143-147`と同じ理由——UIKitの
+        //   イベント追跡が`.tracking`ランループモードへ切り替わる文脈下でも
+        //   確実に発火させるための保険)。
+        RunLoop.main.add(initialTimer, forMode: .common)
+        repeatTimers[usage] = initialTimer
+        mx68k_log(String(format: "[Swift][iOS][P775-KEYREPEAT] start usage=0x%02X code=0x%02X", usage, Int(code)))
+    }
+
+    /// P775: 指定usageの合成キーリピートを停止する。
+    private func stopRepeat(usage: Int) {
+        guard repeatTimers[usage] != nil else { return }
+        repeatTimers[usage]?.invalidate()
+        repeatTimers.removeValue(forKey: usage)
+        mx68k_log(String(format: "[Swift][iOS][P775-KEYREPEAT] stop usage=0x%02X", usage))
     }
 
     /// `InputManager.handleKeyUp`(`:577-585`)の逐語移植。
     @discardableResult
     private func handleUp(usage: Int) -> Bool {
+        stopRepeat(usage: usage)  // ★P775: 追加(この1行のみ)
         // 押下時に送出したコードで解放する(現在の割当を引き直さない)。
         guard let code = heldKeys.removeValue(forKey: usage) else { return false }
         /* ★同じコードを別の物理キーがまだ保持している場合は解放しない
@@ -447,6 +509,13 @@ final class IOSKeyboardInput {
     ///
     /// ★呼び出しはメインスレッドから行うこと(§B-7)。
     func releaseAll(reason: String) {
+        /* ★P775: 進行中の合成リピートを全て停止する(P724 releaseVirtualPad
+         *   `:176-184`と同じ理由——これを怠ると、この関数を呼ぶ複数の契機
+         *   (バックグラウンド遷移・pressesCancelled等)の後もタイマーが
+         *   生き残り、指を離していないのに周期的にkey_downが送出され続ける)。 */
+        for timer in repeatTimers.values { timer.invalidate() }
+        repeatTimers.removeAll()
+
         /* 複数の usage が同一スキャンコードへ写り得る(0x5E)ので、
          * コードの集合へ畳んでから 1 回ずつ up する。 */
         let codes = Set(heldKeys.values)
