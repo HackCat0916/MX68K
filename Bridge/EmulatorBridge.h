@@ -580,6 +580,7 @@ void mx68k_joy_set1(int port, uint8_t bits);
 
 // ---- SRAM ----
 void mx68k_sram_save(void);
+void mx68k_sram_save_all(void);   // P773: 基本16KB+64KB拡張を1回でまとめて保存
 void mx68k_sram_load(void);
 void mx68k_sram_clear(void);
 // P454: schedule the SRAM zero-clear at the next mx68k_run_frame() boundary

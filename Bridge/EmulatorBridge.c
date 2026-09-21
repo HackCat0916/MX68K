@@ -7172,6 +7172,16 @@ void mx68k_set_fd_fast_access(int enabled) {
     g_fd_fast_access = enabled ? 1 : 0;
 }
 
+/* P773 — 基本16KB(mx68k_sram_save)と64KB拡張(sram_ext_save)の両方を
+ * まとめて保存する。mx68k_shutdown()(:1816-1830)が行っている2つの
+ * SRAM保存呼出しと同じペアだが、シャットダウン特有の他の後処理
+ * (scsi_real_install_teardown 等)は含まない——実行継続を前提とした
+ * バックグラウンド遷移等の契機で、SRAMだけを永続化したい場合に使う。 */
+void mx68k_sram_save_all(void) {
+    mx68k_sram_save();
+    sram_ext_save(mx68k_support_dir());
+}
+
 void mx68k_sram_save(void) {
     ensure_app_support_dir();
     const char* home = getenv("HOME");

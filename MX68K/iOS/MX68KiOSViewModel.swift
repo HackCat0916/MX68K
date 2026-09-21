@@ -35,6 +35,7 @@ import Foundation
 import CoreGraphics
 import Combine
 import AVFoundation   // P757: AVAudioSession
+import UIKit          // P773: UIApplication.didEnterBackgroundNotification
 
 /// ★スレッド規約は macOS 側 EmulatorViewModel と同じ —— クラス自体に `@MainActor` は
 /// 付けず、書き込みは常にメインスレッドから行う。X68KRenderer は
@@ -141,6 +142,40 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         mx68k_log("[Swift][iOS] calling mx68k_init()")
         mx68k_init()
         mx68k_log("[Swift][iOS] mx68k_init() returned")
+
+        // P773 — バックグラウンド遷移時に SRAM を保存する。iOS はサスペンド後の
+        // タスクキルでアプリコードが一切実行されない(macOS 版の
+        // applicationWillTerminate / .onDisappear に相当する契機が存在しない)ため、
+        // mx68k_shutdown()(SRAM 保存を含む)を呼ぶタイミングが無く、SRAM 常駐
+        // プログラムのインストール等の変更がタスクキルで失われていた
+        // (ユーザー報告、2026-09-20)。バックグラウンド遷移はタスクキルの前に
+        // 必ず経由する唯一確実な契機のため、ここで SRAM だけを保存する
+        // (mx68k_shutdown() 全体は呼ばない——scsi_real_install_teardown() 等の
+        // 他の後処理は実行継続前提のバックグラウンド遷移と矛盾するため)。
+        // `EmulatorMetalView_iOS.swift` のキーボード/仮想パッド押しっぱなし解除と
+        // 同じ契機・同じ `queue: .main` パターン。
+        //
+        // このオブザーバは `start(config:)` 冒頭の `guard !didStart else { return }`
+        // により、関数本体が生涯で 1 回だけ実行されることが保証されているため、
+        // 二重登録防止の追加ガードは不要。
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // ★iOS も P762 でノーウェイト(ターボ)が配線済みであり、ノーウェイト中は
+            //   `mx68k_run_frame()` が専用のバックグラウンドスレッドで実行される
+            //   (`EmulatorEngine.swift` の `emulationLock` ——メイン/専用スレッドの
+            //   同時アクセスを排他する既存の共有ロック)。生の `fwrite` を行う
+            //   `mx68k_sram_save_all()` を無防備に呼ぶと、ノーウェイト中の背景遷移で
+            //   SRAM[] の書込み途中状態を読む競合が理論上あり得るため、
+            //   `mx68k_run_frame()` と同じ `engine.withEmulationLock` で必ず囲む
+            //   (P674 で確立済みの既存パターン、`insertMO` / `ejectMO` 等で実績あり)。
+            self?.engine.withEmulationLock {
+                mx68k_sram_save_all()
+            }
+            mx68k_log("[Swift][iOS] SRAM saved on didEnterBackground")
+        }
 
         // ------------------------------------------------------------------
         // P757 — 音声出力の配線。順序を厳守すること:
