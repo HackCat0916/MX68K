@@ -26,6 +26,13 @@
 void p509_fdc_mirror_reset(void);   /* FDC_Init() 直後にコマンドミラーを巻き戻す */
 void p509_fdc_hist_dump(void);      /* フレーム末尾から毎フレーム(出力は300フレーム毎) */
 
+/* P776: ゲスト起点のソフトウェア電源OFF検出($E8E00F への $00→$0F→$0F)。
+ * 状態機械本体と one-shot フラグは m68000_bridge.c 側(書込み観測フックと
+ * 同じ翻訳単位)にあり、ここからは巻き戻し関数とフラグだけを参照する
+ * (p509_fdc_mirror_reset と同型の配置)。 */
+void p776_poweroff_state_reset(void);   /* 状態機械+フラグを巻き戻す(init / hard reset) */
+extern volatile int g_p776_poweroff_req;
+
 #define P29_RTE_STUB_ADDR  0x0FFF00U  /* RTEスタブ配置アドレス（1MB RAM末端・IPLコピー範囲外） */
 
 /* P221b: Config.XVIMode is now DERIVED from the configured clock (see
@@ -1494,6 +1501,11 @@ int mx68k_init(void) {
     debug_log("[P686-EXTFDD] init/reset: enabled=%d -> wired=%d drives=%d\n",
               (int)g_ext_fdd_enabled, g_ext_fdd_wired, g_ext_fdd_wired ? 4 : 2);
     p509_fdc_mirror_reset();   /* P509: Bridge 側コマンドミラーを fdc.c と同時に巻き戻す */
+    /* P776: ゲスト起点電源OFF検出の状態機械を巻き戻す。★cold boot 経路にも
+     * 必要 —— 電源OFF 後の電源ON は stopEmulation → startEmulation =
+     * mx68k_init() を通るため、ここで巻き戻さないと「一度ゲスト起点で
+     * 電源を切ると 2 回目以降が効かない」(step が 3 のまま)になる。 */
+    p776_poweroff_state_reset();
     TVRAM_Init();       /* P171: init TextDrawPattern (text bit-expand table). Missing in
                          * the port -> TextDrawWork stayed 0 -> blank text layer. MPX calls
                          * this in its reset sequence (winx68k.cpp:293). */
@@ -2029,6 +2041,9 @@ void mx68k_reset_hard(void) {
     debug_log("[P686-EXTFDD] init/reset: enabled=%d -> wired=%d drives=%d\n",
               (int)g_ext_fdd_enabled, g_ext_fdd_wired, g_ext_fdd_wired ? 4 : 2);
     p509_fdc_mirror_reset();   /* P509: Bridge 側コマンドミラーを fdc.c と同時に巻き戻す */
+    /* P776: ゲスト起点電源OFF検出の状態機械を巻き戻す(ハードリセットで
+     * 再武装 —— 実機のリセットでも電源OFF シーケンスの途中状態は残らない)。 */
+    p776_poweroff_state_reset();
     /* P509 (D-48): P46-FIX-B の FDC_SetForceReady(1) をここから削除した。
      * P46-FIX-B が当初意図していたポート $E94005(ドライブレディレジスタ)には
      * fdc.ready は一切効いておらず(fdc.c:465-469 は FDD_IsReady() のみを参照する)、
@@ -6135,6 +6150,17 @@ bool mx68k_scsi_in_is_inserted(int id) {
 /* P204: guest SRAM $ED0029 (XEiJ SRAM_EJECT) bit0 = eject FD at power-off.
    SRAM[] is byte-swapped (adr^1) so guest $ED0029 -> SRAM[0x28]. */
 bool mx68k_sram_eject_on_poweroff(void) { return (SRAM[0x28] & 0x01) != 0; }
+
+/* P776: ゲスト起点のソフトウェア電源OFF要求の取得(読み取り+クリアの one-shot)。
+ * フラグを立てるのは m68000_bridge.c の p776_sysport_poweroff_note()
+ * ($E8E00F への $00→$0F→$0F 成立時)。呼出しは mx68k_run_frame() と同一
+ * スレッドから行う規約(EmulatorBridge.h 側のコメント参照)なので、
+ * ここでの読み+クリアに追加の同期は不要。 */
+int mx68k_take_guest_poweroff_request(void) {
+    int req = g_p776_poweroff_req;
+    if (req) g_p776_poweroff_req = 0;
+    return req;
+}
 
 /* ======================================================================
  * P198: State save / load (Phase 2 #4)

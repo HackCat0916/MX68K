@@ -589,6 +589,17 @@ void mx68k_schedule_sram_clear(void);
 // P204: guest SRAM $ED0029 (XEiJ SRAM_EJECT) bit0 — eject FD at power-off.
 bool mx68k_sram_eject_on_poweroff(void);
 
+// ---- Guest-initiated software power-off (P776) ----
+// 実機のシステムポート $E8E00F へゲスト側ソフトウェアが "00"→"0F"→"0F" を順に
+// 書き込むと POWER OFF (Vcc1 OFF) が実行される(テクニカルデータブック p.184 /
+// p.194 付録 3-2 (6)、XEiJ PowerControl.java / XM6 vm/sysport.cpp:481-519 も同仕様)。
+// そのシーケンス成立を Bridge 側の書込み観測フックで検出する。
+//
+// 読み取り+クリアの one-shot API: シーケンスが成立していれば 1 を返し内部
+// フラグを 0 へ戻す。未成立なら 0。★呼び出しは mx68k_run_frame() と同一
+// スレッド(= 同一の emulationLock 区間内)から行うこと。
+int mx68k_take_guest_poweroff_request(void);
+
 // ---- Status ----
 typedef struct {
     uint32_t pc;
