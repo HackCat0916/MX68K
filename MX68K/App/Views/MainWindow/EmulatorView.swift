@@ -98,6 +98,12 @@ struct EmulatorView: View {
                             fdd2: configManager.config.fdd.lastFDD2Path,
                             fdd3: configManager.config.fdd.lastFDD3Path)
                     }
+                    // P776: ゲスト起点のソフトウェア電源OFF($E8E00F への
+                    // "00"→"0F"→"0F")= 手動の電源ボタンと完全に同じ経路を通す
+                    // (4秒フェード + ランプ点滅)。onPowerOn と同型に [weak viewModel]。
+                    viewModel.onGuestPowerOffRequested = { [weak viewModel] in
+                        viewModel?.powerOff()
+                    }
                     let fdd0 = configManager.config.fdd.lastFDD0Path
                     let fdd1 = configManager.config.fdd.lastFDD1Path
                     // P684: 起動時も FD2/FD3 の保存済みパスから自動再マウントする。

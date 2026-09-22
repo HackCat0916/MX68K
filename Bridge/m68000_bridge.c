@@ -746,6 +746,64 @@ static void p509_fdc_write_note(uint32_t addr_raw, uint32_t val, int is_word) {
     }
 }
 
+/* ============================================================================
+ * P776: ゲスト起点のソフトウェア電源OFF($E8E00F への $00→$0F→$0F)検出
+ *
+ * 実機仕様: システムポート $E8E00F へ "00"、"0F"、"0F" を順に書き込むと
+ * POWER OFF (Vcc1 OFF) が実行される(テクニカルデータブック p.184
+ * 「5-1 (C) POWER スイッチ」/ p.184「5-2 (B) Vcc1」/ p.194 付録
+ * 「3-2 (6) E8E00FH [WRITE]」の 3 箇所)。それ以外のコードは無効。
+ * 参照実装: XEiJ PowerControl.java(pwcWritePort)、XM6 本家
+ * vm/sysport.cpp:481-519 が同一仕様。px68k 系譜(px68k 本家 /
+ * px68k-libretro / MPX68K)は 3 者ともこの検出を持たない。
+ *
+ * ★永続機能であり診断プローブではないため、p479/p484/p491/p509 と同じく
+ *   いかなる #if Pxxx_ENABLE ガードの内側にも置かないこと。read-only ——
+ *   val も addr も改変せず、ゲストから見た書込みの意味論は一切変えない。
+ *
+ * アドレス一致条件は Core 側 sysport.c:30 の switch(adr & 0x0f) と同じ
+ * エイリアシングを再現する($E8E01F 等も同じ SysPort[6] 書込みになる)。
+ * ========================================================================== */
+/* 読み取り+クリアの one-shot フラグ。書込みはエミュレーションスレッド
+ * (trace_Memory_WriteB/W 経由)、読出しも同スレッド(mx68k_run_frame() と
+ * 同一の emulationLock 区間内)なので volatile int で足りる。
+ * 取得 API は EmulatorBridge.c の mx68k_take_guest_poweroff_request()。 */
+volatile int g_p776_poweroff_req = 0;
+static int s_p776_poweroff_step = 0;   /* 0..3、3 到達で発火・以後は再武装まで無反応 */
+
+/* mx68k_init() / mx68k_reset_hard() から呼ぶ(p509_fdc_mirror_reset と同型)。
+ * 電源ON(cold boot)での再武装もこの経路で行われる —— 発火後 step は 3 で
+ * 止まるため、これを呼ばないと 2 回目以降のゲスト起点電源OFF が効かない。 */
+void p776_poweroff_state_reset(void) {
+    s_p776_poweroff_step = 0;
+    g_p776_poweroff_req = 0;
+}
+
+/* trace_Memory_WriteB/W から無条件に呼ばれる。read-only(val は改変しない)。 */
+static void p776_sysport_poweroff_note(uint32_t addr, uint8_t val) {
+    uint32_t a = addr & 0x00FFFFFFu;
+    uint8_t d;
+    if (!(a >= 0xE8E000u && a <= 0xE8FFFFu && (a & 0x0Fu) == 0x0Fu)) return;
+    d = (uint8_t)(val & 0x0Fu);   /* D07-D04 は無効(テクニカルデータブック p.192 表A-2) */
+    if (s_p776_poweroff_step == 3) return;   /* 既に発火済み。次のハードリセット/電源ON まで無反応 */
+    if (s_p776_poweroff_step == 0 && d == 0x00u) {
+        s_p776_poweroff_step = 1;
+    } else if (s_p776_poweroff_step == 1 && d == 0x0Fu) {
+        s_p776_poweroff_step = 2;
+    } else if (s_p776_poweroff_step == 2 && d == 0x0Fu) {
+        s_p776_poweroff_step = 3;
+        g_p776_poweroff_req = 1;
+#ifdef DEBUG
+        /* 生の addr/val を記録する(事後に「何が起きたか」を検証可能にするため。
+         * debug_log は mx68k_log と同じ出力先で、書式付きが使える方)。 */
+        debug_log("[Bridge][P776-POWEROFF] step=3 fired addr=0x%06X val=0x%02X f=%d\n",
+                  (unsigned)a, (unsigned)val, g_mx68k_frame_num);
+#endif
+    } else {
+        s_p776_poweroff_step = 0;   /* 不一致でリセット(XM6/XEiJ と同一仕様) */
+    }
+}
+
 /* mx68k_run_frame() のフレーム末尾から毎フレーム呼ばれる(出力は 300 フレーム
  * ごと)。f= は取得時点の g_mx68k_frame_num そのもの。 */
 void p509_fdc_hist_dump(void) {
@@ -26751,6 +26809,10 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
     p491_mercury_opn_shadow_note(addr, val, 0);
     /* P509 (D-48): FDC コマンド番号のミラー更新($E94003 write の傍受)。read-only。 */
     p509_fdc_write_note(addr, val, 0);
+    /* P776: ゲスト起点のソフトウェア電源OFF($E8E00F への $00→$0F→$0F)の検出。
+     * ★上の P479/P484/P491/P509 と同じ理由でいかなる #if Pxxx_ENABLE ガードの
+     * 内側にも置かないこと(恒久機能)。read-only。 */
+    p776_sysport_poweroff_note(addr, (uint8_t)(val & 0xFFu));
     /* P169: does the guest write text VRAM ($E00000-$E7FFFF) at all, and what is the
      * CRTC plane-mask gate at that moment? Distinguishes H1(no write) vs H2(write
      * dropped by CRTC gate). Read-only counter + first-N gate snapshot. */
@@ -27565,6 +27627,16 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
     p491_mercury_opn_shadow_note(addr, val, 1);
     /* P509 (D-48): word 書込み側の FDC コマンドミラー更新。read-only。 */
     p509_fdc_write_note(addr, val, 1);
+    /* P776: word 書込み側のゲスト起点電源OFF検出。$E8xxxx 帯は wm16_main の
+     * default 経路(Core/px68k/x68k/mem_wrap.c:314-317)を通り、上位バイトが
+     * addr(偶数化済み)へ、下位バイトが addr+1 へと 2 回に分けて書かれる。
+     * その分解をそのまま再現し、両バイトを同じ検出器へ通す(実際に下位 4bit が
+     * 0x0F になるのは奇数側だけなので、上位バイト側はアドレス条件で弾かれる)。
+     * ★上の WriteB 側と同じく無条件位置(#if ガードの外)に置くこと。read-only。 */
+    p776_sysport_poweroff_note((addr & 0x00FFFFFEu),
+                               (uint8_t)((val >> 8) & 0xFFu));
+    p776_sysport_poweroff_note((addr & 0x00FFFFFEu) + 1u,
+                               (uint8_t)(val & 0xFFu));
 #if P169_ENABLE
     /* P169: mirror for word writes to text VRAM. Read-only. */
     {

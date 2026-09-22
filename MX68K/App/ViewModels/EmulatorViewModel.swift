@@ -39,6 +39,10 @@ class EmulatorViewModel: ObservableObject {
     /// P204 — 電源ON(cold boot)時に呼ばれる。EmulatorView が config/fdd を注入する
     /// (onFDDMounted 等と同型 = ViewModel が ConfigManager に依存しない)。
     var onPowerOn: (() -> Void)?
+    /// P776 — ゲスト側ソフトウェアがシステムポート $E8E00F へ実機の電源OFF
+    /// シーケンス("00"→"0F"→"0F")を書き込んだときに呼ばれる。EmulatorView が
+    /// powerOff() を注入する(onPowerOn と同型 = 手動の電源ボタンと完全に同じ経路)。
+    var onGuestPowerOffRequested: (() -> Void)?
     @Published var statusText = String(localized: "Ready")
     /// P189 — 下部ステータスバーに数秒だけ一時表示するメッセージ（スクショ完了等）。
     /// nil のとき非表示。showTransientMessage() で世代管理付きに自動クリアする。
@@ -383,6 +387,13 @@ class EmulatorViewModel: ObservableObject {
             self.adpcmStatus.peak_level = 0
             self.isPausedByDebugger = true   // P749: この一時停止はデバッガ由来。
             self.isPaused = true
+        }
+        /* P776 — ゲスト起点のソフトウェア電源OFF($E8E00F への $00→$0F→$0F)。
+         * 検出は C 側で完結しているので、ここでやるのは EmulatorView が注入した
+         * クロージャ(= powerOff())を main で呼ぶことだけ。手動の電源ボタンと
+         * 完全に同じ経路を通す(ユーザー決定、2026-09-22)。 */
+        engine.onGuestPowerOffRequested = { [weak self] in
+            self?.onGuestPowerOffRequested?()
         }
         engine.onSpriteListUpdate = { [weak self] entries in   // P326
             self?.spriteList = entries

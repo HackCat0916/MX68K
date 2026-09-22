@@ -449,6 +449,11 @@ class EmulatorEngine: ObservableObject {
     ///   「起きたことを Swift 側の一時停止状態へ反映する」ためだけの配線。
     var onDebuggerStopped: (() -> Void)?
 
+    /// P776 — ゲスト起点のソフトウェア電源OFF($E8E00F への $00→$0F→$0F)を
+    /// 検出したときの通知。★検出そのものは C 側(Bridge の書込み観測フック)で
+    /// 完結する。ここは「起きたことを Swift 側の電源状態へ反映する」ための配線だけ。
+    var onGuestPowerOffRequested: (() -> Void)?
+
     /// 立ち上がりエッジだけを通知するためのラッチ(停止中は毎フレーム
     /// stopped==true が観測されるので、これが無いと通知が毎フレーム飛ぶ)。
     ///
@@ -567,12 +572,21 @@ class EmulatorEngine: ObservableObject {
              * volatile 読み 1 回で、チャンク毎ではなくフレーム毎(約55回/秒)。
              * エッジ検出も同区間で行う(ラッチの同期規約)。UI 通知だけは
              * ロックの外で main へ hop する。 */
-            let notifyDebuggerStop: Bool = emulationLock.withLock {
+            /* P776: ゲスト起点の電源OFF要求も**同一のロック区間**で読む
+             * (読み+クリアの one-shot なので、別区間で読むと run_frame 中に
+             * 立ったフラグを取り落とす/二重に見る窓ができる)。UI 通知は
+             * 上の停止通知と同じくロックの外で main へ hop する。 */
+            let (notifyDebuggerStop, guestPowerOffRequested): (Bool, Bool) = emulationLock.withLock {
                 mx68k_run_frame()
-                return markDebuggerStopEdge(mx68k_debug_is_stopped() != 0)
+                let stop = markDebuggerStopEdge(mx68k_debug_is_stopped() != 0)
+                let poweroff = mx68k_take_guest_poweroff_request() != 0
+                return (stop, poweroff)
             }
             if notifyDebuggerStop {
                 DispatchQueue.main.async { [weak self] in self?.onDebuggerStopped?() }
+            }
+            if guestPowerOffRequested {
+                DispatchQueue.main.async { [weak self] in self?.onGuestPowerOffRequested?() }
             }
             let frameElapsed = CFAbsoluteTimeGetCurrent() - frameStart
             /* P556: perf カウンタの加算は共有メソッドへ抽出済み(ノーウェイトループ
@@ -1108,12 +1122,21 @@ class EmulatorEngine: ObservableObject {
             /* P748: ★駆動元は 2 系統あるので、こちらにも同じ停止判定を置く。
              * 片方だけに配線するとノーウェイト/ターボ中だけブレークポイントが
              * 効かないという欠陥になる(Fix Plan 残留リスク R-7 / テスト T-9)。 */
-            let notifyDebuggerStop: Bool = emulationLock.withLock {
+            /* P776: ★駆動元は 2 系統あるので、ゲスト起点の電源OFF検出も
+             * こちらへ同じパターンで置く。片方だけに配線するとノーウェイト/
+             * ターボ中だけゲスト起点の電源OFF が効かないという欠陥になる
+             * (P748 の停止判定と同型の既知の地雷)。 */
+            let (notifyDebuggerStop, guestPowerOffRequested): (Bool, Bool) = emulationLock.withLock {
                 mx68k_run_frame()
-                return markDebuggerStopEdge(mx68k_debug_is_stopped() != 0)
+                let stop = markDebuggerStopEdge(mx68k_debug_is_stopped() != 0)
+                let poweroff = mx68k_take_guest_poweroff_request() != 0
+                return (stop, poweroff)
             }
             if notifyDebuggerStop {
                 DispatchQueue.main.async { [weak self] in self?.onDebuggerStopped?() }
+            }
+            if guestPowerOffRequested {
+                DispatchQueue.main.async { [weak self] in self?.onGuestPowerOffRequested?() }
             }
             let frameElapsed = CFAbsoluteTimeGetCurrent() - frameStart
             /* countOverBudget: false — ノーウェイトは意図的な最大速度実行であり
