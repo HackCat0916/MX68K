@@ -56,6 +56,17 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// side帯は項目ごとに縦積み、bottom帯は結合して横並び表示する——同じデータを
     /// 配置先ごとに異なるレイアウトへ描画するための構造化(文言の重複定義はしない)。
     @Published var statusFields: [String] = []
+    /// P777 — ランプ表示1項目(ラベル+在席+稼働中)。macOS版StatusBarView.swift
+    /// の色分けロジック(緑=アイドル/赤=ビジー/グレー=非在席)を移植するための
+    /// データ。点滅は実装しない(ユーザー決定、2026-09-24)。
+    struct StatusLampField {
+        let label: String    // "FD0:" / "FD1:" / "HDD:"
+        let present: Bool    // media/HDD在席
+        let active: Bool     // アクセス中(FD)/ビジー(HDD)
+    }
+    /// P777 — FD0/FD1/HDD のランプ表示用(`statusFields` から分離)。
+    /// 空配列 = 詳細状態なし(`statusFields` と同じタイミングでクリアする)。
+    @Published var statusLamps: [StatusLampField] = []
     /// P723 — 状態表示の Speed% 項目。macOS 版 `EmulatorViewModel` と同名・同型・同既定値。
     @Published var speedPercent: Double = 100   // P658: StatusBar常時表示用
     /// P730 — マウント/イジェクト成功のたびにインクリメントするだけの値。
@@ -130,6 +141,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             needsConfiguration = true
             statusText = String(localized: "BIOS not configured — missing \(missing.joined(separator: ", "))")
             statusFields = []
+            statusLamps = []
             mx68k_log("[Swift][iOS] start deferred, missing: \(missing.joined(separator: ", "))")
             return
         }
@@ -236,10 +248,14 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             self.statusFields = [
                 String(format: String(localized: "CPU: %dMHz"), status.clock_mhz),
                 String(format: String(localized: "MEM: %dMB"), status.memory_mb),
-                String(format: String(localized: "Spd: %d%%"), Int(self.speedPercent.rounded())),
-                String(format: String(localized: "FD0: %@"), status.fdd0_media_present ? String(localized: "yes") : String(localized: "no")),
-                String(format: String(localized: "FD1: %@"), status.fdd1_media_present ? String(localized: "yes") : String(localized: "no")),
-                String(format: String(localized: "HDD: %@"), (status.hdd0_inserted || status.hdd1_inserted) ? String(localized: "yes") : String(localized: "no")),
+                String(format: String(localized: "Spd: %3d%%"), Int(self.speedPercent.rounded())),
+            ]
+            // P777 — 在席判定は macOS 版 StatusBarView.swift と同じ fdd*_inserted
+            // (FDD_IsReady() 由来)を使う(fdd*_media_present は別目的のフィールド)。
+            self.statusLamps = [
+                StatusLampField(label: "FD0: ", present: status.fdd0_inserted, active: status.fdd0_active),
+                StatusLampField(label: "FD1: ", present: status.fdd1_inserted, active: status.fdd1_active),
+                StatusLampField(label: "HDD: ", present: status.hdd0_inserted || status.hdd1_inserted, active: status.hdd_busy),
             ]
         }
         engine.onSpeedUpdate = { [weak self] pct in   // P658
@@ -422,6 +438,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         engine.pause()
         statusText = String(localized: "Paused")
         statusFields = []
+        statusLamps = []
         isPaused = true
         didAutoPause = true
     }
@@ -446,6 +463,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             engine.pause()
             statusText = String(localized: "Paused")
             statusFields = []
+            statusLamps = []
         }
         isPaused.toggle()
     }

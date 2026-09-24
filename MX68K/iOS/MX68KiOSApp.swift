@@ -419,7 +419,7 @@ struct MX68KiOSRootView: View {
                 Text(error)
                     .foregroundStyle(.red)
             }
-            if viewModel.statusFields.isEmpty {
+            if viewModel.statusFields.isEmpty && viewModel.statusLamps.isEmpty {
                 Text(viewModel.statusText)
                     .foregroundStyle(.green)
             } else if axis == .vertical {
@@ -428,10 +428,23 @@ struct MX68KiOSRootView: View {
                     Text(field)
                         .foregroundStyle(.green)
                 }
+                // P777 — FD0/FD1/HDD は macOS 版と同じ色分けランプ(点滅なし)。
+                ForEach(Array(viewModel.statusLamps.enumerated()), id: \.offset) { _, lamp in
+                    (Text(lamp.label)
+                        + Text(lamp.present ? "●" : "○")
+                            .foregroundColor(lampColor(present: lamp.present, active: lamp.active)))
+                        .foregroundStyle(.green)
+                }
             } else {
                 // 下部帯: 従来どおり2スペース区切りの1行(横画面以外の既存見た目を維持)。
-                Text(viewModel.statusFields.joined(separator: "  "))
-                    .foregroundStyle(.green)
+                // P777 — ランプは `Text + Text` で同じ1行へ連結(セグメントごとの色を保持)。
+                viewModel.statusLamps.reduce(Text(viewModel.statusFields.joined(separator: "  "))) { line, lamp in
+                    line
+                        + Text("  " + lamp.label)
+                        + Text(lamp.present ? "●" : "○")
+                            .foregroundColor(lampColor(present: lamp.present, active: lamp.active))
+                }
+                .foregroundStyle(.green)
             }
             // P725 — セーブ/ロード結果(成功/失敗どちらも 1 行で表示)。
             // ★P727改訂——`.secondary`(セマンティック色)は、このファイル内の他の
@@ -452,6 +465,13 @@ struct MX68KiOSRootView: View {
             }
         }
         .font(.system(size: 10, design: .monospaced))
+    }
+
+    /// P777 — ランプ色(macOS 版 StatusBarView.swift と同一ロジック):
+    /// 非在席=グレー、在席かつアクセス中/ビジー=赤、在席かつアイドル=緑。
+    private func lampColor(present: Bool, active: Bool) -> Color {
+        if !present { return .gray }
+        return active ? .red : .green
     }
 
     /// macOS `StatusBarView`(下部)に対応する帯——状態表示テキスト
