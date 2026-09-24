@@ -6309,6 +6309,26 @@
         }
       }
     },
+    "FD0…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD0…"
+          }
+        }
+      }
+    },
+    "FD1…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD1…"
+          }
+        }
+      }
+    },
     "Not started": {
       "localizations": {
         "ja": {
@@ -6505,6 +6525,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "速度: %d%%"
+          }
+        }
+      }
+    },
+    "Spd: %3d%%": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "速度: %3d%%"
           }
         }
       }

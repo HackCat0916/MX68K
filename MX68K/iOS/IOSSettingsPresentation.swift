@@ -169,8 +169,8 @@ struct IOSSettingsBarButtons: View {
             // Eject(eject)の 2 ボタン構成だが、iOS では同一行に複数 Button を
             // 並べると隣接ボタンが同時発火する不具合を P712 で経験しているため、
             // 1 つの `Menu`(タップで Select… / Eject を出す)へまとめる。
-            fddMenu(drive: 0, titleKey: "FDD0…")
-            fddMenu(drive: 1, titleKey: "FDD1…")
+            fddMenu(drive: 0, titleKey: "FD0…")
+            fddMenu(drive: 1, titleKey: "FD1…")
 
             // P725 — セーブステート。FDD0/1 と同じ `Menu` パターン(隣接 Button 同時
             // 発火回避、P712f)。Save State は即実行、Load State… は一覧シートを開く。
