@@ -468,7 +468,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         isPaused.toggle()
     }
 
-    // MARK: - State Save/Load (P725)
+    // MARK: - ステートのセーブ/ロード(P725)
 
     /// 一時的な一回限りの通知メッセージ(macOS `EmulatorViewModel.transientMessage`
     /// に相当)。`MX68KiOSApp.swift` の `statusLines` が 1 行として表示し、3 秒後に

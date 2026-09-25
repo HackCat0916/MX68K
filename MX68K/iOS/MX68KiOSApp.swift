@@ -2,7 +2,7 @@
 //  MX68KiOSApp.swift
 //  MX68K-iOS
 //
-//  P702: iOS/iPadOS target scaffold.
+//  P702: iOS/iPadOS ターゲットの足場(雛形)を作成。
 //  P703: PlaceholderView を廃し、Metal 表示 + CADisplayLink フレーム駆動の
 //        実アプリ本体へ差し替えた。
 //  P705: 物理/Bluetooth キーボード入力を配線。
