@@ -294,6 +294,15 @@ static uint32_t p492_hist_io_other = 0; /* $E80000-ECFFFF 内だが上記いず�
                                          * (未割当領域・BG・SRAM 隣接の buserr 域等) */
 static uint32_t p492_hist_non_io  = 0;  /* $E80000-ECFFFF 範囲外(分母の一部) */
 static uint32_t p492_total_reads  = 0;  /* 総 read 回数(分母) */
+/* P805 (D-14/D-15診断): non_io の内訳として GVRAM/TVRAM 窓への read を数える。
+ * ★non_io の部分集合であり、non_io 自体の定義・値は従来どおり(二重計上ではなく
+ *   内訳)。したがって既存の不変条件「全 I/O バケット + non_io == total_reads」は
+ *   そのまま成立し、non_io - gvram - tvram が主記憶・ROM 等の残余になる。
+ * 窓の一次情報源: Core/px68k/x68k/mem_wrap.c:274(GVRAM $C00000-$DFFFFF の
+ *   case ラベル)、同 :58-66(MemReadTable 先頭64エントリ=TVRAM_Read、
+ *   (addr>>13)&0xff の 0x00-0x3F → $E00000-$E7FFFF)。 */
+static uint32_t p492_hist_gvram   = 0;  /* $C00000-DFFFFF(non_io の内訳) */
+static uint32_t p492_hist_tvram   = 0;  /* $E00000-E7FFFF(non_io の内訳) */
 
 /* P492b (D-43診断・追加): DMACウィンドウ内のどのチャンネル・オフセットが
  * 読まれているかを特定する。ch×off(4×64)+oob($E84100-E85FFFの常時0返し領域)。
@@ -351,7 +360,13 @@ static void p492_io_histogram_note(uint32_t addr, int is_word) {
     /* 上限は Mercury 窓($ECC000-ECDFFF)を含む $ECFFFF まで。ここを $EBFFFF に
      * すると Mercury 宛 read が全て non_io へ落ち、本サイクルの主目的に対し
      * 構造的に無価値になる。 */
-    if (a < 0xE80000u || a > 0xECFFFFu) { p492_hist_non_io++; return; }
+    if (a < 0xE80000u || a > 0xECFFFFu) {
+        p492_hist_non_io++;
+        /* P805: non_io の内訳(部分集合)。non_io の計上は上で従来どおり済ませる。 */
+        if      (a >= 0xC00000u && a <= 0xDFFFFFu) p492_hist_gvram++;
+        else if (a >= 0xE00000u && a <= 0xE7FFFFu) p492_hist_tvram++;
+        return;
+    }
     if      (a >= 0xE80000u && a <= 0xE81FFFu) p492_hist_crtc++;
     else if (a >= 0xE82000u && a <= 0xE83FFFu) p492_hist_vc++;
     else if (a >= 0xE84000u && a <= 0xE85FFFu) { p492_hist_dmac++; p492b_dmac_note(a); }
@@ -380,12 +395,16 @@ void p492_io_histogram_dump(void) {
     if (frame_no % 300u != 0u) return;
     debug_log("[P492-IOHIST] f=%u total_reads=%u non_io=%u | "
               "crtc=%u vc=%u dmac=%u mfp=%u rtc=%u sysport=%u opm=%u adpcm=%u "
-              "fdc=%u sasi=%u scc=%u ppi=%u ioc=%u scsi=%u midi=%u mercury=%u io_other=%u\n",
+              "fdc=%u sasi=%u scc=%u ppi=%u ioc=%u scsi=%u midi=%u mercury=%u io_other=%u "
+              "gvram=%u tvram=%u\n",
               frame_no, p492_total_reads, p492_hist_non_io,
               p492_hist_crtc, p492_hist_vc, p492_hist_dmac, p492_hist_mfp, p492_hist_rtc,
               p492_hist_sysport, p492_hist_opm, p492_hist_adpcm,
               p492_hist_fdc, p492_hist_sasi, p492_hist_scc, p492_hist_ppi, p492_hist_ioc,
-              p492_hist_scsi, p492_hist_midi, p492_hist_mercury, p492_hist_io_other);
+              p492_hist_scsi, p492_hist_midi, p492_hist_mercury, p492_hist_io_other,
+              /* P805: 既存フィールドの並び・書式は不変、末尾へ追加のみ。
+               * gvram/tvram は non_io の内訳(部分集合)。 */
+              p492_hist_gvram, p492_hist_tvram);
     p492b_dmac_dump(frame_no);
 }
 #endif /* P492_ENABLE */
