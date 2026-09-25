@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <stdatomic.h>
 #include <time.h>   /* P694: mx68k_get_rtc_status() の localtime_r()/time() */
+#include <errno.h>  /* P805: MX68K_DEBUG_CLOCK_SLICE の strtol() 範囲外判定 */
 /* P633: P490 の CoreMIDI 直参照(packetList の extern 宣言と付け替え)は、
  * CoreMIDI 連携層の Bridge/midi_coremidi.c への移設にともない削除した。
  * このファイルはもう CoreMIDI の型を必要としない。 */
@@ -1410,12 +1411,53 @@ static int p270_derive_xvimode(int clock_mhz) {
  * (実装とエンディアン根拠は Bridge/m68000_bridge.c を参照)。 */
 extern void mx68k_p565_fill_illegal(void *dst, size_t bytes);
 
+/* P385: CLOCK_SLICE sub-line chunk size の既定値 — px68k原典 winx68k.cpp:319 の値。
+ * (経緯の詳細は mx68k_run_frame() 内の走査線チャンクループ直前のコメントを参照。)
+ * P805: 従来は mx68k_run_frame() 内でこのマクロを直接参照していたが、D-14/D-15
+ * 診断用に環境変数 MX68K_DEBUG_CLOCK_SLICE で一時的に上書きできるよう、実際の
+ * 参照は下の s_p805_clock_slice 経由に置き換えた。マクロは既定値としてのみ使う。 */
+#ifndef CLOCK_SLICE
+#define CLOCK_SLICE 200
+#endif
+#define P805_CLOCK_SLICE_MAX 1000000   /* 上書き値の上限(サニティ用。実効値は走査線
+                                        * 残余/フレーム予算クランプでさらに制限される) */
+/* P805: 実際に使うチャンク上限。既定は CLOCK_SLICE と完全に同一。
+ * 書込みは mx68k_init() のみ、読取りは mx68k_run_frame() のみ
+ * (どちらもエミュレーションを駆動するスレッド上で直列に呼ばれる)。 */
+static int32_t s_p805_clock_slice = CLOCK_SLICE;
+
+/* P805: 環境変数 MX68K_DEBUG_CLOCK_SLICE を読み、1〜P805_CLOCK_SLICE_MAX の
+ * 10進整数として完全にパースできた場合のみ採用する。未設定・空文字・非数値・
+ * 末尾ゴミ付き・0以下・上限超・オーバーフローはすべて既定値 CLOCK_SLICE へ
+ * フォールバックする。毎回 mx68k_init() で再評価し、前回値を持ち越さない。 */
+static void p805_load_clock_slice_override(void) {
+    const char *env = getenv("MX68K_DEBUG_CLOCK_SLICE");
+    s_p805_clock_slice = CLOCK_SLICE;
+    if (env == NULL || env[0] == '\0') return;   /* 未設定: 無出力で既定値 */
+
+    char *end = NULL;
+    errno = 0;
+    long v = strtol(env, &end, 10);
+    if (errno == 0 && end != env && *end == '\0' &&
+        v >= 1 && v <= P805_CLOCK_SLICE_MAX) {
+        s_p805_clock_slice = (int32_t)v;
+        debug_log("[P805-CLOCKSLICE] override accepted env=\"%s\" clock_slice=%d (default=%d)\n",
+                  env, (int)s_p805_clock_slice, (int)CLOCK_SLICE);
+    } else {
+        debug_log("[P805-CLOCKSLICE] override rejected env=\"%s\" -> clock_slice=%d (default)\n",
+                  env, (int)s_p805_clock_slice);
+    }
+}
+
 // ---- init / shutdown(初期化 / 終了) ----
 int mx68k_init(void) {
     /* P753: ここにあった debug_log_init() の単独呼出しは削除した。次行の
      * debug_log() が実行時フラグを見た上で内部で同じ初期化を行うため冗長で
      * あり、残すと OFF のときも debug.log が生成されてしまう。 */
     debug_log("[MX68K] mx68k_init() called\n");
+
+    /* P805: CLOCK_SLICE の診断用上書き(環境変数未設定なら既定値 200 のまま)。 */
+    p805_load_clock_slice_override();
 
     /* P633: ここにあった P490 の packetList 付け替え(欠陥 A 対策)は、CoreMIDI
      * 連携層を Bridge/midi_coremidi.c へ移設し、新実装が自前の書込可能バッファを
@@ -3676,9 +3718,13 @@ void mx68k_run_frame(void) {
      * MX は P180 で clkdiv を px68k 式 (= clock) に戻したためこの組が崩れていた。
      * 200 に戻すことで clkdiv と CLOCK_SLICE が再び px68k 原典と同じ組になる。
      * なお P385 の走査線境界クランプ (下記 do ループ先頭) により、契約
-     * 「1反復はその走査線を跨がない」は CLOCK_SLICE の数値的余裕には依存しない。 */
-#ifndef CLOCK_SLICE
-#define CLOCK_SLICE 200
+     * 「1反復はその走査線を跨がない」は CLOCK_SLICE の数値的余裕には依存しない。
+     * P805: マクロ CLOCK_SLICE の定義は mx68k_init() 直前へ移設した。実際の上限値は
+     * s_p805_clock_slice(既定 = CLOCK_SLICE、環境変数 MX68K_DEBUG_CLOCK_SLICE で
+     * 診断用に上書き可)を参照する。 */
+    const int32_t clock_slice = s_p805_clock_slice;   /* フレーム内で不変 */
+#if P805_ENABLE
+    int32_t p805_chunks = 0;   /* このフレームの m68000_execute() 呼出回数 */
 #endif
     /* P149: MPX の ClkUsed 余り累積器(winx68k.cpp のグローバル)。static なので
      * ≤clkdiv の余りが chunk・走査線・フレームをまたいで持ち越される — MPX と byte-identical。
@@ -3755,7 +3801,7 @@ void mx68k_run_frame(void) {
          * 本クランプは数値的余裕に依存しないため将来の設定変更でも再発しない。 */
         int32_t line_left = clk_next - clk_count;   /* 現在ラインの残余 */
         int32_t n = frame_icount;
-        if (n > CLOCK_SLICE) n = CLOCK_SLICE;
+        if (n > clock_slice) n = clock_slice;   /* P805: 既定では CLOCK_SLICE(200) と同値 */
         if (n > line_left)   n = line_left;
         if (n < 0)           n = 0;   /* 防御: 負値は ClkUsed を逆走させる */
 
@@ -3976,6 +4022,9 @@ void mx68k_run_frame(void) {
          * IRQ を確認するため)。 */
         int32_t ex = m68000_execute(n);     /* 実行サイクル数: 記録用のみ */
         total_executed += ex;
+#if P805_ENABLE
+        p805_chunks++;   /* P805: 呼出回数の計数のみ(ex・n には触れない) */
+#endif
         /* P657: 水平フロントポーチ到達 → ラスタコピーの唯一の実行契機。
          * PR#2 は m(= n - m68000_ICountBk)で判定するが、MX は m ≡ n
          * (m68000_ICountBk は常に0、下記 P152 コメント)。
@@ -4408,7 +4457,7 @@ void mx68k_run_frame(void) {
     /* P408: CPUモニタ可視化用スナップショット。ログ出力ゲート(次行の if)より
      * 手前に置き、60フレームおきではなく毎フレーム更新すること
      * (P382/P383 の状態スタンプ鮮度バグと同型の再発を避けるため)。 */
-    g_p408_clock_slice_snapshot = CLOCK_SLICE;
+    g_p408_clock_slice_snapshot = clock_slice;   /* P805: 実効値(既定では CLOCK_SLICE と同値) */
     g_p408_clkdiv_snapshot      = clkdiv;
     g_p408_clk_total_snapshot   = clk_total;
     g_p408_vline_total_snapshot = vline_total_val;
@@ -4423,11 +4472,44 @@ void mx68k_run_frame(void) {
                   s_p385_cum_chunks, s_p385_cum_zero,
                   clk_total, vline_total_val,
                   (vline_total_val > 0 ? clk_total / vline_total_val : -1),
-                  CLOCK_SLICE, clkdiv);
+                  clock_slice, clkdiv);
     }
 #endif
 
     int32_t executed = total_executed;
+
+#if P805_ENABLE
+    /* P805 (D-14/D-15): 命令境界オーバーシュートの実測。total_executed は
+     * フレームごとに 0 から数えるローカル変数(上の exec ループ直前で宣言)、
+     * clk_total はこのフレームの設計予算なので、両者を 300 フレーム窓で累積し
+     * 生値のまま出力する。窓はダンプ後にリセットする(窓ごとの値)。比は出さない。
+     * 自己反証: frames(窓内の実加算回数)と chunks_sum を併記するため、
+     * 「executed_sum≈clk_total_sum」が本当にオーバーシュート無しなのか、
+     * 母数 0(プローブ未到達)なのかを区別できる。読取り・加算のみ。 */
+    {
+        static unsigned long long s_p805_clk_total_sum = 0;
+        static unsigned long long s_p805_executed_sum  = 0;
+        static unsigned long long s_p805_chunks_sum    = 0;
+        static unsigned int       s_p805_frames        = 0;
+        s_p805_clk_total_sum += (unsigned long long)(clk_total > 0 ? clk_total : 0);
+        s_p805_executed_sum  += (unsigned long long)(total_executed > 0 ? total_executed : 0);
+        s_p805_chunks_sum    += (unsigned long long)p805_chunks;
+        s_p805_frames++;
+        if ((frame_num % 300) == 0) {
+            debug_log("[P805-OVERSHOOT] f=%d frames=%u clk_total_sum=%llu executed_sum=%llu "
+                      "chunks_sum=%llu clock_mhz=%d clkdiv=%d clock_slice=%d "
+                      "last_clk_total=%d last_executed=%d last_chunks=%d\n",
+                      frame_num, s_p805_frames,
+                      s_p805_clk_total_sum, s_p805_executed_sum, s_p805_chunks_sum,
+                      g_clock_mhz, clkdiv, clock_slice,
+                      clk_total, total_executed, p805_chunks);
+            s_p805_clk_total_sum = 0;
+            s_p805_executed_sum  = 0;
+            s_p805_chunks_sum    = 0;
+            s_p805_frames        = 0;
+        }
+    }
+#endif
 
 #if P63_PROBE_ENABLE
     /* Probe-C: フレーム毎の FDD_IsReady(0) 状態ログ。
