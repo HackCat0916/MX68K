@@ -2,15 +2,15 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// ---- Initialization & Shutdown ----
+// ---- 初期化と終了 ----
 int  mx68k_init(void);
 void mx68k_shutdown(void);
 
-// ---- BIOS Path Setup (call before init) ----
+// ---- BIOS パス設定(init より前に呼ぶ) ----
 void mx68k_set_bios_path(const char* iplrom_path, const char* cgrom_path);
 void mx68k_set_bios_path_030(const char* iplrom30_path);
 
-// ---- Hardware Settings (call before init or reset) ----
+// ---- ハードウェア設定(init またはリセットより前に呼ぶ) ----
 void mx68k_set_machine_type(int type);
 void mx68k_set_memory_size(int mb);
 void mx68k_set_clock(int mhz);
@@ -136,23 +136,23 @@ void mx68k_get_midi_regs(MX68K_MIDIRegs* out);
 // mx68k_reset_hard() と mx68k_shutdown() から呼ぶ。
 void mx68k_p483_dump_mcry_counters(const char* tag);
 
-// ---- Emulation Control ----
+// ---- エミュレーション制御 ----
 void mx68k_reset_hard(void);
 void mx68k_reset_soft(void);
 void mx68k_nmi(void);
 void mx68k_pause(bool pause);
 
-// ---- Frame Execution ----
+// ---- フレーム実行 ----
 void mx68k_run_frame(void);
-/* P503 (c1): consume any queued frame-boundary operation (SRAM clear, hard/soft
- * reset, SASI fd cache invalidation, state save/load) WITHOUT running a frame of
- * CPU. The Swift frame driver calls this instead of mx68k_run_frame() while the
- * emulator is paused (settings sheet open), so a queued reset / Clear SRAM takes
- * effect at the next display-link callback rather than waiting for the sheet to
- * close. Same thread as mx68k_run_frame(). */
+/* P503 (c1): キューに積まれたフレーム境界処理(SRAM クリア、ハード/ソフト
+ * リセット、SASI fd キャッシュの無効化、ステートのセーブ/ロード)を、CPU を
+ * 1 フレーム分実行することなく消化する。エミュレータが一時停止中(設定シート
+ * 表示中)は、Swift 側のフレーム駆動部が mx68k_run_frame() の代わりにこれを
+ * 呼ぶ。これにより、キューに積まれたリセット / Clear SRAM はシートが閉じるのを
+ * 待たず、次のディスプレイリンクコールバックで反映される。mx68k_run_frame() と同じスレッド。 */
 void mx68k_pump_pending(void);
 
-// ---- Video ----
+// ---- 映像 ----
 const uint8_t* mx68k_get_framebuffer(int* width, int* height);
 /* P595 (D-55): 公開フレームと同一スナップショットの表示ジオメトリを返す。
  * 単位は「標準表示窓=1.0」。標準ラスタでは h_scale=v_scale=1.0, off=0.0(P212と同一)。
@@ -174,14 +174,14 @@ void mx68k_fdd_eject(int drive);
 void mx68k_fdd_set_write_protect(int drive, int protect);
 bool mx68k_fdd_is_write_protected(int drive);
 bool mx68k_fdd_is_inserted(int drive);
-/* P160: 1 if the drive was accessed (read/seek) within the last few frames —
- * drives the status-bar "accessing" (red) indicator so disk activity is visible
- * even while the emulated screen is blank. */
+/* P160: 直近数フレーム以内にドライブへのアクセス(読込/シーク)があれば 1 —
+ * ステータスバーの「アクセス中」(赤)インジケータを駆動し、エミュレート画面が
+ * 真っ暗な間でもディスクの動作が見えるようにする。 */
 int  mx68k_fdd_accessing(int drive);
-/* P443 (D-7): 1 if media is currently present in the drive, tracked from Core's
- * StatBar_ParamFDD() notifications — so a guest-initiated eject (Core fdd.c
- * FDD_EjectFD) is reflected too. Unlike FDD_IsReady() this has no post-insert
- * SetDelay grace window, so it is safe to sample from the 1 Hz status poll. */
+/* P443 (D-7): 現在ドライブにメディアが入っていれば 1。Core の
+ * StatBar_ParamFDD() 通知から追跡するため、ゲスト起点のイジェクト(Core fdd.c
+ * FDD_EjectFD)も反映される。FDD_IsReady() と異なり挿入直後の SetDelay 猶予
+ * 期間が無いため、1 Hz のステータスポーリングからサンプルしても安全。 */
 int  mx68k_fdd_media_present(int drive);
 bool mx68k_fdd_is_active(int drive);
 const char* mx68k_fdd_get_path(int drive);
@@ -204,98 +204,99 @@ void mx68k_schedule_soft_reset(void);
  *   Config.HDImage[dev*2+1] まで読むため、dev=7 で index 15 に達し、
  *   prop.h:19 の HDImage[16] をちょうど使い切る。9 以上は OOB。 */
 #define MX68K_SASI_UNIT_COUNT 8
-// Logical unit 0..7 maps to SASI device ID 0..7 (physical Config.HDImage index
-// unit*2 — LUN1 slots are unused). Human68k probes the SASI bus per device ID,
-// so an additional drive must be a distinct device (index 2, 4, …), not LUN1
-// (odd index), or it stays invisible (P200 hands-on finding). P201: insert/eject
-// only set/clear the path; the IPL re-probes the SASI bus on the next manual
-// reset (Cmd+R) — no automatic restart. Changes apply after the user resets.
-// Returns 0=ok, <0=error:
-//   -1 unit out of range / NULL path / path too long for Config.HDImage[]
-//   -2 refused because the wired machine type is SCSI (P268)
-//   -3 stat failed, or the file size is not a valid SASI capacity (10/20/40MB) (P458)
-//   -4 refused because the image starts with the "X68SCSI1" signature, i.e. it is
-//      SCSI-formatted and was inserted into a SASI slot (P687 / D-29 B). The
-//      reverse direction (a SASI image inserted into a SCSI slot) is NOT detected:
-//      the absence of a signature has several legitimate interpretations, so it
-//      cannot serve as a rejection condition.
+// 論理ユニット 0..7 は SASI デバイス ID 0..7 に対応する(物理的な Config.HDImage
+// のインデックスは unit*2 — LUN1 スロットは未使用)。Human68k は SASI バスを
+// デバイス ID 単位で探索するため、追加ドライブは LUN1(奇数インデックス)では
+// なく別デバイス(インデックス 2, 4, …)にしないと見えないまま(P200 hands-on
+// での発見)。P201: insert/eject はパスの設定/クリアのみを行い、IPL は次回の手動
+// リセット(Cmd+R)で SASI バスを再探索する — 自動再起動はしない。変更はユーザーが
+// リセットした後に反映される。
+// 戻り値 0=成功、<0=エラー:
+//   -1 ユニット番号が範囲外 / パスが NULL / パスが Config.HDImage[] に収まらない
+//   -2 配線確定機種が SCSI のため拒否(P268)
+//   -3 stat 失敗、またはファイルサイズが SASI の有効容量(10/20/40MB)でない(P458)
+//   -4 イメージ先頭が "X68SCSI1" シグネチャ、つまり SCSI フォーマット済みの
+//      イメージが SASI スロットへ挿入されたため拒否(P687 / D-29 B)。逆方向
+//      (SASI イメージを SCSI スロットへ挿入)は検出しない: シグネチャが無い
+//      ことには正当な解釈が複数ありうるため、拒否条件には使えない。
 int  mx68k_hdd_insert(int unit, const char* path);
-// P503 (b): returns 0=ok, <0=error — -1 unit out of range, -2 refused because the
-// wired machine type is SCSI (symmetric with mx68k_hdd_insert()'s P268 gate).
+// P503 (b): 戻り値 0=成功、<0=エラー — -1 ユニット番号が範囲外、-2 配線確定機種が
+// SCSI のため拒否(mx68k_hdd_insert() の P268 ゲートと対称)。
 int  mx68k_hdd_eject(int unit);
 bool mx68k_hdd_is_inserted(int unit);
-// P447 (C2'): record the config-persisted SASI HDD path in the Bridge-side shadow
-// that mx68k_reset_hard() re-applies to Config.HDImage[unit*2] once the machine
-// type is wired. Call it unconditionally from pushConfig (NO machine-type gate on
-// the Swift side — the Bridge decides). unit 0..7; NULL or "" clears the slot.
-// mx68k_hdd_insert/_eject update the same shadow themselves, so the immediate-
-// effect settings-screen path (P239) stays in sync without any Swift change.
+// P447 (C2'): config に永続化された SASI HDD パスを Bridge 側シャドウへ記録する。
+// 機種が配線確定した時点で mx68k_reset_hard() がこれを Config.HDImage[unit*2] へ
+// 再適用する。pushConfig から無条件に呼ぶこと(Swift 側では機種ゲートを掛けない
+// — 判断は Bridge が行う)。unit は 0..7、NULL または "" でスロットをクリアする。
+// mx68k_hdd_insert/_eject も同じシャドウを自ら更新するため、即時反映される設定
+// 画面側の経路(P239)も Swift 側の変更無しに整合が保たれる。
 void mx68k_set_hdd_path(int unit, const char* path);
-/* P201: 1 if the SASI/HDD bus was accessed within the last few frames — drives
- * the status-bar "HD BUSY" indicator. */
+/* P201: 直近数フレーム以内に SASI/HDD バスへのアクセスがあれば 1 — ステータス
+ * バーの「HD BUSY」インジケータを駆動する。 */
 int  mx68k_hdd_accessing(void);
-/* P269: HDD mount lamp — internal SCSI (SPC, ID0) present under the P268 triple
- * gate, and external CZ-6BS1 (any ID 0..6) mounted. Both OR into hdd0_inserted. */
+/* P269: HDD マウントランプ — P268 の三重ゲート下で内蔵 SCSI(SPC, ID0)が在席、
+ * および外付け CZ-6BS1(ID 0..6 のいずれか)がマウント済み。どちらも
+ * hdd0_inserted へ OR される。 */
 bool mx68k_scsi_in_disk_present(void);
 bool mx68k_scsi_ext_is_inserted(void);
-/* P269/P510: external SCSI ($EA0000, MemTable index 0x50) install.
- * Gate not satisfied → the P269 observation hook (pure pass-through to Core
- * SCSI_Read/Write, HDD busy pulse on DREG access), exactly as before.
- * Gate satisfied (ext_wired && ext_rom_loaded) → a sub-decode dispatcher:
- * offset 0x0000-0x001F (SPC registers) goes to the ported XM6 MB89352
- * implementation, offset 0x0020-0x1FFF (ROM) stays on the Core path — the
- * Core SCSIIPL[] buffer is stored LE16-swapped and scsi.c compensates with
- * `adr^1`, a convention the ported implementation does not share.
- * wired_machine_type is passed for the log denominator only. */
+/* P269/P510: 外付け SCSI($EA0000、MemTable インデックス 0x50)のインストール。
+ * ゲート不成立 → P269 の観測フック(Core の SCSI_Read/Write へ素通しし、DREG
+ * アクセス時に HDD ビジーパルスを出す)で、従来と全く同じ。
+ * ゲート成立(ext_wired && ext_rom_loaded)→ サブデコードのディスパッチャ:
+ * オフセット 0x0000-0x001F(SPC レジスタ)は移植した XM6 MB89352 実装へ、
+ * オフセット 0x0020-0x1FFF(ROM)は Core 経路のまま — Core の SCSIIPL[]
+ * バッファは LE16 スワップされた状態で格納され、scsi.c が `adr^1` で補正して
+ * おり、移植した実装はこの慣習を共有していないため。
+ * wired_machine_type はログの分母のためだけに渡す。 */
 void scsi_ext_bridge_install(int ext_wired, int ext_rom_loaded, int wired_machine_type);
-/* P510: $EA000D (SSTS) read total — the denominator for [P510-SCTL]. */
+/* P510: $EA000D(SSTS)の読み出し総数 — [P510-SCTL] の分母。 */
 uint32_t p510_scsi_ext_ssts_read_count(void);
 
-// ---- SCSI (external CZ-6BS1) ----
-// SCSI ID 0..6 maps directly to Config.SCSIEXHDImage[id] (7=host reserved).
-// insert/eject only set/clear the path. Requires SCSIEXROM.DAT loaded + a SCSI
-// boot image carrying the "X68SCSI1" signature to actually boot.
-// P692: the previous wording here ("scsi.c re-opens per block access (no cache)
-// — no reset needed") has been stale since P510. When the external board is
-// actually wired (ext_wired && ext_rom_loaded), $EA0000 offsets 0x00-0x1F are
-// dispatched to the ported XM6 SPC, so Core scsi.c's SCSI_BlockRead/Write
-// per-block File_Open path is no longer reached; the real disk is opened once,
-// inside scsi_real_install_construct(), and its fd is held by DiskCache. A path
-// changed afterwards therefore takes effect only on the next hard reset (⌘R) —
-// the same rule as internal SCSI. The old "live, no reset needed" behaviour
-// survives only when the wiring gate is NOT satisfied (i.e. when external SCSI
-// does not actually function).
-int  mx68k_scsi_insert(int id, const char* path);  // 0=ok, <0=error
+// ---- SCSI(外付け CZ-6BS1) ----
+// SCSI ID 0..6 は Config.SCSIEXHDImage[id] に直接対応する(7=ホスト予約)。
+// insert/eject はパスの設定/クリアのみを行う。実際に起動するには SCSIEXROM.DAT
+// のロードと、"X68SCSI1" シグネチャを持つ SCSI 起動イメージが必要。
+// P692: ここにあった旧記述(「scsi.c はブロックアクセスごとに再オープンする
+// (キャッシュ無し)— リセット不要」)は P510 以降古くなっていた。外付けボードが
+// 実際に配線されている場合(ext_wired && ext_rom_loaded)、$EA0000 のオフセット
+// 0x00-0x1F は移植した XM6 SPC へディスパッチされるため、Core scsi.c の
+// SCSI_BlockRead/Write によるブロック単位の File_Open 経路にはもう到達しない。
+// 実ディスクは scsi_real_install_construct() 内で一度だけオープンされ、その fd は
+// DiskCache が保持する。したがって後から変更したパスは次回のハードリセット(⌘R)
+// でのみ反映される — 内蔵 SCSI と同じ規則。旧来の「即時反映、リセット不要」の
+// 挙動は、配線ゲートが成立しない場合(つまり外付け SCSI が実際には機能しない
+// 場合)にのみ残っている。
+int  mx68k_scsi_insert(int id, const char* path);  // 0=成功, <0=エラー
 void mx68k_scsi_eject(int id);
 bool mx68k_scsi_is_inserted(int id);
-void mx68k_set_scsi_ext_rom_path(const char* path); // optional; absent = ext SCSI disabled
+void mx68k_set_scsi_ext_rom_path(const char* path); // 任意。未指定 = 外付け SCSI 無効
 
-// ---- Internal SCSI (SUPER+ built-in SPC MB89352) — P247 Stage 1 skeleton ----
-// Stage 1: path/ROM held in Bridge only; NOT yet wired to real I/O. The actual
-// SPC (MB89352) transfer logic and $FC0000 IPL mapping arrive in Stage 2/4.
-// mx68k_scsi_in_insert/eject/is_inserted only set/clear a held path (id=SCSI
-// ID 0..6). mx68k_set_scsi_in_rom_path loads SCSIINROM.DAT (8KB) into a static
-// Bridge buffer (held only, not mapped). These have no runtime effect yet.
-int  mx68k_scsi_in_insert(int id, const char* path);  // 0=ok, <0=error
+// ---- 内蔵 SCSI(SUPER+ 内蔵 SPC MB89352)— P247 Stage 1 の骨組み ----
+// Stage 1: パス/ROM は Bridge 内で保持するのみで、実 I/O へはまだ配線しない。
+// 実際の SPC(MB89352)転送ロジックと $FC0000 の IPL マッピングは Stage 2/4 で
+// 導入する。mx68k_scsi_in_insert/eject/is_inserted は保持パスの設定/クリアのみを
+// 行う(id=SCSI ID 0..6)。mx68k_set_scsi_in_rom_path は SCSIINROM.DAT(8KB)を
+// Bridge の静的バッファへロードする(保持のみ、マップはしない)。これらは現時点では
+// 実行時の効果を持たない。
+int  mx68k_scsi_in_insert(int id, const char* path);  // 0=成功, <0=エラー
 void mx68k_scsi_in_eject(int id);
 bool mx68k_scsi_in_is_inserted(int id);
 void mx68k_set_scsi_in_rom_path(const char* path);
-void scsi_in_bridge_install(int machine_type); // gate: installs index0x4b passthrough when machine_type==4 (SCSI)
-// P447 Phase 1 diagnostic probe [P447-SASIWIRE]. Emits ONE unconditional line per
-// hard reset holding the raw MemRead/MemWriteTable[0x4b] function-pointer values
-// alongside every candidate handler address (the denominator), plus the SASI
-// slot occupancy over all MX68K_SASI_UNIT_COUNT units (hdimg_map/n_hdimg — P455;
-// hdimg0=/hdimg2= are kept only as a grep-compatible subset, never the
-// denominator). Lives in scsi_in_bridge.c because the candidate
-// handlers there have internal linkage. Call it from mx68k_reset_hard() right
-// after the wiring pair runs and BEFORE g_wired_machine_type is overwritten
-// (wired_prev must carry the previous session's machine type).
+void scsi_in_bridge_install(int machine_type); // ゲート: machine_type==4(SCSI)のとき index0x4b の素通しハンドラを設置
+// P447 Phase 1 診断プローブ [P447-SASIWIRE]。ハードリセットごとに無条件で 1 行を
+// 出力し、MemRead/MemWriteTable[0x4b] の関数ポインタの生値を、候補ハンドラ全ての
+// アドレス(分母)と並べて記録する。加えて MX68K_SASI_UNIT_COUNT 個の全ユニットに
+// わたる SASI スロット占有状況(hdimg_map/n_hdimg — P455。hdimg0=/hdimg2= は grep
+// 互換のための部分集合として残しているだけで、分母ではない)も出す。候補ハンドラが
+// 内部リンケージを持つため scsi_in_bridge.c に置いている。mx68k_reset_hard() から、
+// 配線ペアの実行直後かつ g_wired_machine_type が上書きされる前に呼ぶこと
+// (wired_prev には前セッションの機種を渡す必要がある)。
 void scsi_in_bridge_log_slots(int machine_type, int wired_prev);
 void scsi_real_install_teardown(void);   // P275: 電源OFF時に内蔵SCSIを解放(次回電源ONで新ディスクパス反映)
-// P253 Stage 2d: internal-SCSI HD disk-image path (id=SCSI ID 0..6; ID0 wired).
-// Takes effect on the next hard reset (scsi_real_install_construct pulls it in
-// before Reset()->Construct() opens the disk). mx68k_get_machine_type returns
-// g_machine_type (4 == SCSI); used by the $FC0000 fetch overlay helper.
+// P253 Stage 2d: 内蔵 SCSI の HD ディスクイメージパス(id=SCSI ID 0..6、ID0 が配線済み)。
+// 次回のハードリセットで反映される(Reset()->Construct() がディスクをオープンする
+// 前に scsi_real_install_construct が取り込む)。mx68k_get_machine_type は
+// g_machine_type(4 == SCSI)を返し、$FC0000 のフェッチ・オーバーレイ補助関数が使う。
 void        mx68k_set_scsi_in_disk_path(int id, const char* path);
 const char* mx68k_get_scsi_in_disk_path(int id);
 int         mx68k_get_machine_type(void);
@@ -307,89 +308,90 @@ int         mx68k_get_machine_type(void);
 // 「操作できるのに挿入は必ず拒否される」窓(P268 由来)を解消する。
 int         mx68k_get_wired_machine_type(void);
 
-// ---- P692: live SPC state accessors for the Storage Monitor (read-only) ----
-// Every other SCSI/MO/CD getter above returns a Bridge-side shadow (the pending
-// configuration), which drifts from what the running SPC actually has open until
-// the next hard reset. These four read the running instance itself
-// (s_scsi_instance->GetSCSI()) and are the single source of truth for "what is
-// mounted right now". Defined in scsi_spc_bridge.cpp.
-//   id is 0..6; out-of-range, no SPC instance, or an empty slot all return the
-//   documented safe default (mask bit clear / kind -1 / ready false / path "").
-//   kind: 0=HD, 1=MO, 2=CD, -1=not attached.
-// ★mx68k_scsi_live_path() returns a pointer to a SHARED static buffer that the
-//   next call overwrites — the caller must copy the string before calling again.
-// ★These dereference Disk* objects that MO/CD live insert/eject deletes from the
-//   main thread, so callers on the emulation thread must hold the same lock that
-//   brackets mx68k_run_frame() (Swift: EmulatorEngine.emulationLock).
+// ---- P692: ストレージモニタ向けの稼働中 SPC 状態アクセサ(read-only) ----
+// 上記の他の SCSI/MO/CD getter はいずれも Bridge 側シャドウ(保留中の設定)を
+// 返すため、次回のハードリセットまでは稼働中の SPC が実際にオープンしている
+// ものとずれる。この 4 つは稼働中インスタンス自体(s_scsi_instance->GetSCSI())を
+// 読み、「今まさに何がマウントされているか」の唯一の真実源となる。
+// 実体は scsi_spc_bridge.cpp。
+//   id は 0..6。範囲外・SPC インスタンス無し・空スロットはいずれも文書化された
+//   安全側の既定値(マスクビット 0 / kind -1 / ready false / path "")を返す。
+//   kind: 0=HD, 1=MO, 2=CD, -1=未接続。
+// ★mx68k_scsi_live_path() は次の呼出しで上書きされる「共有」静的バッファへの
+//   ポインタを返す — 呼び出し側は再度呼ぶ前に文字列をコピーしておくこと。
+// ★これらは MO/CD のライブ挿入/イジェクトがメインスレッドから delete する Disk*
+//   オブジェクトを逆参照するため、エミュレーションスレッド上の呼び出し側は
+//   mx68k_run_frame() を囲むのと同じロック(Swift: EmulatorEngine.emulationLock)を
+//   保持していなければならない。
 uint32_t    mx68k_scsi_live_attached_mask(void);
 int         mx68k_scsi_live_kind(int id);
 bool        mx68k_scsi_live_ready(int id);
 const char* mx68k_scsi_live_path(int id);
 
-// ---- SCSI MO (magneto-optical) — P668, dedicated slot at SCSI ID5 ----
-// A single dedicated MO slot at SCSI ID5, matching XM6's default layout
-// (HD on ID0-4, MO on ID5, CD on ID6, initiator on ID7 — XM6:vm/scsi.cpp:3952-3995).
-// The path is held in a Bridge-side shadow and pulled into the ported SPC by
-// scsi_real_install_construct() -> SCSI::SetMOPath() -> Reset() -> Construct().
-// P674: when the MO drive is ALREADY attached (a MO path was set at the time of
-// the last hard reset), insert/eject now take effect LIVE — SCSI::Open()/Eject()
-// swap only the medium, leaving the drive itself on the bus, and the guest is
-// notified via UNIT ATTENTION. When no MO drive is attached yet (no MO path at
-// boot), the shadow is updated as before and takes effect on the NEXT HARD RESET
-// (Cmd+R), the same as the internal SCSI HD path (P450/D-30).
-// If SCSI ID5 already carries a hard-disk image, the HD keeps ID5 and the MO is
-// NOT attached (a configured HD is never displaced); the Swift settings UI
-// refuses the MO selection in that case, and Construct() logs the conflict.
-// ★Guest-side requirement (NOT an MX defect — real hardware behaves the same):
-// the real SCSIINROM.DAT contains only the SCSI IOCS + boot routine, no Human68k
-// block-device driver, so a resident SCSI device driver such as SUSIE.X must be
-// loaded on the guest for the MO to get a drive letter. The user supplies it.
+// ---- SCSI MO(光磁気ディスク)— P668、SCSI ID5 の専用スロット ----
+// SCSI ID5 に MO 専用スロットを 1 つ置く。XM6 の既定レイアウト(ID0-4 に HD、
+// ID5 に MO、ID6 に CD、ID7 にイニシエータ — XM6:vm/scsi.cpp:3952-3995)に合わせたもの。
+// パスは Bridge 側シャドウに保持され、scsi_real_install_construct() ->
+// SCSI::SetMOPath() -> Reset() -> Construct() の順で移植 SPC へ取り込まれる。
+// P674: MO ドライブが「既に」接続済み(前回のハードリセット時点で MO パスが設定
+// されていた)の場合、insert/eject は即時(ライブ)反映される — SCSI::Open()/Eject()
+// はメディアだけを差し替えてドライブ自体はバス上に残し、ゲストには UNIT ATTENTION
+// で通知する。MO ドライブがまだ接続されていない(起動時に MO パスが無かった)場合は、
+// 従来どおりシャドウを更新し、次回のハードリセット(Cmd+R)で反映される。内蔵 SCSI
+// の HD パス(P450/D-30)と同じ。
+// SCSI ID5 に既にハードディスクイメージが割り当てられている場合、HD が ID5 を維持し
+// MO は接続しない(設定済みの HD を押しのけることは決してない)。その場合 Swift の
+// 設定 UI は MO の選択を拒否し、Construct() は競合をログに記録する。
+// ★ゲスト側の要件(MX の不具合ではない — 実機も同じ挙動):
+// 実物の SCSIINROM.DAT には SCSI IOCS と起動ルーチンしか入っておらず、Human68k の
+// ブロックデバイスドライバは含まれない。そのため MO にドライブ名を割り当てるには、
+// SUSIE.X のような常駐 SCSI デバイスドライバをゲスト側で組み込む必要がある。
+// ドライバはユーザーが用意する。
 int         mx68k_mo_insert(const char* path);
-// 0=live (took effect immediately) / 1=shadow only (takes effect on the next hard reset, Cmd+R)
-// / -1=bad argument / -3=size is not one of the 4 standard MO capacities
-// / -4=open failed (live path) / -5=the guest has the medium locked (live path)
+// 0=ライブ(即時反映) / 1=シャドウのみ(次回のハードリセット Cmd+R で反映)
+// / -1=引数不正 / -3=サイズが MO の標準 4 容量のいずれでもない
+// / -4=オープン失敗(ライブ経路) / -5=ゲストがメディアをロック中(ライブ経路)
 int         mx68k_mo_eject(void);
-// 0=live (took effect immediately) / 1=shadow only (takes effect on the next hard reset, Cmd+R)
-// / -5=the guest has the medium locked (live path)
+// 0=ライブ(即時反映) / 1=シャドウのみ(次回のハードリセット Cmd+R で反映)
+// / -5=ゲストがメディアをロック中(ライブ経路)
 bool        mx68k_mo_is_inserted(void);
-void        mx68k_set_mo_path(const char* path); // pushConfig path; no size validation (mirrors mx68k_set_hdd_path)
+void        mx68k_set_mo_path(const char* path); // pushConfig 経路。サイズ検証なし(mx68k_set_hdd_path と同様)
 const char* mx68k_get_mo_path(void);
 
-// ---- P676: SCSI CD-ROM (ID6 fixed slot) ----
-// Mounts a host CD-ROM image file (ISO / Mode1, 2048B or RAW 2352B sectors) on
-// SCSI ID6. Structurally identical to the MO path above (P668/P674); the drive
-// is created by Construct() from the shadow path and, once attached, insert /
-// eject take effect LIVE via SCSI::Open()/Eject() with the drive left on the
-// bus (the guest is notified via UNIT ATTENTION). When no CD drive is attached
-// yet (no CD path at boot), the shadow is updated and takes effect on the NEXT
-// HARD RESET (Cmd+R).
-// If SCSI ID6 already carries a hard-disk image, the HD keeps ID6 and the CD is
-// NOT attached (a configured HD is never displaced; XM6's "fall back to ID7"
-// behaviour is deliberately NOT adopted because MX's ID7 is the initiator and
-// HDMax=7 (P576/D-52) is incompatible with it). The Swift settings UI refuses
-// the CD selection in that case, and Construct() logs the conflict.
-// Size validation is a RANGE check, not the MO's exact-capacity match:
-// a multiple of 2352 up to 912579600, or a multiple of 2048 up to 0x2bed5000.
-// Mode1 verification (the sector header's mode byte) is NOT done here — it is
-// SCSICD::OpenIso's job, and duplicating it would diverge from the XM6 port.
-// ★Guest-side requirement (NOT an MX defect — real hardware behaves the same):
-// a resident SCSI device driver such as SUSIE.X must be loaded on the guest for
-// the CD-ROM to get a drive letter. The user supplies it.
-// Scope: data (Mode1) tracks only — CD-DA audio playback and booting from CD
-// are out of scope and not implemented (upstream XM6 leaves CD-DA unimplemented
-// as well).
+// ---- P676: SCSI CD-ROM(ID6 固定スロット) ----
+// ホストの CD-ROM イメージファイル(ISO / Mode1、2048B または RAW 2352B セクタ)を
+// SCSI ID6 にマウントする。構造は上記の MO 経路(P668/P674)と同一で、ドライブは
+// Construct() がシャドウパスから生成し、いったん接続された後は insert / eject が
+// SCSI::Open()/Eject() によりドライブをバス上に残したまま即時(ライブ)反映される
+// (ゲストには UNIT ATTENTION で通知)。CD ドライブがまだ接続されていない(起動時に
+// CD パスが無かった)場合は、シャドウを更新し、次回のハードリセット(Cmd+R)で
+// 反映される。
+// SCSI ID6 に既にハードディスクイメージが割り当てられている場合、HD が ID6 を維持し
+// CD は接続しない(設定済みの HD を押しのけることは決してない。XM6 の「ID7 へ
+// フォールバック」挙動は意図的に採用しない — MX の ID7 はイニシエータであり、
+// HDMax=7(P576/D-52)と両立しないため)。その場合 Swift の設定 UI は CD の選択を
+// 拒否し、Construct() は競合をログに記録する。
+// サイズ検証は MO のような容量の完全一致ではなく「範囲」チェック:
+// 912579600 以下の 2352 の倍数、または 0x2bed5000 以下の 2048 の倍数。
+// Mode1 の検証(セクタヘッダのモードバイト)はここでは行わない — それは
+// SCSICD::OpenIso の役目であり、重複させると XM6 移植から乖離するため。
+// ★ゲスト側の要件(MX の不具合ではない — 実機も同じ挙動):
+// CD-ROM にドライブ名を割り当てるには、SUSIE.X のような常駐 SCSI デバイス
+// ドライバをゲスト側で組み込む必要がある。ドライバはユーザーが用意する。
+// スコープ: データ(Mode1)トラックのみ — CD-DA 音声再生と CD からの起動は
+// スコープ外で未実装(上流の XM6 も CD-DA は未実装のまま)。
 int         mx68k_cd_insert(const char* path);
-// 0=live (took effect immediately) / 1=shadow only (takes effect on the next hard reset, Cmd+R)
-// / -1=bad argument / -3=size is not a valid CD-ROM image size
-// / -4=open failed (live path) / -5=the guest has the medium locked (live path)
+// 0=ライブ(即時反映) / 1=シャドウのみ(次回のハードリセット Cmd+R で反映)
+// / -1=引数不正 / -3=サイズが CD-ROM イメージとして有効なサイズでない
+// / -4=オープン失敗(ライブ経路) / -5=ゲストがメディアをロック中(ライブ経路)
 int         mx68k_cd_eject(void);
-// 0=live (took effect immediately) / 1=shadow only (takes effect on the next hard reset, Cmd+R)
-// / -5=the guest has the medium locked (live path)
+// 0=ライブ(即時反映) / 1=シャドウのみ(次回のハードリセット Cmd+R で反映)
+// / -5=ゲストがメディアをロック中(ライブ経路)
 bool        mx68k_cd_is_inserted(void);
-void        mx68k_set_cd_path(const char* path); // pushConfig path; no size validation (mirrors mx68k_set_mo_path)
+void        mx68k_set_cd_path(const char* path); // pushConfig 経路。サイズ検証なし(mx68k_set_mo_path と同様)
 const char* mx68k_get_cd_path(void);
 
-// ---- P450: Memory-switch auto-update + SASI-side memory-switch clear ----
+// ---- P450: メモリスイッチ自動更新 + SASI 側メモリスイッチのクリア ----
 // P450: メモリスイッチ自動更新(XM6「メモリスイッチ自動更新」相当)。既定 true。
 // ON  = ハードリセットのたびに、SRAM のメモリスイッチ $ED006F/$ED0070/$ED0071 を
 //       現在の機種/ボード構成へ合わせて更新する。
@@ -458,50 +460,48 @@ const char* mx68k_get_scsi_ext_disk_path(int id);
 // P510: [P510-SCTL] — 300 フレームごとの無条件ダンプ。フレーム末尾から毎フレーム呼ぶ。
 void p510_ext_scsi_dump(void);
 
-// ---- State Save / Load (Phase 2 #4) ----
-// Snapshot / restore the full emulated-machine state to a file.
-// Thread-safe: the request is queued and executed at the next run_frame
-// boundary on the emulation thread. Returns 0 when queued, negative on a
-// bad argument.
+// ---- ステートのセーブ / ロード(Phase 2 #4) ----
+// エミュレートしているマシン全体の状態をファイルへスナップショット / 復元する。
+// スレッドセーフ: 要求はキューに積まれ、エミュレーションスレッド上の次の run_frame
+// 境界で実行される。キューに積めたら 0、引数不正なら負値を返す。
 int  mx68k_save_state(const char* path);
 int  mx68k_load_state(const char* path);
 
-// P481 (D-42): completion notification. Because the two calls above only report
-// "queued", the actual result is published here once the emulation thread has
-// run the operation. Snapshot mx68k_state_op_seq() before queueing, then poll
-// until it changes; mx68k_last_state_rc() is that operation's result
-// (0 = success) and mx68k_last_state_kind() is 0=none / 1=save / 2=load.
+// P481 (D-42): 完了通知。上記 2 つの呼出しは「キューに積んだ」ことしか報告しない
+// ため、実際の結果はエミュレーションスレッドが処理を実行した後にここで公開される。
+// キューに積む前に mx68k_state_op_seq() の値を控え、それが変化するまでポーリング
+// すること。mx68k_last_state_rc() がその処理の結果(0 = 成功)、
+// mx68k_last_state_kind() が 0=なし / 1=セーブ / 2=ロード。
 unsigned int mx68k_state_op_seq(void);
 int          mx68k_last_state_rc(void);
 int          mx68k_last_state_kind(void);
 
-// ---- Sound ----
+// ---- サウンド ----
 int  mx68k_audio_read(int16_t* buffer, int frames);
 void mx68k_set_sound_enabled(bool en);
 void mx68k_set_opm_volume(int vol);
 void mx68k_set_adpcm_volume(int vol);
-/* P624: turbo mode audio playback rate (replaces P555's mx68k_set_turbo_audio_mute).
+/* P624: ターボモード時の音声再生レート(P555 の mx68k_set_turbo_audio_mute を置き換える)。
  *
- * ratio_q16 is a Q16 fixed-point playback-speed multiplier: 65536 = 1.0x.
- * The consumer side (mx68k_audio_read, CoreAudio real-time thread) decimates the
- * ring buffer with a phase accumulator + linear interpolation, so turbo playback
- * is pitch-shifted (tape fast-forward) instead of silent — the same variable-rate
- * resampling approach WebX68k uses. Sound generation and chip state are untouched.
+ * ratio_q16 は Q16 固定小数点の再生速度倍率: 65536 = 1.0 倍。
+ * 消費側(mx68k_audio_read、CoreAudio の実時間スレッド)が位相アキュムレータ +
+ * 線形補間でリングバッファを間引くため、ターボ再生は無音ではなくピッチが上がった
+ * 音(テープの早送り)になる — WebX68k と同じ可変レート・リサンプリング方式。
+ * 音声生成とチップ状態には一切手を触れない。
  *
- * Reserved values:
- *   MX68K_TURBO_AUDIO_RATE_UNITY (65536) — normal speed. mx68k_audio_read() takes
- *       a bypass path that is byte-for-byte identical to the pre-P624 code.
- *   MX68K_TURBO_AUDIO_RATE_MUTE  (0)     — silence (ring is drained, output ramps
- *       to zero via the existing P463/P465 decay). Kept as a general-purpose API
- *       primitive; as of P625 no UI path reaches it (No-Wait uses AUTO below).
- *   MX68K_TURBO_AUDIO_RATE_AUTO  (1)     — P625: for No-Wait turbo, whose effective
- *       speed is host-load dependent and therefore not expressible as a fixed
- *       ratio. mx68k_audio_read() derives the playback rate itself from the audio
- *       ring's fill level (proportional feedback + exponential smoothing) and feeds
- *       the result into the same decimation path used by fixed-multiplier turbo.
- *       1 is safe to reserve: it would otherwise mean 1/65536x playback, a ratio no
- *       caller can legitimately request (fixed turbo passes N<<16, N=2..5).
- * Negative values are invalid and are coerced to MX68K_TURBO_AUDIO_RATE_UNITY. */
+ * 予約値:
+ *   MX68K_TURBO_AUDIO_RATE_UNITY (65536) — 通常速度。mx68k_audio_read() は
+ *       P624 以前のコードとバイト単位で同一の素通し経路を通る。
+ *   MX68K_TURBO_AUDIO_RATE_MUTE  (0)     — 無音(リングは読み捨てられ、出力は既存の
+ *       P463/P465 の減衰でゼロへ落ちる)。汎用 API のプリミティブとして残しているが、
+ *       P625 時点でこれに到達する UI 経路は無い(No-Wait は下記の AUTO を使う)。
+ *   MX68K_TURBO_AUDIO_RATE_AUTO  (1)     — P625: No-Wait ターボ用。実効速度がホスト
+ *       負荷に依存するため固定倍率では表せない。mx68k_audio_read() がオーディオ
+ *       リングの充填量から再生レートを自ら導出し(比例フィードバック + 指数平滑化)、
+ *       その結果を固定倍率ターボと同じ間引き経路へ渡す。
+ *       1 を予約しても安全: 本来なら 1/65536 倍の再生を意味し、正当にそれを要求する
+ *       呼び出し元は存在しない(固定倍率ターボは N<<16、N=2..5 を渡す)。
+ * 負値は不正で、MX68K_TURBO_AUDIO_RATE_UNITY へ強制される。 */
 #define MX68K_TURBO_AUDIO_RATE_UNITY 65536
 #define MX68K_TURBO_AUDIO_RATE_MUTE  0
 #define MX68K_TURBO_AUDIO_RATE_AUTO  1
@@ -552,23 +552,23 @@ void mx68k_rec_audio_reset(void);
  * mx68k_rec_audio_write() が atomic load 1 回で即 return する。 */
 void mx68k_rec_audio_set_enabled(bool enabled);
 
-// ---- Keyboard Input ----
+// ---- キーボード入力 ----
 void mx68k_key_down(uint8_t x68k_keycode);
 void mx68k_key_up(uint8_t x68k_keycode);
 
-/* P228: software-keyboard LED indicator. Returns the raw keyLED byte captured
- * by mfp.c. Negative logic (0=lit, 1=off) for the 7 lock LEDs:
+/* P228: ソフトウェアキーボードの LED インジケータ。mfp.c が捕捉した keyLED の
+ * 生バイトを返す。7 個のロック LED について負論理(0=点灯, 1=消灯):
  * bit0=かな bit1=ローマ字 bit2=コード入力 bit3=CAPS bit4=INS bit5=ひらがな
- * bit6=全角 (D7 is the command-identify bit). Read-only. */
+ * bit6=全角(D7 はコマンド識別ビット)。read-only。 */
 uint8_t mx68k_get_key_led(void);
 
-// ---- Mouse Input ----
+// ---- マウス入力 ----
 void mx68k_mouse_move(int dx, int dy);
 void mx68k_mouse_button(int button, bool pressed);
 
-// ---- Joystick Input ----
-// bits: bit0=Up, bit1=Down, bit2=Left, bit3=Right, bit5=TRIG2, bit6=TRIG1
-// bit4 / bit7 are unused and read as 1. 0 = pressed (active Low), idle = 0xFF.
+// ---- ジョイスティック入力 ----
+// ビット: bit0=上, bit1=下, bit2=左, bit3=右, bit5=TRIG2, bit6=TRIG1
+// bit4 / bit7 は未使用で 1 として読める。0 = 押下(アクティブ Low)、無操作時 = 0xFF。
 void mx68k_joy_set(int port, uint8_t bits);
 // P500: 多ボタンパッドの第2バンク(ストローブ線 High 側)。実機の多ボタン化は
 // 8番ピン(PPI PortC bit4/5)の L/H による静的 2 バンク多重で実現されており、
@@ -583,13 +583,13 @@ void mx68k_sram_save(void);
 void mx68k_sram_save_all(void);   // P773: 基本16KB+64KB拡張を1回でまとめて保存
 void mx68k_sram_load(void);
 void mx68k_sram_clear(void);
-// P454: schedule the SRAM zero-clear at the next mx68k_run_frame() boundary
-// (avoids racing the emulation thread; mirrors mx68k_schedule_hard_reset).
+// P454: SRAM のゼロクリアを次の mx68k_run_frame() 境界で行うよう予約する
+// (エミュレーションスレッドとの競合を避けるため。mx68k_schedule_hard_reset と同様)。
 void mx68k_schedule_sram_clear(void);
-// P204: guest SRAM $ED0029 (XEiJ SRAM_EJECT) bit0 — eject FD at power-off.
+// P204: ゲスト SRAM $ED0029(XEiJ の SRAM_EJECT)の bit0 — 電源 OFF 時に FD をイジェクトする。
 bool mx68k_sram_eject_on_poweroff(void);
 
-// ---- Guest-initiated software power-off (P776) ----
+// ---- ゲスト起点のソフトウェア電源 OFF(P776) ----
 // 実機のシステムポート $E8E00F へゲスト側ソフトウェアが "00"→"0F"→"0F" を順に
 // 書き込むと POWER OFF (Vcc1 OFF) が実行される(テクニカルデータブック p.184 /
 // p.194 付録 3-2 (6)、XEiJ PowerControl.java / XM6 vm/sysport.cpp:481-519 も同仕様)。
@@ -600,7 +600,7 @@ bool mx68k_sram_eject_on_poweroff(void);
 // スレッド(= 同一の emulationLock 区間内)から行うこと。
 int mx68k_take_guest_poweroff_request(void);
 
-// ---- Status ----
+// ---- ステータス ----
 typedef struct {
     uint32_t pc;
     uint32_t d[8];
@@ -617,7 +617,7 @@ typedef struct {
     bool     fdd1_inserted;
     bool     fdd1_active;
     bool     paused;
-    bool     hdd_busy;       // P201: SASI/HDD access indicator
+    bool     hdd_busy;       // P201: SASI/HDD アクセスインジケータ
     bool     hdd0_inserted;  /* P203 / P455: ランプ用の集約在席フラグ。
                               * ★P455 以降「unit 0 が装着」ではなく
                               *   「SASI unit 0..7 のいずれか OR 内蔵SCSI OR 外付SCSI」。
@@ -668,9 +668,9 @@ typedef struct {
 
 void mx68k_get_status(MX68KStatus* status);
 
-/* P286: developer monitor panels — CRTC / Video Controller / BG・Sprite.
- * All three read existing extern globals only (no Core changes), snapshot-copied
- * into the out-param under the same 1Hz gate as mx68k_get_status. */
+/* P286: 開発者向けモニタパネル — CRTC / ビデオコントローラ / BG・スプライト。
+ * 3 つとも既存の extern グローバル変数を読むだけで(Core は無改変)、
+ * mx68k_get_status と同じ 1Hz ゲート下で出力引数へスナップショットコピーする。 */
 typedef struct {
     double   hsync_khz;
     double   vsync_hz;
@@ -1112,88 +1112,88 @@ int mx68k_get_region_map(MX68KRegionInfo* out, int max);
  *   DMAC/MIDI/SCSI がそのフラグを読む処理と競合しうる。 */
 uint32_t mx68k_disassemble_line(uint32_t addr, char* out_text, uint32_t out_text_len);
 
-/* P211: current guest VSYNC rate in Hz (CRTC R20 bit4: hi-res 55.46 / lo-res 61.46).
- * Used by the Swift frame driver to pace mx68k_run_frame() to wall-clock. */
+/* P211: 現在のゲスト VSYNC レート(Hz)(CRTC R20 bit4: 高解像度 55.46 / 低解像度 61.46)。
+ * Swift 側のフレーム駆動部が mx68k_run_frame() を実時間に合わせて刻むのに使う。 */
 double mx68k_get_vsync_hz(void);
 
-/* ----  P51-B ablation switches (L3 chunk-internal SSP exception-push scrub) ----
- * Consumed in both EmulatorBridge.c and m68000_bridge.c. Hoisted to header so a
- * single source of truth governs both translation units. C99 §6.10.1 evaluates
- * undefined identifiers in #if as 0; defining these only in one .c would
- * silently disable the consumer in the other → "fail-quiet dead code".
- * See /tmp/mx68k_P51B_plan.md §0 / §2.1. */
+/* ----  P51-B アブレーションスイッチ(L3 チャンク内 SSP 例外プッシュの除去) ----
+ * EmulatorBridge.c と m68000_bridge.c の両方で参照される。両翻訳単位を単一の
+ * 真実源で統制するためヘッダへ引き上げている。C99 §6.10.1 により #if 内の未定義
+ * 識別子は 0 と評価されるため、片方の .c でだけ定義すると、もう片方の参照側が
+ * 黙って無効化される →「気付かれないデッドコード」になる。
+ * /tmp/mx68k_P51B_plan.md §0 / §2.1 を参照。 */
 #define P51B_ENABLE              0
-#define P51B_SIGC_ENABLE         1   /* BasePC-dirty gate (primary) */
-#define P51B_SIGA_ENABLE         1   /* SSP-relative + supervisor gate (action) */
-#define P51B_SIGB_ENABLE         1   /* vec-area fallback (no BasePC dirty req) */
-#define P51B_SR_GATE_ENABLE      1   /* Spec Proposal A diagnostic only — see plan §5.4 */
+#define P51B_SIGC_ENABLE         1   /* BasePC 汚れゲート(主) */
+#define P51B_SIGA_ENABLE         1   /* SSP 相対 + スーパーバイザゲート(実処理) */
+#define P51B_SIGB_ENABLE         1   /* ベクタ領域のフォールバック(BasePC 汚れを要求しない) */
+#define P51B_SR_GATE_ENABLE      1   /* Spec Proposal A の診断専用 — plan §5.4 参照 */
 #define P51B_LOG_CAP             64
 
-/* Optional summary dumper — call once at session end. */
+/* 任意のサマリ出力関数 — セッション終了時に 1 回呼ぶ。 */
 void m68000_p51b_dump_summary(void);
 
-/* ---- P52 ablation switches (chunk-entry SSP guard, diagnostic-first) ----
- * Single source of truth for both translation units. C99 §6.10.1 evaluates
- * undefined identifiers in #if as 0. See /tmp/mx68k_P52_plan.md §2. */
+/* ---- P52 アブレーションスイッチ(チャンク入口の SSP ガード、診断優先) ----
+ * 両翻訳単位の単一の真実源。C99 §6.10.1 により #if 内の未定義識別子は 0 と
+ * 評価される。/tmp/mx68k_P52_plan.md §2 を参照。 */
 #define P52_ENABLE                       0
 #define P52_SNAPSHOT_ENABLE              0
 #define P52_DETECT_ENABLE                0
 #define P52_DETECT_SR_BYTE_ENABLE        0   /* sigA: (stk_sr & 0x58E0) != 0 */
-#define P52_DETECT_PC_RANGE_ENABLE       0   /* sigB: stk_PC odd or hi ∉ {0x00,0xFF} */
-#define P52_DETECT_SINGLE_PUSH_ENABLE    0   /* 1=strict delta==6; 0=relaxed multiple-of-6 */
-#define P52_RESTORE_ENABLE               0   /* Phase 1: OFF (diagnostic-only) */
+#define P52_DETECT_PC_RANGE_ENABLE       0   /* sigB: stk_PC が奇数、または上位 ∉ {0x00,0xFF} */
+#define P52_DETECT_SINGLE_PUSH_ENABLE    0   /* 1=厳密に delta==6、0=緩和して 6 の倍数 */
+#define P52_RESTORE_ENABLE               0   /* Phase 1: OFF(診断専用) */
 #define P52_LOG_CAP                      64
 #define P52_RAM_LO                       0x00000000u
 #define P52_RAM_HI                       0x00C00000u
 
 void m68000_p52_dump_summary(void);
 
-/* ---- P53 ablation switches (graceful-shutdown wiring) ----
- * Single source of truth for both C and Swift translation units.
- * - P53_ENABLE: master gate for idempotency + atexit body.
- * - P53_ATEXIT_ENABLE: gate for atexit registration + summary body.
- * - P53_APPDELEGATE_ENABLE: gate for AppDelegate.applicationWillTerminate
- *   body. NOTE: the @NSApplicationDelegateAdaptor field is a compile-time
- *   decoration in MX68KApp.swift and is not runtime-removable; this switch
- *   only short-circuits the willTerminate body. See /tmp/mx68k_P53_plan.md §4.
- * - P53_SIGSRC_ENABLE: gate for DispatchSourceSignal (SIGTERM/SIGINT) install
- *   in applicationDidFinishLaunching. Default disposition restored when 0.
+/* ---- P53 アブレーションスイッチ(正常終了処理の配線) ----
+ * C と Swift 両方の翻訳単位にとっての単一の真実源。
+ * - P53_ENABLE: 冪等性 + atexit 本体のマスターゲート。
+ * - P53_ATEXIT_ENABLE: atexit 登録 + サマリ本体のゲート。
+ * - P53_APPDELEGATE_ENABLE: AppDelegate.applicationWillTerminate 本体のゲート。
+ *   注意: @NSApplicationDelegateAdaptor フィールドは MX68KApp.swift 内の
+ *   コンパイル時の修飾であり実行時には取り外せない。このスイッチは
+ *   willTerminate 本体を短絡させるだけ。/tmp/mx68k_P53_plan.md §4 を参照。
+ * - P53_SIGSRC_ENABLE: applicationDidFinishLaunching 内での DispatchSourceSignal
+ *   (SIGTERM/SIGINT)設置のゲート。0 のときは既定のシグナル処理に戻る。
  */
 #define P53_ENABLE              1
 #define P53_ATEXIT_ENABLE       1
 #define P53_APPDELEGATE_ENABLE  1
 #define P53_SIGSRC_ENABLE       1
 
-/* P53 atexit-safe summary helper (NOT mx68k_shutdown — avoids double-free).
- * See /tmp/mx68k_P53_plan.md §1.3 / §3.2. */
+/* P53 atexit から安全に呼べるサマリ補助関数(mx68k_shutdown ではない — 二重解放を避けるため)。
+ * /tmp/mx68k_P53_plan.md §1.3 / §3.2 を参照。 */
 void mx68k_atexit_summary(void);
 
-/* P53 ablation queries (exposed to Swift). */
+/* P53 アブレーション設定の問い合わせ(Swift へ公開)。 */
 int  mx68k_p53_appdelegate_enabled(void);
 int  mx68k_p53_sigsrc_enabled(void);
 
-/* P53 C bridge logging helpers — route Swift markers through debug_log
- * (no NSLog: no stderr→debug.log redirect exists in this codebase).
- * See /tmp/mx68k_P53_plan.md §1.4 (Code Review C-2). */
+/* P53 C ブリッジのログ補助関数 — Swift 側のマーカーを debug_log 経由で出力する
+ * (NSLog は使わない: このコードベースには stderr→debug.log のリダイレクトが無い)。
+ * /tmp/mx68k_P53_plan.md §1.4(Code Review C-2)を参照。 */
 void mx68k_log_delegate_fire(void);
 void mx68k_log_sig_catch(const char* signame);
 void mx68k_log_marker(const char* msg);
 
-/* ---- P54 ablation switches (gate-3 relaxation + reject diagnostics) ----
- * /tmp/mx68k_P54_plan.md §4. C99 §6.10.1: undefined macros eval to 0.
+/* ---- P54 アブレーションスイッチ(ゲート3の緩和 + 棄却時の診断) ----
+ * /tmp/mx68k_P54_plan.md §4。C99 §6.10.1: 未定義マクロは 0 と評価される。
  *
- * Semantics:
- *  - P54_ENABLE: master compile gate. 0 = identical to Test#64 baseline.
- *  - P54_RELAX_DELTA_GATE: when 1, gate-3 delta criterion is
- *      (delta != 0 && delta % 6 == 0) regardless of
- *      P52_DETECT_SINGLE_PUSH_ENABLE. When 0, falls back to existing
- *      P52_DETECT_SINGLE_PUSH_ENABLE selection (identity).
- *  - P54_DIAG_GATE3_EXIT_SR: ring-log gate-3 reject events with exit SR.
- *  - P54_DIAG_GATE45_RING: ring-log gate-4/5 reject events with sigs.
- *  - P54_RING_CAP: per-ring depth.
+ * 意味:
+ *  - P54_ENABLE: コンパイル時のマスターゲート。0 = Test#64 ベースラインと同一。
+ *  - P54_RELAX_DELTA_GATE: 1 のとき、ゲート3の delta 判定条件は
+ *      P52_DETECT_SINGLE_PUSH_ENABLE に関係なく (delta != 0 && delta % 6 == 0)。
+ *      0 のときは既存の P52_DETECT_SINGLE_PUSH_ENABLE による選択に
+ *      戻る(恒等)。
+ *  - P54_DIAG_GATE3_EXIT_SR: ゲート3の棄却イベントを終了時 SR 付きでリングログに記録。
+ *  - P54_DIAG_GATE45_RING: ゲート4/5の棄却イベントを sig 付きでリングログに記録。
+ *  - P54_RING_CAP: リングごとの深さ。
  *
- * Default values reflect the P54-A1 measurement step. To revert to Test#64
- * behavior in one line, set P54_ENABLE 0.
+ * 既定値は P54-A1 計測ステップを反映したもの。Test#64 の挙動へ 1 行で戻すには
+ * P54_ENABLE を 0 にする。
  */
 #define P54_ENABLE                       0
 #define P54_RELAX_DELTA_GATE             1
@@ -1201,26 +1201,26 @@ void mx68k_log_marker(const char* msg);
 #define P54_DIAG_GATE45_RING             1
 #define P54_RING_CAP                     8
 
-/* ---- P55 ablation switches (direction-discriminated DETECT + vector-fetch seed hook) ----
- * /tmp/mx68k_P55_plan.md §4. C99 §6.10.1: undefined macros eval to 0.
+/* ---- P55 アブレーションスイッチ(方向を判別する DETECT + ベクタフェッチ起点フック) ----
+ * /tmp/mx68k_P55_plan.md §4。C99 §6.10.1: 未定義マクロは 0 と評価される。
  *
- * Semantics:
- *  - P55_ENABLE: master compile gate. 0 = identical to Test#65 baseline.
- *  - P55_A1_SIGNAL_ENRICH: append signed_delta, dir, exit_sr fields to
- *      [P52-DETECT] log line. Does NOT change which events fire — purely
- *      additional fields in the same printf.
- *  - P55_REQUIRE_PUSH_DIRECTION: when 1, gate the detect bucket on
- *      (signed_delta > 0) — i.e. only count/log push-real events.
- *      H6 quantitative confirmation toggle. Default 0 keeps Test#65 parity.
- *  - P55_A3_VECREAD_HOOK: ring-log even reads in [0x0000, 0x0400) whose
- *      returned word's hi-byte is non-zero (suspected seed of BasePC mask
- *      leak per c68kmac.inc:70-73).
- *  - P55_A3_RING_CAP: A3 ring depth (deeper than P54 because 256 vector
- *      slots × possible repeats).
- *  - P55_DEBUG_VERBOSE: optional per-chunk direction logging. Default 0.
+ * 意味:
+ *  - P55_ENABLE: コンパイル時のマスターゲート。0 = Test#65 ベースラインと同一。
+ *  - P55_A1_SIGNAL_ENRICH: [P52-DETECT] ログ行に signed_delta・dir・exit_sr
+ *      フィールドを追加する。どのイベントが発火するかは変えない — 同じ printf に
+ *      フィールドを足すだけ。
+ *  - P55_REQUIRE_PUSH_DIRECTION: 1 のとき、検出バケットを (signed_delta > 0)
+ *      でゲートする — つまり実際のプッシュイベントだけを計数/記録する。
+ *      H6 の定量確認用トグル。既定値 0 で Test#65 と同等を保つ。
+ *  - P55_A3_VECREAD_HOOK: [0x0000, 0x0400) の偶数アドレス読み出しのうち、返した
+ *      ワードの上位バイトが非ゼロのものをリングログに記録する(c68kmac.inc:70-73
+ *      による BasePC マスクの上位バイト未クリアの起点候補)。
+ *  - P55_A3_RING_CAP: A3 のリング深さ(ベクタスロット 256 個 × 繰り返しの
+ *      可能性があるため P54 より深い)。
+ *  - P55_DEBUG_VERBOSE: 任意のチャンク単位の方向ログ。既定値 0。
  *
- * Default values reflect the P55-A1+A3 measurement step. To revert to
- * Test#65 behavior in one line, set P55_ENABLE 0.
+ * 既定値は P55-A1+A3 計測ステップを反映したもの。Test#65 の挙動へ 1 行で
+ * 戻すには P55_ENABLE を 0 にする。
  */
 #define P55_ENABLE                       0
 #define P55_A1_SIGNAL_ENRICH             1
@@ -1229,21 +1229,21 @@ void mx68k_log_marker(const char* msg);
 #define P55_A3_RING_CAP                  16
 #define P55_DEBUG_VERBOSE                0
 
-/* ---- P56 ablation switches (vec#$BC/$114 snapshot + verify-on-fetch drift detect) ----
- * /tmp/mx68k_P56_plan.md §4. C99 §6.10.1: undefined macros eval to 0.
+/* ---- P56 アブレーションスイッチ(vec#$BC/$114 のスナップショット + フェッチ時照合によるずれ検出) ----
+ * /tmp/mx68k_P56_plan.md §4。C99 §6.10.1: 未定義マクロは 0 と評価される。
  *
- * Semantics:
- *  - P56_ENABLE: master compile gate. 0 = identical to Test#66 baseline.
- *  - P56_DIAG_WHK: trace_Memory_WriteW hook on vec$BC/$114 (4 word addrs).
- *      log-only (val 改変なし). [P56-WHK] tag, pre/post phase 区別.
- *  - P56_DIAG_DRIFT: post-snapshot trace_Memory_ReadW で snapshot との
- *      diff 比較 -> [P56-VECDRIFT] log. snapshot 取得自体は本マクロ非依存
- *      (snapshot は MEM 直読みで取得され、本マクロは比較・log を gate する).
- *  - P56_SNAPSHOT_TRIGGER_FRAME: mx68k_run_frame 内 frame counter が
- *      この閾値に到達したとき snapshot を取得 (1 回限り). default 60
- *      (≈1 sec @60Hz; IPL ROM IOCS init + MFP init 完了想定).
- *  - P56_LOG_CAP: [P56-WHK] / [P56-VECDRIFT] の cumulative cap.
- *  - P56_DEBUG_VERBOSE: 1 で snapshot 4-byte hex dump 追加.
+ * 意味:
+ *  - P56_ENABLE: コンパイル時のマスターゲート。0 = Test#66 ベースラインと同一。
+ *  - P56_DIAG_WHK: vec$BC/$114(4 ワードアドレス)に対する trace_Memory_WriteW フック。
+ *      ログのみ(val 改変なし)。[P56-WHK] タグ、pre/post フェーズを区別。
+ *  - P56_DIAG_DRIFT: スナップショット取得後の trace_Memory_ReadW で snapshot との
+ *      差分比較 -> [P56-VECDRIFT] ログ。snapshot 取得自体は本マクロ非依存
+ *      (snapshot は MEM 直読みで取得され、本マクロは比較・ログをゲートする)。
+ *  - P56_SNAPSHOT_TRIGGER_FRAME: mx68k_run_frame 内のフレームカウンタが
+ *      この閾値に到達したとき snapshot を取得(1 回限り)。既定値 60
+ *      (60Hz で約 1 秒。IPL ROM の IOCS 初期化 + MFP 初期化の完了を想定)。
+ *  - P56_LOG_CAP: [P56-WHK] / [P56-VECDRIFT] の累積上限。
+ *  - P56_DEBUG_VERBOSE: 1 で snapshot の 4 バイト 16 進ダンプを追加。
  *
  *  vec#$BC (TRAP#15 = IOCS dispatcher) RTE スタブ化禁止 — Spec Inv §4 / §7.6.
  *  本 Plan の WHK / DRIFT は全て log-only.
@@ -1255,21 +1255,21 @@ void mx68k_log_marker(const char* msg);
 #define P56_LOG_CAP                      128
 #define P56_DEBUG_VERBOSE                0
 
-/* ---- P57-A ablation switches (Bridge-side BasePC × vect × ReadW triangulation) ----
- * /tmp/mx68k_P57_plan.md §3 / §4 (v2).  Diagnostic-only — no behavior mutation.
+/* ---- P57-A アブレーションスイッチ(Bridge 側での BasePC × vect × ReadW の三点照合) ----
+ * /tmp/mx68k_P57_plan.md §3 / §4 (v2)。診断専用 — 挙動は一切変えない。
  *
- * Semantics:
- *  - P57A_ENABLE: master compile gate. 0 = identical to Test#67 baseline.
- *  - P57A_DIAG_SETPC:        chunk-pair BasePC entry/exit + delta log (H1).
- *  - P57A_DIAG_BPCDRIFT:     trace_Memory_ReadW BasePC drift sampling (H1/H4).
- *  - P57A_DIAG_VECT_SANITIZE: mx68k_diag_irqh_callback vect range check (H2).
- *  - P57A_DIAG_READW:        Memory_ReadW return-value upper-byte watch (H3).
- *  - P57A_FRAME_SAMPLE:      per-frame BasePC sample at focus_frame (case D).
- *  - P57A_FOCUS_FRAME:       observation window (current Pattern A1 stuck frame).
- *  - P57A_LOG_CAP:           per-tag cumulative cap for each P57A log family.
- *  - P57A_LOG_CAP_READW:     dedicated cap for [P57A-READW-POST] (vec-table read 高頻度のため、
- *                            H3 rate analysis 用に大きく設定; Code Minor-2).
- *  - P57A_DEBUG_VERBOSE:     1 emits clean-range samples (default 0).
+ * 意味:
+ *  - P57A_ENABLE: コンパイル時のマスターゲート。0 = Test#67 ベースラインと同一。
+ *  - P57A_DIAG_SETPC:        チャンク対の BasePC 入口/出口 + delta ログ(H1)。
+ *  - P57A_DIAG_BPCDRIFT:     trace_Memory_ReadW での BasePC ずれのサンプリング(H1/H4)。
+ *  - P57A_DIAG_VECT_SANITIZE: mx68k_diag_irqh_callback の vect 範囲チェック(H2)。
+ *  - P57A_DIAG_READW:        Memory_ReadW の戻り値の上位バイト監視(H3)。
+ *  - P57A_FRAME_SAMPLE:      focus_frame でのフレーム単位 BasePC サンプル(ケース D)。
+ *  - P57A_FOCUS_FRAME:       観測窓(現行の Pattern A1 で停止するフレーム)。
+ *  - P57A_LOG_CAP:           P57A 系ログのタグごとの累積上限。
+ *  - P57A_LOG_CAP_READW:     [P57A-READW-POST] 専用の上限(vec-table read 高頻度のため、
+ *                            H3 のレート分析用に大きく設定; Code Minor-2)。
+ *  - P57A_DEBUG_VERBOSE:     1 で正常範囲のサンプルも出力(既定値 0)。
  */
 #define P57A_ENABLE                       1   /* P407で復帰: must-stay-green #4-#7が依存(s_p59g2_frame_id宣言の外側ゲート)、P403で誤って休止。
                                                  * ★共有インフラ注意(P407b調査確認済み): このマクロ配下で宣言される
@@ -1288,205 +1288,207 @@ void mx68k_log_marker(const char* msg);
 #define P57A_LOG_CAP_READW                256
 #define P57A_DEBUG_VERBOSE                0
 
-/* ---- P58-Z ablation switches (ReadW upper-byte sanitiser; treatment layer
- *      for P57A_DIAG_READW = H3 hypothesis confirmed by Test#68 Path Z) ----
- * /tmp/mx68k_P58_plan.md §3 / §5. Goal: enforce the implicit contract
- * `(Memory_ReadW return >> 16) == 0` at the c68k callback boundary so the
- * dirty hi-byte cannot reach SET_PC via READ_LONG_F (c68kmac.inc:88-90 HI
- * half未 mask, Core 改変禁止のため Bridge で吸収).
+/* ---- P58-Z アブレーションスイッチ(ReadW 上位バイトの正規化。Test#68 Path Z で
+ *      確認された P57A_DIAG_READW = H3 仮説に対する対処層) ----
+ * /tmp/mx68k_P58_plan.md §3 / §5。目的: c68k コールバック境界で暗黙の契約
+ * `(Memory_ReadW の戻り値 >> 16) == 0` を強制し、上位バイトの不正な値が
+ * READ_LONG_F 経由で SET_PC に届かないようにする(c68kmac.inc:88-90 は上位
+ * 半分を mask していないが、Core 改変禁止のため Bridge で吸収)。
  *
- *  P58Z_ENABLE:        master compile gate. 0 = identical to Test#68 baseline.
- *  P58Z_MASK_HI:       1 = actually apply `val & 0xFFFFu` at return.
- *                      0 = log-only (no mutation, paired with marker).
- *  P58Z_DIAG_MARKER:   emit [P58Z-INSTALL] once on first ReadW (wiring proof)
- *                      and [P58Z-MASK-APPLIED] for first P58Z_LOG_CAP events
- *                      where the mask actually drops bits.
- *  P58Z_LOG_CAP:       cap for the mask-applied marker log (v2: 32,
- *                      raised from v1's 4 per Code Review Minor-2).
+ *  P58Z_ENABLE:        コンパイル時のマスターゲート。0 = Test#68 ベースラインと同一。
+ *  P58Z_MASK_HI:       1 = 戻り時に実際に `val & 0xFFFFu` を適用する。
+ *                      0 = ログのみ(値は変えず、マーカーと対で出す)。
+ *  P58Z_DIAG_MARKER:   最初の ReadW で [P58Z-INSTALL] を 1 回出し(配線の証明)、
+ *                      マスクが実際にビットを落とした最初の P58Z_LOG_CAP 件の
+ *                      イベントで [P58Z-MASK-APPLIED] を出す。
+ *  P58Z_LOG_CAP:       マスク適用マーカーログの上限(v2: 32。Code Review
+ *                      Minor-2 により v1 の 4 から引き上げ)。
  */
 #define P58Z_ENABLE                       0
 #define P58Z_MASK_HI                      1
 #define P58Z_DIAG_MARKER                  1
 #define P58Z_LOG_CAP                      32
 
-/* ---- P59-γ2 passive observation layer (BasePC pollution single-path locator) ----
- * /tmp/mx68k_P59_plan.md v3 §3. Goal: pin the BasePC-pollution origin to ONE of
- * candidate A (exception/vector fetch READ_LONG_F<<16),
- * candidate B (SET_PC macro re-installing an already-dirty logical PC),
- * candidate Spec (C68k_Set_PC missing the `& 0xFF000000` mask).
+/* ---- P59-γ2 受動観測層(BasePC の不正値の発生経路を 1 本に特定する) ----
+ * /tmp/mx68k_P59_plan.md v3 §3。目的: BasePC に不正値が入る起点を次のいずれか
+ * 1 つに絞り込む: 候補 A(例外/ベクタフェッチの READ_LONG_F<<16)、
+ * 候補 B(SET_PC マクロが既に不正値を持つ論理 PC を再設定する)、
+ * 候補 Spec(C68k_Set_PC に `& 0xFF000000` マスクが欠けている)。
  *
- * PASSIVE observation only. The C68k_Exec call cadence is NOT changed (no
- * single-instruction stepper) — so CHECK_INT frequency, cycle accounting and
- * the 60fps timing stay byte-identical to the Test#69 baseline. The hook only
- * READS C68K.PC / C68K.BasePC after each chunk; it never mutates them.
- * Core (c68k / px68k) is NOT modified.
+ * 受動的な観測のみ。C68k_Exec の呼出し周期は変えない(1 命令ずつのステッパは
+ * 使わない)— そのため CHECK_INT の頻度・サイクル計上・60fps のタイミングは
+ * Test#69 ベースラインとバイト単位で同一のまま。フックは各チャンクの後で
+ * C68K.PC / C68K.BasePC を「読む」だけで、決して書き換えない。
+ * Core(c68k / px68k)は改変しない。
  *
- * Decision axis: the bit24-31 of the LOGICAL PC (`C68K.PC - C68K.BasePC`).
- * The raw 64-bit BasePC host pointer upper bits are NOT used for the verdict
- * (they are non-zero even in healthy operation — see v3 §2.1).
+ * 判定軸: 論理 PC(`C68K.PC - C68K.BasePC`)の bit24-31。
+ * 64 ビットの BasePC ホストポインタの生の上位ビットは判定に使わない
+ * (正常動作中でも非ゼロのため — v3 §2.1 参照)。
  *
- * DEPENDENCY: P59G2_ENABLE requires P57A_ENABLE. The per-chunk observation
- * hook (Edit C) additionally requires P57A_DIAG_SETPC, because it reuses the
- * existing `p57a_entry_basepc` / `p57a_entry_pc_raw` / `p57a_entry_pc_log`
- * chunk-entry snapshots, which are declared under
- * `#if P57A_ENABLE && P57A_DIAG_SETPC`. The hook is therefore guarded by
- * `#if P59G2_ENABLE && P57A_ENABLE && P57A_DIAG_SETPC`, so a build with either
- * P57A_ENABLE=0 or P57A_DIAG_SETPC=0 simply disables P59G2 without a compile
- * error.
+ * 依存関係: P59G2_ENABLE は P57A_ENABLE を必要とする。チャンク単位の観測フック
+ * (Edit C)はさらに P57A_DIAG_SETPC を必要とする。既存のチャンク入口スナップ
+ * ショット `p57a_entry_basepc` / `p57a_entry_pc_raw` / `p57a_entry_pc_log`
+ * を再利用しており、これらは `#if P57A_ENABLE && P57A_DIAG_SETPC` の下で
+ * 宣言されているため。したがってフックは
+ * `#if P59G2_ENABLE && P57A_ENABLE && P57A_DIAG_SETPC` でガードされ、
+ * P57A_ENABLE=0 または P57A_DIAG_SETPC=0 のビルドではコンパイルエラーに
+ * ならず単に P59G2 が無効になる。
  *
- *  P59G2_ENABLE:       master compile gate. 0 = identical to Test#69 baseline.
- *  P59G2_LOG_CAP:      cap for the [P59G2-CHUNK-PC] cumulative trail.
- *  P59G2_RESET_CHUNKS: chunk_id threshold below which a first-drift is judged
- *                      to be the reset-seed path (candidate Spec).
+ *  P59G2_ENABLE:       コンパイル時のマスターゲート。0 = Test#69 ベースラインと同一。
+ *  P59G2_LOG_CAP:      [P59G2-CHUNK-PC] 累積トレイルの上限。
+ *  P59G2_RESET_CHUNKS: chunk_id がこの閾値未満で最初のずれが起きた場合、
+ *                      リセット起点の経路(候補 Spec)と判定する。
  */
 #define P59G2_ENABLE                      1   /* P407で復帰: must-stay-green #4-#7が依存(s_p59g2_frame_idの宣言+毎フレームincrement)、P403で誤って休止 */
 #define P59G2_LOG_CAP                     128
 #define P59G2_RESET_CHUNKS                2
 
-/* ---- P59-γ3/γ4 drift-triggered ring-buffer capture (BasePC drift context) ----
- * /tmp/mx68k_P59g4_plan.md (γ4 supersedes /tmp/mx68k_P59g3_plan.md). Supersedes
- * the P59G2 fixed first-128-chunk trail (P59G2_LOG_CAP), which Test#70 showed is
- * consumed inside frame=1 BEFORE the BasePC drift appears.
+/* ---- P59-γ3/γ4 ずれ発生を契機とするリングバッファ捕捉(BasePC ずれの前後文脈) ----
+ * /tmp/mx68k_P59g4_plan.md(γ4 は /tmp/mx68k_P59g3_plan.md を置き換える)。
+ * P59G2 の固定の先頭 128 チャンク・トレイル(P59G2_LOG_CAP)を置き換える —
+ * Test#70 で、そのトレイルは BasePC のずれが現れる「前に」frame=1 の中で
+ * 使い切られてしまうことが判明したため。
  *
- * P59-γ4 records EVERY chunk into a circular ring buffer of depth
- * P59G3_RING_DEPTH (power-of-two). The trigger now watches the registered-base
- * equality invariant: when a chunk EXITS with C68K.BasePC not equal to the
- * registered C68K.Fetch[] base for the page of the current logical PC — i.e.
- * the c68k SET_PC upper-byte fold (`BasePC -= A & 0xFF000000`) has run and
- * BasePC has drifted off every registered region base — the ring (RING_DEPTH
- * chunks of BEFORE context) is dumped, the trigger chunk is flagged, and
- * P59G3_AFTER_CHUNKS chunks of AFTER context are logged. One-shot per boot;
- * re-armed on hard reset.
+ * P59-γ4 は「全」チャンクを深さ P59G3_RING_DEPTH(2 のべき乗)の循環リング
+ * バッファへ記録する。トリガは登録済みベースとの一致という不変条件を監視する:
+ * あるチャンクが、現在の論理 PC のページに対応する登録済み C68K.Fetch[] ベースと
+ * 一致しない C68K.BasePC で「終了」したとき — つまり c68k の SET_PC による上位
+ * バイトの畳み込み(`BasePC -= A & 0xFF000000`)が走り、BasePC がどの登録済み
+ * 領域ベースからも外れたとき — リング(トリガ「前」の文脈 RING_DEPTH チャンク分)を
+ * ダンプし、トリガのチャンクに印を付け、トリガ「後」の文脈 P59G3_AFTER_CHUNKS
+ * チャンク分を記録する。起動ごとに 1 回限りで、ハードリセットで再装填される。
  *
- * This registered-base-equality axis is INDEPENDENT of the [P59G2-FIRST-DRIFT]
- * logical-PC-upper-byte axis: the logical-PC upper byte is observed always 0x00
- * (PC and BasePC re-base together and cancel via Get_PC = PC - BasePC), so γ4
- * watches the raw host BasePC against Fetch[page] instead. The dump tags remain
- * [P59G3-*] — same diagnostic feature, corrected observation axis.
+ * この「登録済みベースとの一致」軸は [P59G2-FIRST-DRIFT] の「論理 PC 上位
+ * バイト」軸とは独立している: 論理 PC の上位バイトは常に 0x00 と観測される
+ * (PC と BasePC は一緒にベースし直され、Get_PC = PC - BasePC で相殺される)
+ * ため、γ4 は代わりにホスト側の生の BasePC を Fetch[page] と比較して監視する。
+ * ダンプのタグは [P59G3-*] のまま — 同じ診断機能で、観測軸を修正したもの。
  *
- * PASSIVE observation only: no extra C68k_Exec, no PC/BasePC/SSP mutation, no
- * masking (the trigger adds one plain array load of C68K.Fetch[]). #if
- * P59G3_ENABLE 0 => byte-identical to the Test#70 baseline.
+ * 受動的な観測のみ: 追加の C68k_Exec なし、PC/BasePC/SSP の書き換えなし、
+ * マスク処理なし(トリガが加えるのは C68K.Fetch[] の単純な配列読み出し 1 回
+ * だけ)。#if P59G3_ENABLE 0 => Test#70 ベースラインとバイト単位で同一。
  *
- * DEPENDENCY: P59G3 reuses the P57A chunk-entry snapshots (p57a_entry_pc_log
- * etc.) and the P59G2 exit-side locals, so it is guarded by the SAME triple as
- * the P59G2 Edit-C hook: #if P59G3_ENABLE && P57A_ENABLE && P57A_DIAG_SETPC.
+ * 依存関係: P59G3 は P57A のチャンク入口スナップショット(p57a_entry_pc_log
+ * 等)と P59G2 の出口側ローカル変数を再利用するため、P59G2 の Edit-C フックと
+ * 「同じ」3 条件でガードされる: #if P59G3_ENABLE && P57A_ENABLE && P57A_DIAG_SETPC。
  *
- *  P59G3_ENABLE:       master compile gate. 0 = identical to Test#70 baseline.
- *  P59G3_RING_DEPTH:   N — circular ring depth (BEFORE context). MUST be a
- *                      power of two (the ring uses `& (DEPTH-1)` masking).
- *  P59G3_AFTER_CHUNKS: M — number of chunks logged AFTER the trigger chunk.
+ *  P59G3_ENABLE:       コンパイル時のマスターゲート。0 = Test#70 ベースラインと同一。
+ *  P59G3_RING_DEPTH:   N — 循環リングの深さ(トリガ前の文脈)。必ず 2 の
+ *                      べき乗にすること(リングは `& (DEPTH-1)` でマスクする)。
+ *  P59G3_AFTER_CHUNKS: M — トリガのチャンクの「後」に記録するチャンク数。
  */
 #define P59G3_ENABLE                      0
-#define P59G3_RING_DEPTH                  64   /* N — power of two */
+#define P59G3_RING_DEPTH                  64   /* N — 2 のべき乗 */
 #define P59G3_AFTER_CHUNKS                16   /* M */
 
-/* P59-γ10 FIX: vector table hi-word top-byte clear.
- * IPLROM 0xFF05BE init loop stores the vector number in bits 31-24 of each
- * handler address. Real X68000 24-bit external bus ignores the top byte;
- * c68k retains it internally → SET_PC dirtifies BasePC. When enabled (=1),
- * trace_Memory_WriteW clears bits 15-8 of val before storing into hi-word
- * vector table slots (addr < 0x400, addr & 2 == 0).
- * Set to 0 to revert to Test#76 (P59-g9) baseline.
- * P82-X-T (Outcome C confirmed non-culprit, /tmp/mx68k_P82-X-T_plan.md §4.1):
- *   revived to 1 — baseline restored to P82-X-R era (3 patches enabled) so
- *   the new CP-T-* probes observe alongside the original patch signal. */
+/* P59-γ10 修正: ベクタテーブル上位ワードの最上位バイトのクリア。
+ * IPLROM 0xFF05BE の初期化ループは、各ハンドラアドレスの bit31-24 にベクタ番号を
+ * 格納する。実機 X68000 の 24 ビット外部バスは最上位バイトを無視するが、
+ * c68k は内部でそれを保持する → SET_PC が BasePC を汚す。有効(=1)のとき、
+ * trace_Memory_WriteW はベクタテーブルの上位ワードスロット(addr < 0x400,
+ * addr & 2 == 0)へ格納する前に val の bit15-8 をクリアする。
+ * 0 にすると Test#76(P59-g9)ベースラインへ戻る。
+ * P82-X-T(Outcome C で原因ではないと確認、/tmp/mx68k_P82-X-T_plan.md §4.1):
+ *   1 へ復帰 — 新しい CP-T-* プローブが元のパッチの信号と並べて観測できるよう、
+ *   ベースラインを P82-X-R 時代(3 パッチ有効)へ戻した。 */
 #define P59G10_FIX_ENABLE                 1
-#define P206_VACANT_SENTINEL_RESTORE      1   /* P206: 1 = restore IPLROM vacant-vector sentinel (disable pin/strip cluster); 0 = original Phase-1 behavior */
+#define P206_VACANT_SENTINEL_RESTORE      1   /* P206: 1 = IPLROM の空きベクタ番兵値を復元(pin/strip 群を無効化)、0 = Phase 1 当初の挙動 */
 
-/* P48-C-REFIRE-WORKAROUND (NEW macro, P82-X-S §3.1).
- * Wraps the IOC bit1 0->1 rising-edge IRQ refire at
- * Bridge/m68000_bridge.c trace_Memory_WriteB hook (~line 11045). When 0,
- * the outer block compiles out; static state s_p48c_ioc_intstat_prev /
- * s_p48c_refire_count remain (unused-static warnings tolerated) so the
- * CP-R-8 audit emitter and the reset hook continue to compile.
- * P82-X-T (Outcome C confirmed non-culprit, /tmp/mx68k_P82-X-T_plan.md §4.1):
- *   revived to 1 — baseline restored to P82-X-R era. */
-/* P154: disabled — obsolete re-fire workaround. It re-injected an FDD-insert
- * level-1 one-shot that MPX/real-HW legitimately drop, landing a spurious IPL1
- * in the IPLROM boot-device poll (icount 1026837, guest PC FF0F36) -> FF145C ->
- * FF063C halt. Predates the P68 reset drain + P143b Timer-C + P144 preset
- * removal, so its compensation is stale. Bridge-only, Core untouched. */
+/* P48-C-REFIRE-WORKAROUND(新規マクロ、P82-X-S §3.1)。
+ * Bridge/m68000_bridge.c の trace_Memory_WriteB フック(約 11045 行目)にある、
+ * IOC bit1 の 0->1 立ち上がりエッジでの IRQ 再発火を囲む。0 のとき外側の
+ * ブロックはコンパイルから除外されるが、静的状態 s_p48c_ioc_intstat_prev /
+ * s_p48c_refire_count は残す(未使用 static の警告は許容)ため、CP-R-8 監査の
+ * 出力処理とリセットフックは引き続きコンパイルできる。
+ * P82-X-T(Outcome C で原因ではないと確認、/tmp/mx68k_P82-X-T_plan.md §4.1):
+ *   1 へ復帰 — ベースラインを P82-X-R 時代へ戻した。 */
+/* P154: 無効化 — 役目を終えた再発火の回避策。MPX/実機では正当に落とされる
+ * FDD 挿入時のレベル1 ワンショットを再度発生させており、IPLROM のブート
+ * デバイス・ポーリング(icount 1026837、ゲスト PC FF0F36)へ偽の IPL1 を
+ * 着地させて -> FF145C -> FF063C で停止させていた。P68 のリセット時ドレイン +
+ * P143b の Timer-C + P144 のプリセット削除より前のものであり、その補償は
+ * もう古い。Bridge のみの変更で Core は無改変。 */
 #define P48C_REFIRE_WORKAROUND_ENABLE     0
 
-/* P60 probe: SR IPL-field force-clear on first entry to the IPLROM FDC
- * boot-sector read routine (0xff756c). SR=0x2614 (IPL=6) inherited from an
- * MFP exception context permanently masks the level-1 FDC completion IRQ
- * so RAM $000974 is never updated. Force IPL=0 to let the IRQ through.
- * Set to 0 to revert to Test#77 (P59-g10) baseline.
- * P82-X-T (Outcome C confirmed non-culprit, /tmp/mx68k_P82-X-T_plan.md §4.1):
- *   revived to 1 — baseline restored to P82-X-R era. */
+/* P60 プローブ: IPLROM の FDC ブートセクタ読込ルーチン(0xff756c)へ最初に入った
+ * ときに SR の IPL フィールドを強制クリアする。MFP の例外コンテキストから
+ * 引き継いだ SR=0x2614(IPL=6)がレベル1 の FDC 完了 IRQ を恒久的にマスクし、
+ * RAM $000974 が一切更新されない。IPL=0 を強制して IRQ を通す。
+ * 0 にすると Test#77(P59-g10)ベースラインへ戻る。
+ * P82-X-T(Outcome C で原因ではないと確認、/tmp/mx68k_P82-X-T_plan.md §4.1):
+ *   1 へ復帰 — ベースラインを P82-X-R 時代へ戻した。 */
 #define P60_PROBE_ENABLE                  0
 
-/* P61 probe: track writes to guest RAM $000974 (FDC completion flag).
- * The IPLROM FDC boot-sector read subroutine (0xff756c) reads this flag
- * immediately after sending FDC command bytes, with no polling loop.
- * If the FDC completion IRQ fires after the read, the flag is set too late.
- * This probe records when $000974 is written (up to P61_WRITE_LOG_MAX times)
- * to determine whether the FDC completes at all, and whether it completes
- * before or after the IPLROM reads the flag.
- * Set to 0 to revert to Test#78 (P60) baseline. */
+/* P61 プローブ: ゲスト RAM $000974(FDC 完了フラグ)への書込みを追跡する。
+ * IPLROM の FDC ブートセクタ読込サブルーチン(0xff756c)は、FDC コマンドバイトを
+ * 送った直後にポーリングループ無しでこのフラグを読む。
+ * FDC 完了 IRQ がその読み出しより後に発火すると、フラグの設定が遅すぎることになる。
+ * このプローブは $000974 が書かれた時点を記録し(最大 P61_WRITE_LOG_MAX 回)、
+ * そもそも FDC が完了するのか、また IPLROM がフラグを読む前と後のどちらで
+ * 完了するのかを判定する。
+ * 0 にすると Test#78(P60)ベースラインへ戻る。 */
 #define P61_PROBE_ENABLE                  0
 #define P61_WRITE_LOG_MAX                 8
 
-/* P62 probe: FDC command-loop execution check.
- * Probe-A: on first WriteW with PC in 0xff756c..0xff7800, log A1 register
- *          to confirm the param-block pointer value.
- * Probe-B: on first WriteW with PC in 0xff7576..0xff757b, log to confirm
- *          the FDC command loop body (BSR $ff779e) was entered at least once.
- * If probe-B never fires, the A1 param block first byte is 0x00 and the
- * FDC command loop is skipped entirely, explaining why no FDC commands
- * are ever sent to the hardware registers (P42-DIAG-FDCW = 0 events).
- * Set to 0 to revert to Test#79 (P61) baseline. */
+/* P62 プローブ: FDC コマンドループの実行確認。
+ * Probe-A: PC が 0xff756c..0xff7800 にある最初の WriteW で A1 レジスタを記録し、
+ *          パラメータブロックのポインタ値を確認する。
+ * Probe-B: PC が 0xff7576..0xff757b にある最初の WriteW で記録し、FDC コマンド
+ *          ループ本体(BSR $ff779e)に少なくとも 1 回入ったことを確認する。
+ * Probe-B が一度も発火しなければ、A1 パラメータブロックの先頭バイトが 0x00 で
+ * FDC コマンドループが丸ごと飛ばされており、ハードウェアレジスタへ FDC
+ * コマンドが一切送られない理由(P42-DIAG-FDCW = 0 件)の説明になる。
+ * 0 にすると Test#79(P61)ベースラインへ戻る。 */
 #define P62_PROBE_ENABLE                  0
 
-/* P63 probe: IOCS FDD disk-read failure root cause identification.
- * Probe-A: on first WriteW with PC in 0xff0624..0xff062f (error handler TRAP#14
- *          call region), read guest RAM 0xBC-0xBF (TRAP#15 vector) and log it.
- *          If 0xff05e4 (panic placeholder): H1 confirmed -- IOCS handler never
- *          installed. If other address: real handler exists, look at H2/H3.
- * Probe-B: on reads to guest addr 0xe94001 (FDC Status Register), log the
- *          returned value (expect 0x80=ready, 0x00=not-ready, 0xff=bug).
- * Probe-C: per-frame FDD_IsReady(0) state log in mx68k_run_frame -- shows when
- *          (if ever) the FDD drive becomes ready for IOCS disk-read commands.
- * Set to 0 to revert to Test#80 (P62) baseline. */
+/* P63 プローブ: IOCS による FDD ディスク読込失敗の根本原因の特定。
+ * Probe-A: PC が 0xff0624..0xff062f(エラーハンドラ TRAP#14 の呼出し領域)にある
+ *          最初の WriteW で、ゲスト RAM 0xBC-0xBF(TRAP#15 ベクタ)を読んで記録する。
+ *          0xff05e4(パニック用の仮置き)なら H1 確定 -- IOCS ハンドラが一度も
+ *          設置されていない。それ以外のアドレスなら実ハンドラが存在するので H2/H3 を見る。
+ * Probe-B: ゲストアドレス 0xe94001(FDC ステータスレジスタ)の読み出し時に、返した
+ *          値を記録する(期待値 0x80=レディ、0x00=ノットレディ、0xff=不具合)。
+ * Probe-C: mx68k_run_frame 内でのフレームごとの FDD_IsReady(0) 状態ログ -- FDD
+ *          ドライブが IOCS のディスク読込コマンドに対してレディになる時点(なるなら)を示す。
+ * 0 にすると Test#80(P62)ベースラインへ戻る。 */
 #define P63_PROBE_ENABLE                  1   /* P407で復帰: must-stay-green #4供給元、P403で誤って休止 */
 #define P63_FDCST_LOG_MAX                 6
 #define P63_FDDREADY_LOG_MAX              30
 
-/* P64 probe: identify the IOCS function number that triggers the error path.
- * Probe-A: on first WriteW with C68K.PC at 0xff0632 (TRAP#14 handler entry),
- *          log C68K.D[0] (the IOCS function number, preserved across the
- *          panic-placeholder call chain) and the current TRAP#15 vector value.
- * Probe-B: on the first call to mx68k_run_frame (frame=1), snapshot the
- *          TRAP#15 vector value from guest RAM for baseline comparison.
- * Together they identify which IOCS call fails and whether the TRAP#15
- * vector is still the panic placeholder at the time of failure.
- * Set to 0 to revert to Test#81 (P63) baseline. */
+/* P64 プローブ: エラー経路を引き起こす IOCS ファンクション番号を特定する。
+ * Probe-A: C68K.PC が 0xff0632(TRAP#14 ハンドラ入口)にある最初の WriteW で、
+ *          C68K.D[0](IOCS ファンクション番号。パニック用仮置きの呼出し連鎖を
+ *          通じて保持される)と現在の TRAP#15 ベクタ値を記録する。
+ * Probe-B: mx68k_run_frame の最初の呼出し(frame=1)で、ベースライン比較用に
+ *          ゲスト RAM から TRAP#15 ベクタ値をスナップショットする。
+ * 両者を合わせて、どの IOCS 呼出しが失敗するのか、また失敗時点で TRAP#15
+ * ベクタがまだパニック用の仮置きのままなのかを特定する。
+ * 0 にすると Test#81(P63)ベースラインへ戻る。 */
 #define P64_PROBE_ENABLE                  1   /* P407で復帰: must-stay-green #5供給元、P403で誤って休止 */
 
-/* P65 probe: determine whether the IOCS handler table slot for func 0x81
- * (RAM 0x0604) holds the real handler or the Stage-A default filler when
- * the failing IOCS dispatch occurs. Also snapshots SRAM boot-config fields.
- * Probe-A: WriteW monitor on addr 0x0604 (captures Stage A/B table writes).
- * Probe-B: ReadW monitor on addr 0x0604 (captures dispatcher read at dispatch time).
- * Probe-C: SRAM[0x1E..0x21] / [0x26] snapshot at frame=1.
- * Set to 0 to revert to Test#82 (P64) baseline. */
+/* P65 プローブ: 失敗する IOCS ディスパッチが起きた時点で、ファンクション 0x81 の
+ * IOCS ハンドラテーブルのスロット(RAM 0x0604)が実ハンドラを持っているのか、
+ * Stage-A の既定の埋め値のままなのかを判定する。SRAM の起動設定フィールドも
+ * スナップショットする。
+ * Probe-A: アドレス 0x0604 の WriteW 監視(Stage A/B のテーブル書込みを捕捉)。
+ * Probe-B: アドレス 0x0604 の ReadW 監視(ディスパッチ時のディスパッチャの読み出しを捕捉)。
+ * Probe-C: frame=1 での SRAM[0x1E..0x21] / [0x26] のスナップショット。
+ * 0 にすると Test#82(P64)ベースラインへ戻る。 */
 #define P65_PROBE_ENABLE                  0
 #define P65_IOCSTBL_LOG_MAX               8
 
-/* P65 SRAM fix: kept SEPARATE from P65_PROBE_ENABLE so Test#83 can run
- * probes-only (fix=0) to cleanly determine H-A vs H-B.
- * Default: 0 (probes only, no guest-behavior change in Test#83). */
+/* P65 SRAM 修正: P65_PROBE_ENABLE とは「別」に保ち、Test#83 をプローブのみ
+ * (fix=0)で走らせて H-A と H-B をきれいに判別できるようにする。
+ * 既定値: 0(プローブのみ、Test#83 ではゲストの挙動を変えない)。 */
 #define P65_SRAM_FIX_ENABLE               0
 
-/* --- P66: IOCS function-number identification probe (Probe D + Probe E) --- */
-#define P66_PROBE_ENABLE      0   /* set 0 to revert to P65/Test#83 baseline */
-#define P66_IOCSFN_LOG_MAX    8   /* ring buffer capacity */
+/* --- P66: IOCS ファンクション番号の特定プローブ(Probe D + Probe E) --- */
+#define P66_PROBE_ENABLE      0   /* 0 にすると P65/Test#83 ベースラインへ戻る */
+#define P66_IOCSFN_LOG_MAX    8   /* リングバッファの容量 */
 
-/* P67 probe: capture TRAP#14 exception source via vector fetch (RAM 0x0B8).
- * One-shot: fires on the first TRAP#14 and logs stacked PC + D7. Set to 0
- * to revert to Test#84 (P66) baseline. */
+/* P67 プローブ: ベクタフェッチ(RAM 0x0B8)経由で TRAP#14 例外の発生元を捕捉する。
+ * ワンショット: 最初の TRAP#14 で発火し、スタックに積まれた PC + D7 を記録する。
+ * 0 にすると Test#84(P66)ベースラインへ戻る。 */
 #define P67_PROBE_ENABLE    0
 
 /* P69-A: FDC/DMAC ブート停止の診断 probe 群。
@@ -1511,62 +1513,61 @@ void mx68k_log_marker(const char* msg);
  *        =0 で全 P72 probe をコンパイル除外。 */
 #define P72_PROBE_ENABLE                   0
 
-/* P73-A: IOC vec slot (0x180/0x184/0x188/0x18C) pre-initialization fix.
+/* P73-A: IOC ベクタスロット(0x180/0x184/0x188/0x18C)の事前初期化による修正。
  *        mx68k_reset_hard() の m68000_reset_p47d_counters() 完了後に
  *        4 スロット全てを P49-A handler (0x000FFF20) へ向ける。
  *        =0 でコンパイル除外。 */
 #define P73A_ENABLE                        0
 
-/* P74-A: panic-path diagnosis probes.
- *  G1 — extend P47-D-DIAG-H trigger to include 0xff063c (direct panic-terminus
- *        entry without going through 0xff0632/0xff05e4; gives PC ring trail).
- *  G2 — add full 32-bit dispatch address to P67 TRAP#14 vector-fetch log
- *        (only vec_hi was logged previously; need full_vec for target analysis).
+/* P74-A: パニック経路の診断プローブ。
+ *  G1 — P47-D-DIAG-H のトリガを 0xff063c まで広げる(0xff0632/0xff05e4 を経由せず
+ *        パニック終端へ直接入る場合。PC リングのトレイルが得られる)。
+ *  G2 — P67 の TRAP#14 ベクタフェッチログに 32 ビット完全なディスパッチ先アドレスを
+ *        追加する(従来は vec_hi しか記録しておらず、遷移先の分析には full_vec が必要)。
  *  =0 でコンパイル除外。 */
 #define P74A_ENABLE                        0
 
-/* P75-A: TRAP#14 panic origin diagnosis probes.
- *  G1 — first TRAP#14 vector-table read observer (fires in trace_Memory_ReadW
- *        at addr=0x0B8; exception frame already on supervisor stack)
- *  G2 — first entry to ISR/dispatcher/error-handler chunk-start trigger
+/* P75-A: TRAP#14 パニックの発生元の診断プローブ。
+ *  G1 — 最初の TRAP#14 ベクタテーブル読み出しの観測(addr=0x0B8 で
+ *        trace_Memory_ReadW 内で発火。例外フレームは既にスーパーバイザスタック上にある)
+ *  G2 — ISR/ディスパッチャ/エラーハンドラへの最初の進入を捉えるチャンク開始トリガ
  *  =0 でコンパイル除外。 */
 #define P75A_ENABLE   0
 
-/* P76-A: TRAP#14 vector slot (0x0B8/0x0BA) write observer.
- *  Observes every WriteW to the TRAP#14 exception vector to determine
- *  when and what installs the handler address. P75-A observed
- *  vec14=0x00FF0632 at first dispatch — this probe traces all writes
- *  to find the install source.
+/* P76-A: TRAP#14 ベクタスロット(0x0B8/0x0BA)の書込み観測。
+ *  TRAP#14 例外ベクタへの全 WriteW を観測し、ハンドラアドレスがいつ・何によって
+ *  設置されるのかを判定する。P75-A は最初のディスパッチ時に vec14=0x00FF0632 を
+ *  観測した — このプローブは全書込みを追跡して設置元を突き止める。
  *  =0 でコンパイル除外。 */
 #define P76A_ENABLE   0
 
-/* P77-A: TRAP vector table (0x080-0x0BE, TRAP#0-#15) write observer.
- *  Captures every WriteW to TRAP exception vectors to map the full
- *  handler installation. Specifically tracks TRAP#15 (0x0BC/0x0BE)
- *  which should be the IOCS dispatcher entry point.
+/* P77-A: TRAP ベクタテーブル(0x080-0x0BE、TRAP#0-#15)の書込み観測。
+ *  TRAP 例外ベクタへの全 WriteW を捕捉し、ハンドラ設置の全体像を把握する。
+ *  特に、IOCS ディスパッチャの入口であるはずの TRAP#15(0x0BC/0x0BE)を
+ *  追跡する。
  *  =0 でコンパイル除外。 */
 #define P77A_ENABLE   0
 
-/* P78-A: TRAP#14 entry deep stack-walk probe.
- *  When PC first enters 0xFF0632 (TRAP#14 error handler), reads 32 bytes
- *  (8 longwords) from the supervisor stack to reconstruct the call chain.
- *  Fires up to 2 times (once per TRAP#14 event). =0 でコンパイル除外。
+/* P78-A: TRAP#14 進入時の深いスタックウォーク・プローブ。
+ *  PC が初めて 0xFF0632(TRAP#14 エラーハンドラ)に入ったとき、スーパーバイザ
+ *  スタックから 32 バイト(8 ロングワード)を読んで呼出し連鎖を再構成する。
+ *  最大 2 回発火(TRAP#14 イベントごとに 1 回)。=0 でコンパイル除外。
  *  DISABLED: P73-A以降 trace_Memory_WriteW でPC==0xFF0632 の条件が成立しないため
  *  デッドプローブ。P64-TRAP14ENTRYと同条件のため同様に不発。 */
 #define P78A_ENABLE   0
 
-/* P79-A: TRAP#14 entry stack-walk co-located inside P64 detection block.
- *  Guaranteed to fire whenever P64-TRAP14ENTRY fires (same PC detection).
- *  Reads 8 longwords (32 bytes) from SSP to reconstruct the call chain
- *  leading to the error handler. =0 でコンパイル除外。
+/* P79-A: P64 の検出ブロック内に同居させた TRAP#14 進入時のスタックウォーク。
+ *  P64-TRAP14ENTRY が発火するときは必ず発火する(同じ PC 検出を使うため)。
+ *  SSP から 8 ロングワード(32 バイト)を読み、エラーハンドラへ至る呼出し連鎖を
+ *  再構成する。=0 でコンパイル除外。
  *  DISABLED: P64-TRAP14ENTRYがP73-A以降発火しないためデッドプローブ。
  *  (Test#101で確認: P64-TRAP14ENTRY=0, P79-A=0) */
 #define P79A_ENABLE   0
 
-/* P82-A: Timer-C firing / speed-table-service diagnostic probes.
- *  -1: speed-table-svc entry (PC=0xFF05E4 chunk-start) — D7/D0/A6/MFP snapshot
- *  -2: TCDCR write interceptor (WriteB to 0xE8801D; cap P82A_TCDCR_LOG_CAP)
- *  -3: Timer-C IPRB[5] rise detector (per-H-line; cap P82A_TIMERC_RISE_CAP) */
+/* P82-A: Timer-C の発火 / speed-table サービスの診断プローブ。
+ *  -1: speed-table-svc への進入(PC=0xFF05E4 のチャンク開始)— D7/D0/A6/MFP のスナップショット
+ *  -2: TCDCR 書込みの捕捉(0xE8801D への WriteB。上限 P82A_TCDCR_LOG_CAP)
+ *  -3: Timer-C IPRB[5] の立ち上がり検出(水平ラインごと。上限 P82A_TIMERC_RISE_CAP) */
 #define P82A_ENABLE             0
 #define P82A_TCDCR_LOG_CAP     20
 #define P82A_TIMERC_RISE_CAP   10
@@ -1615,7 +1616,7 @@ void mx68k_log_marker(const char* msg);
  *  純粋追加・read-only。frame>=18 で武装 (P82-J と同期)。 */
 #define P82L_ENABLE   0
 
-/* P82-M: per-chunk fine-grained stacktop observation probe.
+/* P82-M: チャンク単位の細粒度スタックトップ観測プローブ。
  *  P82-L Test#114 GO で「user mode SR=0x0000 + 破損 PC を pop した RTE」
  *  経路が確定したが、L-RTE は per-chunk 粒度で 0 件捕捉。本プローブは
  *  per-chunk hook 内で PC ∈ IPLROM かつ A7 ∈ [0x1F80, 0x2000) の時のみ
@@ -1624,30 +1625,30 @@ void mx68k_log_marker(const char* msg);
  *  frame >= 18 で arm (P82-J と同期)。P82-J/K/L 構造体・リングは未変更。 */
 #define P82M_ENABLE   0
 
-/* P82-O: IPLROM CPU-clock self-measurement calibration probe.
+/* P82-O: IPLROM による CPU クロック自己計測(キャリブレーション)のプローブ。
  *
- * Diagnostic-only. Samples MFP Timer-C state (TCDCR/TCDR/IPRB/IMRB),
- * D-register / SR / A-register evolution, IPRB[5] rising edges, and
- * ISR vector-table fetches (addr=0x114) during the IPLROM calibration
- * routine 0xFF0AA6-0xFF0B58. Latches `reached_FF0B34` (RTS) and
- * captures A7 / *A7 there so the caller of 0xFF0AA6 can be identified.
- * One-shot dump at panic-band PC ∈ [0xFF0632, 0xFF063C].
+ * 診断専用。IPLROM のキャリブレーションルーチン 0xFF0AA6-0xFF0B58 の実行中に、
+ * MFP Timer-C の状態(TCDCR/TCDR/IPRB/IMRB)、D レジスタ / SR / A レジスタの
+ * 推移、IPRB[5] の立ち上がりエッジ、ISR ベクタテーブルのフェッチ(addr=0x114)を
+ * サンプリングする。`reached_FF0B34`(RTS)をラッチし、その時点の A7 / *A7 を
+ * 捕捉して 0xFF0AA6 の呼び出し元を特定できるようにする。
+ * パニック帯域 PC ∈ [0xFF0632, 0xFF063C] でワンショットのダンプを行う。
  *
- * Constraints: side-effect-free reads (direct MFP[] / Timer_Count[]),
- * no change to chunk size / gating / interrupt delivery. Setting
- * P82O_ENABLE 0 reverts to baseline byte-equivalent.
+ * 制約: 副作用の無い読み出しのみ(MFP[] / Timer_Count[] を直接読む)、
+ * チャンクサイズ / ゲート / 割込み配送は変えない。P82O_ENABLE を 0 にすると
+ * ベースラインとバイト等価に戻る。
  */
 #define P82O_ENABLE       0
 #define P82O_FRAME_ARM    18
 #define P82O_RING_SIZE    64
 
-/* P82-P: MFP IRQ delivery diagnostics. Four independent rings record
- *   - chunk-PC trace (non-dedup, N=256) for entry artifact confirmation
- *   - A7 word-dump (dedup by (a7,stk0,stk1), N=32) for canonical stack signature
- *   - $114/$116 vector-fetch watchpoint (N=16) — H-D1/H-D2 partition
- *   - TCDCR-write watchpoint (N=16) — 0x30 write at 0xFF0B42 confirmation
- * One-shot dump at panic-band PC ∈ [0xFF0632, 0xFF063C]. Read-only, no
- * MFP/CPU state mutation. P82P_ENABLE=0 reverts to baseline byte-equivalent. */
+/* P82-P: MFP の IRQ 配送の診断。4 本の独立したリングに次を記録する
+ *   - チャンク PC のトレース(重複除去なし、N=256)— 進入時の副産物の確認用
+ *   - A7 のワードダンプ((a7,stk0,stk1) で重複除去、N=32)— 典型的なスタック形状の把握用
+ *   - $114/$116 のベクタフェッチ監視点(N=16)— H-D1/H-D2 の切り分け
+ *   - TCDCR 書込みの監視点(N=16)— 0xFF0B42 での 0x30 書込みの確認
+ * パニック帯域 PC ∈ [0xFF0632, 0xFF063C] でワンショットのダンプ。read-only で、
+ * MFP/CPU の状態は変えない。P82P_ENABLE=0 でベースラインとバイト等価に戻る。 */
 #define P82P_ENABLE              0
 #define P82P_FRAME_ARM           18
 #define P82P_VFETCH_FRAME_ARM    16
@@ -1656,16 +1657,16 @@ void mx68k_log_marker(const char* msg);
 #define P82P_VFETCH_RING_SIZE    16
 #define P82P_TCDCR_RING_SIZE     16
 
-/* P82-Q: IRQ-pending lifecycle probe. Five rings observe the temporal
- * sequence of Timer-C IRQ delivery (assert → mask → accept → vector
- * fetch → ISR → EOI) per chunk. Read-only sibling of P82-P.
- *   Ring A — MFP state per chunk (IPRA/IPRB/IMRA/IMRB/ISRA/ISRB/VR + TCDR snapshot)
- *   Ring B — CPU pending (IRQLine, ipl_mask, IRQH_IRQ[6])
- *   Ring C — ISR band entry/exit (vec 0x114 / 0x116 target bands)
- *   Ring D — MFP IPR/ISR/IMR ReadB piggyback ($E8800B/D/F/$E88011/13/15)
- *   Ring E — MFP IPR/ISR/IMR/VR WriteB piggyback (same + $E88017)
- * One-shot dump at panic-band PC ∈ [0xFF0632, 0xFF063C]. No state
- * mutation. P82Q_ENABLE=0 reverts to baseline byte-equivalent. */
+/* P82-Q: IRQ 保留状態のライフサイクル・プローブ。5 本のリングで Timer-C の IRQ
+ * 配送の時系列(アサート → マスク → 受理 → ベクタフェッチ → ISR → EOI)を
+ * チャンクごとに観測する。P82-P の姉妹版で read-only。
+ *   Ring A — チャンクごとの MFP 状態(IPRA/IPRB/IMRA/IMRB/ISRA/ISRB/VR + TCDR のスナップショット)
+ *   Ring B — CPU 側の保留状態(IRQLine, ipl_mask, IRQH_IRQ[6])
+ *   Ring C — ISR 帯域への進入/退出(vec 0x114 / 0x116 の遷移先帯域)
+ *   Ring D — MFP IPR/ISR/IMR の ReadB への相乗り($E8800B/D/F/$E88011/13/15)
+ *   Ring E — MFP IPR/ISR/IMR/VR の WriteB への相乗り(同上 + $E88017)
+ * パニック帯域 PC ∈ [0xFF0632, 0xFF063C] でワンショットのダンプ。状態は
+ * 変えない。P82Q_ENABLE=0 でベースラインとバイト等価に戻る。 */
 #define P82Q_ENABLE              0
 #define P82Q_FRAME_ARM           16
 #define P82Q_MFP_RING_SIZE       128
@@ -1674,36 +1675,36 @@ void mx68k_log_marker(const char* msg);
 #define P82Q_IPRBRD_RING_SIZE    16
 #define P82Q_IPRBWR_RING_SIZE    16
 
-/* P82-R: Timer-C tick rate + calibration cycle probe.
- * Three rings observe the IPLROM CPU-clock self-measurement routine
- * (0xFF0AA6 entry → 0xFF0B34 RTS) to partition H-D3-γ:
- *   Ring F — TCDR/TCDCR/IPRB/IMRB + abs_cycle, non-dedup, calibration band
- *   Ring G — chunk boundary cycle delta (IPLROM scope)
- *   Ring H — key-event abs_cycle snapshot (cal entry / cal RTS+D0 / Timer-C
- *            fire / panic). ev=2 d0 is the primary datum for §4.3 confirmation.
- * Read-only, side-effect-free reads only. One-shot dump at panic-band
- * PC ∈ [0xFF0632, 0xFF063C]. P82R_ENABLE=0 reverts to baseline byte-equivalent. */
+/* P82-R: Timer-C のティックレート + キャリブレーションのサイクル数プローブ。
+ * 3 本のリングで IPLROM の CPU クロック自己計測ルーチン(0xFF0AA6 進入 →
+ * 0xFF0B34 RTS)を観測し、H-D3-γ を切り分ける:
+ *   Ring F — TCDR/TCDCR/IPRB/IMRB + abs_cycle、重複除去なし、キャリブレーション帯域
+ *   Ring G — チャンク境界のサイクル差分(IPLROM の範囲)
+ *   Ring H — 主要イベント時の abs_cycle スナップショット(cal 進入 / cal RTS+D0 /
+ *            Timer-C 発火 / パニック)。ev=2 の d0 が §4.3 の確認に使う一次データ。
+ * read-only で、副作用の無い読み出しのみ。パニック帯域 PC ∈ [0xFF0632, 0xFF063C]
+ * でワンショットのダンプ。P82R_ENABLE=0 でベースラインとバイト等価に戻る。 */
 #define P82R_ENABLE              0
 #define P82R_FRAME_ARM           16
 #define P82R_TCDR_RING_SIZE      128
 #define P82R_CHUNK_RING_SIZE     32
 #define P82R_EVENT_RING_SIZE     16
 
-/* P82-S-A: calibration spin D1 trace + cal_entry->Timer-C fire delta probe.
+/* P82-S-A: キャリブレーションのスピン中の D1 トレース + cal_entry->Timer-C 発火の差分プローブ。
  * P82-R 有効が前提（Ring H・s_p82r_abs_cycles を read 流用）。
  * P82S_ENABLE=1 かつ P82R_ENABLE=0 はビルド不可（m68000_bridge.c で #error）。
- * Ring I — D1 spin trace (non-dedup, 64 slot) over PC ∈ [0xFF0B48,0xFF0B58].
- * cal_entry edge detector — own PC-range landmark [0xFF0AA6,0xFF0B48).
- * DELTA footer — cal_entry→Timer-C fire / →panic delta cycle 実測。
- * Read-only diagnostic. P82S_ENABLE=0 reverts to baseline byte-equivalent. */
+ * Ring I — PC ∈ [0xFF0B48,0xFF0B58] での D1 スピントレース(重複除去なし、64 スロット)。
+ * cal_entry エッジ検出 — 独自の PC 範囲の目印 [0xFF0AA6,0xFF0B48)。
+ * DELTA フッタ — cal_entry→Timer-C 発火 / →パニック の差分サイクル数を実測。
+ * read-only の診断。P82S_ENABLE=0 でベースラインとバイト等価に戻る。 */
 #define P82S_ENABLE        0
 #define P82S_FRAME_ARM     16   /* この frame 以降のみ記録 (P82-R と同値) */
 #define P82S_D1_RING_SIZE  64   /* Ring I (D1 spin trace) slot 数 */
 
-/* ---- P82-T-A: interrupt accept -> ISR jump 経路 段階特定 probe ----
- * 1987 X68000 emulator debug probe. 診断専用、完全 read-only。
- * Ring A — interrupt accept ring (mx68k_diag_irqh_callback piggyback)
- * Ring B — accept 後 chunk-PC trace ring (per-chunk hook)
+/* ---- P82-T-A: 割込み受理 -> ISR ジャンプ経路の段階を特定するプローブ ----
+ * 1987 年の X68000 エミュレータのデバッグ用プローブ。診断専用、完全 read-only。
+ * Ring A — 割込み受理リング(mx68k_diag_irqh_callback に相乗り)
+ * Ring B — 受理後のチャンク PC トレースリング(チャンク単位のフック)
  * 段判定 — vect==0x45 厳密一致 + first-Timer-C one-shot ラッチ。
  * P82T_ENABLE 0 で P82-S 時点と byte-equivalent に戻る。
  * Plan: /tmp/mx68k_P82T_plan.md §4 / §9. */
@@ -1712,14 +1713,14 @@ void mx68k_log_marker(const char* msg);
 #define P82T_ACCEPT_RING_SIZE  32
 #define P82T_PCTRACE_RING_SIZE 32
 
-/* P82-B: Timer-C vector slot write/read observer.
- *  -1: WriteW to 0x114/0x116 (Timer-C vec slot) — who installs the handler
- *  -2: ReadW from 0x114/0x116 (Timer-C interrupt dispatch) — what handler is fetched
- *  -3: WriteW to 0xE8801D (TCDCR word-write path) — catch missed TCDCR writes */
+/* P82-B: Timer-C ベクタスロットの書込み/読み出し観測。
+ *  -1: 0x114/0x116(Timer-C ベクタスロット)への WriteW — 誰がハンドラを設置するか
+ *  -2: 0x114/0x116 からの ReadW(Timer-C 割込みのディスパッチ)— どのハンドラがフェッチされるか
+ *  -3: 0xE8801D への WriteW(TCDCR のワード書込み経路)— 取りこぼした TCDCR 書込みを捕捉 */
 #define P82B_ENABLE   0
 
 /* ---- P82-U-A: guest $114/$116 (Timer-C vec #0x45) WriteW 全件記録 probe ----
- * 1987 X68000 emulator debug probe。診断専用・完全 read-only。
+ * 1987 年の X68000 エミュレータのデバッグ用プローブ。診断専用・完全 read-only。
  * 不正値 0x00FF0B5A の write 側を捕捉し書込元 PC を特定する。
  *   ring   — 非 dedup 全件 WriteW ring (64 slot)
  *   latch  — first-bad (slot32 初 0x00FF0B5A) を ring eviction 耐性付きで保存
@@ -1745,8 +1746,8 @@ void mx68k_log_marker(const char* msg);
 #define P82W_FRAME_ARM       16   /* P82-R/S/T と同値 — calibration entry 取り逃し防止 */
 #define P82W_FRAME_END       24   /* chunk 縮小帯の上限 (panic frame ~21-22 + 余裕) */
 #define P82W_TRACE_CHUNK     100  /* 縮小 chunk cycle 数 (≒25 命令) */
-#define P82W_BAND_RING_SIZE  128  /* Stage 1 band ring slot (run-length dedup) */
-#define P82W_IRQ_RING_SIZE   16   /* Stage 2 Timer-C accept ring slot */
+#define P82W_BAND_RING_SIZE  128  /* Stage 1 の帯域リングのスロット数(ランレングスで重複除去) */
+#define P82W_IRQ_RING_SIZE   16   /* Stage 2 の Timer-C 受理リングのスロット数 */
 
 /* ---- P82-X-Y: trap#14 cascade full snap (CP-Y-1 単独) ----
  * 1987 X68000 emulator debug probe。read-only / behaviour-change なし。
@@ -1854,7 +1855,7 @@ void mx68k_log_marker(const char* msg);
  * 各 .c での個別 extern 宣言は不要）。 */
 void p82xk_emit_verdict(void);
 
-/* ---- P82-X-L diagnostic probe: Recalibrate->ReadData transition ---- */
+/* ---- P82-X-L 診断プローブ: Recalibrate->ReadData の遷移 ---- */
 /* Recalibrate が good ST0=0x20 で完了したのに IPLROM がセクタ読み出しルーチン
  * 0xff909a に入らず trap#14(0xff0628) へ分岐する — その判定枝を観測のみで切り
  * 分ける診断プローブ。タイプ A（挙動非変更・read-only・純粋追加）。CP-A $E94003
@@ -1865,12 +1866,12 @@ void p82xk_emit_verdict(void);
  * EmulatorBridge.h を include 済みなので mirror 定義は不要（P82XK と同方式）。
  * P82XL_ENABLE 0 で全 #if ブロックが消滅し pre-P82-X-L とバイト等価に戻る。
  * Plan: /tmp/mx68k_P82-X-L_plan.md §2-§5. */
-/* P82-X-L disabled this cycle (P82-X-M, plan /tmp/mx68k_P82-X-M_plan.md):
- * the prior cycle's findings are superseded — see plan §1.1; running P82XL
- * alongside P82XM doubles instrumentation in the perturbation-sensitive
- * frame-86 FDC window. Setting to 0 compiles out all P82XL guards (verified
- * orphan-free: m68000_bridge.c:3664/6586/7399/7659/11163 and
- * EmulatorBridge.c:1641). */
+/* P82-X-L は本サイクル(P82-X-M、plan /tmp/mx68k_P82-X-M_plan.md)で無効化:
+ * 前サイクルの知見は置き換えられた — plan §1.1 参照。P82XL を P82XM と並べて
+ * 走らせると、摂動に敏感な frame-86 の FDC 窓で計装が二重になる。0 にすると
+ * P82XL のガードが全てコンパイルから除外される(取り残しが無いことを確認済み:
+ * m68000_bridge.c:3664/6586/7399/7659/11163 および
+ * EmulatorBridge.c:1641)。 */
 #define P82XL_ENABLE      0
 #define P82XL_PROBE_TOKEN "P82XL-PROBE-L1"
 #if P82XL_ENABLE
@@ -1879,8 +1880,8 @@ void p82xk_emit_verdict(void);
 void p82xl_emit_verdict(void);
 #endif
 
-/* ---- P82-X-M diagnostic probe: boot-sector DMA delivery / IPLROM
- *      bootability-reject pinpoint (TYPE A — read-only, pure addition) ---- */
+/* ---- P82-X-M 診断プローブ: ブートセクタの DMA 配送 / IPLROM による
+ *      起動不可判定の特定(タイプ A — read-only、純粋追加) ---- */
 /* IPLROM は cmd 0x46 (MFM ReadData, C=0/H=0/R=1/N=3) で boot sector を発行し
  * DMA で 1024 バイトを RAM に転送する手はずを整える。それでも frame 90 付近で
  * IPLROM 自身が trap #14 (0xff0628) へ分岐 — 「disk not bootable」の意図枝へ。
@@ -1905,8 +1906,8 @@ void p82xl_emit_verdict(void);
 void p82xm_emit_verdict(void);
 #endif
 
-/* ---- P82-X-N diagnostic probe: boot-sector DMA delivery proof / boot-stub
- *      execution tripwire (TYPE A — read-only, pure addition) ----
+/* ---- P82-X-N 診断プローブ: ブートセクタの DMA 配送の証明 / ブートスタブ
+ *      実行の検知線(タイプ A — read-only、純粋追加) ----
  * P82-X-M Test#136 の verdict `classification=M-DMA-MISDIR` は probe false
  * positive (cf. /tmp/mx68k_P82-X-N_plan.md §1) で本サイクルで撤回。P82XM は
  * §3.2 perturbation 抑制方針により本サイクルで disable (P82XM_ENABLE 1->0)。
@@ -1930,9 +1931,9 @@ void p82xn_emit_verdict(void);
 void p82xn_cpa_tick(void);
 #endif
 
-/* ---- P82-X-O diagnostic probe: IPLROM 0xFF0628 panic 経路の例外配信 vec /
- *      直前メモリアクセス ピンポイント診断プローブ (TYPE A — read-only,
- *      pure addition) ----
+/* ---- P82-X-O 診断プローブ: IPLROM 0xFF0628 panic 経路の例外配信 vec /
+ *      直前メモリアクセス ピンポイント診断プローブ (タイプ A — read-only、
+ *      純粋追加) ----
  * P82-X-N Test#137 確定: DMA は MAR=0x2000 にバイト完全一致で配信済 (CP-B
  *  1024/1024) だがゲストは 0x2000-0x23FF を実行せず IPLROM PC=0xFF0628 で
  *  trap#14 発火 (P67 stacked_pc=0xFF062A, trap_src=0xFF0628, D7=0)。
@@ -1961,31 +1962,31 @@ void p82xn_cpa_tick(void);
 #define P82XO_ARM_FRAME   5u
 #if P82XO_ENABLE
 void p82xo_emit_verdict(void);
-void p82xo_tick(void);          /* per-frame: CP-O-3 snapshot anchor driving */
+void p82xo_tick(void);          /* フレームごと: CP-O-3 のスナップショット基準点を駆動 */
 #endif
 
 /* ====================================================================
- * P82-X-P diagnostic probe (TYPE A — read-only, pure addition)
+ * P82-X-P 診断プローブ(タイプ A — read-only、純粋追加)
  *  P82-X-O VERDICT=O-OTHER-VEC-0x00 (pc=0x7A0496) の probe artifact 切り分け:
  *   CP-P-A: BasePC drift 直接検証 (vec fetch 間 BasePC tracker, enum 3 値分類)
  *   CP-P-B: c68k group-0 14-byte frame stacking 実装有無メタプローブ
  *           (a7 起点 14-byte raw dump + pattern_verdict 分類)
- *   CP-P-C: chunk-PC trail filter for PC=0xFF0628 帯
- *   CP-P-D: BusErrFlag/BusErrHandling 直接 polling (D-1 trace ring / D-2 per-frame
- *           sticky / D-3 BusErrHandling sticky-edge ring for DMAC clear-race)
- *   CP-P-E: HYPOTHESIS-P backup (A7 sampling / 0x7A region write watch /
- *           IOCS B_READ ledger)
- * 観測窓: arm from frame 5 (P82XP_ARM_FRAME), verdict one-shot at frame>=96。
+ *   CP-P-C: PC=0xFF0628 帯を対象とするチャンク PC トレイルのフィルタ
+ *   CP-P-D: BusErrFlag/BusErrHandling 直接 polling (D-1 トレースリング / D-2 フレーム
+ *           ごとの sticky / D-3 DMAC クリア競合用の BusErrHandling sticky エッジリング)
+ *   CP-P-E: HYPOTHESIS-P の予備(A7 サンプリング / 0x7A 領域の書込み監視 /
+ *           IOCS B_READ の台帳)
+ * 観測窓: frame 5 (P82XP_ARM_FRAME) から武装、verdict は frame>=96 でワンショット。
  * Plan: /tmp/mx68k_P82-X-P_plan.md §3-§6. */
-/* P82-X-Q: dormant — Plan §1.1 / §5. CP-P-A through CP-P-E are kept in code
- * (revival path) but mechanically skipped to remove cumulative probe
- * perturbation while the BPC-safe accessor proves itself. */
+/* P82-X-Q: 休止中 — Plan §1.1 / §5。CP-P-A〜CP-P-E はコード上に残す(復活用の
+ * 経路)が、BPC 安全なアクセサが実証されるまでの間、プローブによる累積的な
+ * 摂動を取り除くため機械的にスキップする。 */
 #define P82XP_ENABLE      0
 #define P82XP_PROBE_TOKEN "P82XP-PROBE-P1"
 #define P82XP_ARM_FRAME   5u
 #if P82XP_ENABLE
 void p82xp_emit_verdict(void);
-void p82xp_tick(void);          /* per-frame: CP-P-D D-2 sticky edge sample */
+void p82xp_tick(void);          /* フレームごと: CP-P-D D-2 の sticky エッジのサンプル */
 #endif
 
 /* P82-X-R (Round 5 post-Codex) — 真の panic 原因 並列観測プローブ群
@@ -1997,13 +1998,13 @@ void p82xp_tick(void);          /* per-frame: CP-P-D D-2 sticky edge sample */
 void p82xr_emit_verdict(uint32_t frame);
 void p82xr_tick(void);
 
-/* ---- P82-X-T diagnostic probe family (TYPE A — read-only, pure addition) ----
+/* ---- P82-X-T 診断プローブ群(タイプ A — read-only、純粋追加) ----
  * BUS-ERR-FRAME-SNAP + IRQ-LOSS-GATE 同時観測 fresh family (CP-T-1〜T-6).
  * 既存 P82-X-S Outcome C で確定した「3 patches は真因ではない」を baseline
  * として、faulting access の正体 (Spec Path B / bus-err 14-byte frame) と
  * 上流 IRQ 配送の silent loss を 1 サイクルで同時観測する。
  *  CP-T-1 BUS-ERR-FRAME-SNAP  — 0xFF05E4 entry (frame>=80 AND D7==0) で
- *                               A7+0..17 (bsr return 4 + bus-err frame 14)
+ *                               A7+0..17 (bsr の戻り先 4 + バスエラーフレーム 14)
  *                               を 1 行 snap
  *  CP-T-2 DMA-CCR-GATE        — window 80-95、DMA[0] CSR.COC|BTC または
  *                               MTC→0 edge で (CCR/CSR/MTC/NIV/EIV/IRQH[3]) を
@@ -2018,82 +2019,82 @@ void p82xr_tick(void);
  *                               0xFF062A) の 2 行で NIV/EIV/CCR delta 観測
  * 全 probe は read-only、emit token は P82XT-PROBE-T1〜-T6。総 emit 40 行/run 以下。
  * Plan: /tmp/mx68k_P82-X-T_plan.md §3-§5. */
-/* P82-X-V (H5-C confirmation cycle): re-enable CP-T-1 macro flip — the
- * highest-yield zero-LOC observation. CP-T-2..T-6 also reactivate but are
- * baseline overlap with prior P82-X-T verdicts (no new information; Build &
- * Test Agent annotates the re-emit accordingly). Plan §3.1 / §4. */
+/* P82-X-V(H5-C 確認サイクル): CP-T-1 をマクロ切替で再有効化 — 追加コード 0 行で
+ * 最も成果の見込める観測。CP-T-2..T-6 も再び有効になるが、以前の P82-X-T の判定と
+ * 重なるベースラインにすぎない(新しい情報は無い。Build & Test Agent は再出力分に
+ * その旨を注記する)。Plan §3.1 / §4。 */
 #define P82XT_ENABLE                      0
-void p82xt_tick(void);                /* per-frame: CP-T-2/T-3/T-5/T-6 */
+void p82xt_tick(void);                /* フレームごと: CP-T-2/T-3/T-5/T-6 */
 
-/* ---- P82-X-U diagnostic probe family (TYPE A — read-only, pure addition) ----
- * D-class INVESTIGATE FIRST cycle (Plan: /tmp/mx68k_P82-X-U_plan.md §3-§5).
- * Six TYPE-A read-only probes pinpointing the IPLROM hybrid completion-wait
- * break point, decision-rule output is hypothesis H1〜H5 from §6 outcome matrix.
- *   CP-U-1 FDC-MSR-AND-BUFREADY-TRACE — per-frame sampler (window 80-95, 15 cap)
- *                                       MSR-derived CB/DIO/RQM + FDC_IsDataReady()
+/* ---- P82-X-U 診断プローブ群(タイプ A — read-only、純粋追加) ----
+ * D 区分の「まず調査」サイクル(Plan: /tmp/mx68k_P82-X-U_plan.md §3-§5)。
+ * IPLROM のハイブリッド完了待ちが途切れる地点を特定する、タイプ A の read-only
+ * プローブ 6 本。判定規則の出力は §6 の結果マトリクスにある仮説 H1〜H5。
+ *   CP-U-1 FDC-MSR-AND-BUFREADY-TRACE — フレームごとのサンプラ(窓 80-95、上限 15)
+ *                                       MSR から導出した CB/DIO/RQM + FDC_IsDataReady()
  *                                       + IOC_IntStat + IRQH_IRQ[1/3] + PC
- *   CP-U-2 FDC-SETINT-CALLPATH-MARKER — per-chunk IOC_IntStat bit7 rising-edge
- *                                       (window 5-95, 16 cap). bit7 rise =
- *                                       FDC_SetInt invocation marker (Spec §Q3).
- *   CP-U-3 IPLROM-PC-WINDOW-CLASSIFY  — per-frame PC band classify
- *                                       (window 60-95, 15 cap). H4 pin-point.
- *   CP-U-4 IRQH-IRQ-WRITE-TRACE       — per-chunk IRQH_IRQ[1] transition log
- *                                       (window 5-95, 8 cap). H3 race detect.
- *   CP-U-5 $C90-RESULT-BUFFER-PEEK    — one-shot at frame=90; dump drv 0/1
- *                                       (16 bytes via p47_read_long_le).
- *                                       H2 IRQ handler drain evidence.
- *   CP-U-6 $E9C001-WRITE-TRACE        — extends existing $E9C001 write hook
- *                                       in m68000_bridge.c (8 cap). H1 vs H3
- *                                       supporting evidence — bit2 set timing.
+ *   CP-U-2 FDC-SETINT-CALLPATH-MARKER — チャンクごとの IOC_IntStat bit7 立ち上がりエッジ
+ *                                       (窓 5-95、上限 16)。bit7 の立ち上がり =
+ *                                       FDC_SetInt 呼出しの目印(Spec §Q3)。
+ *   CP-U-3 IPLROM-PC-WINDOW-CLASSIFY  — フレームごとの PC 帯域分類
+ *                                       (窓 60-95、上限 15)。H4 の特定用。
+ *   CP-U-4 IRQH-IRQ-WRITE-TRACE       — チャンクごとの IRQH_IRQ[1] 遷移ログ
+ *                                       (窓 5-95、上限 8)。H3 の競合検出用。
+ *   CP-U-5 $C90-RESULT-BUFFER-PEEK    — frame=90 でワンショット。drv 0/1 をダンプ
+ *                                       (p47_read_long_le 経由で 16 バイト)。
+ *                                       H2 の IRQ ハンドラによる読み出しの証拠。
+ *   CP-U-6 $E9C001-WRITE-TRACE        — m68000_bridge.c の既存 $E9C001 書込み
+ *                                       フックを拡張(上限 8)。H1 対 H3 の
+ *                                       補強証拠 — bit2 がセットされる時点。
  * 全 probe は read-only、emit token は P82XU-PROBE-U1〜-U6。総 emit ≤ 64 行/run。
  * P82XU_ENABLE 0 で全 #if ブロックが消滅し pre-P82-X-U とバイト等価に戻る。 */
-/* P82-X-V: P82-X-U observation cycle has concluded (Test#145 GO, FDC
- * pipeline end-to-end confirmed). Disable to reduce probe noise during
- * the P82-X-V H5-C confirmation cycle. */
+/* P82-X-V: P82-X-U の観測サイクルは完了した(Test#145 GO、FDC パイプラインの
+ * 端から端までを確認)。P82-X-V の H5-C 確認サイクル中のプローブのノイズを
+ * 減らすため無効化する。 */
 #define P82XU_ENABLE                      0
-void p82xu_tick(void);                /* per-frame: CP-U-1/U-3/U-5 driver */
+void p82xu_tick(void);                /* フレームごと: CP-U-1/U-3/U-5 の駆動 */
 
-/* ---- P82-X-V diagnostic probe family (TYPE A — read-only, pure addition) ----
- * H5-C PRIMARY confirmation cycle (Plan: /tmp/mx68k_P82-X-V_plan.md §3-§5).
- * Four new TYPE-A read-only probes + CP-T-1 re-enable (macro flip, 0 LOC).
- * Confirms the H5-C hypothesis: vector $6C (level-3 autovector) is left at
- * the IPL-init default thunk ($00FF05E4), so any stray IRQ/exception passes
- * through Lff05e4 → Lff05e8 magic-walk prologue → fails compare → Lff0622
- * (clr.w d7 / trap #14) → $ff062a HALT trampoline (the P67 fingerprint).
- *   CP-T-1 BUS-ERR-FRAME-SNAP    — re-enabled via P82XT_ENABLE=1; observes
- *                                   the 14-byte exception frame at $ff05e4
- *                                   entry (frame>=80 AND D7==0).
- *   CP-V-2 VEC-6C-STATE-MONITOR  — frame=5 (post-init) + frame=90 (panic-
- *                                   near) snap of vector slots at byte
- *                                   offsets $08 / $0C / $60 / $6C.
- *   CP-V-3 FF05E8-ENTRY-D7-SNAP  — first PC ∈ [$ff05e8..$ff0626] band,
- *                                   one-shot, frame>=80; snaps D7 (lower
- *                                   byte = vector_number / 4 after lsr.w).
- *   CP-V-4 FF0622-ENTRY-PROBE    — first PC ∈ [$ff0622..$ff0628] band,
- *                                   one-shot, frame>=80; snaps D7/SR/A7/A6
- *                                   + 8-slot distinct-PC trail dump.
- *   CP-V-5 IRQH-ALL-LEVELS-SAMPLER — frame 80..95 window, 1 row/frame
- *                                    (cap 16); IRQH[1..7] + IRQLine + IPL +
- *                                    MFP IPRA/B + DMA0 CSR/CCR snapshot.
+/* ---- P82-X-V 診断プローブ群(タイプ A — read-only、純粋追加) ----
+ * H5-C の主確認サイクル(Plan: /tmp/mx68k_P82-X-V_plan.md §3-§5)。
+ * 新規のタイプ A read-only プローブ 4 本 + CP-T-1 の再有効化(マクロ切替、0 行)。
+ * H5-C 仮説を確認する: ベクタ $6C(レベル3 オートベクタ)が IPL 初期化時の既定の
+ * サンク($00FF05E4)のまま残されているため、迷い込んだ IRQ/例外はいずれも
+ * Lff05e4 → Lff05e8 のマジックワード探索プロローグ → 比較失敗 → Lff0622
+ * (clr.w d7 / trap #14)→ $ff062a の HALT トランポリン(P67 の指紋)を通る。
+ *   CP-T-1 BUS-ERR-FRAME-SNAP    — P82XT_ENABLE=1 で再有効化。$ff05e4 進入時
+ *                                   (frame>=80 かつ D7==0)の 14 バイトの
+ *                                   例外フレームを観測する。
+ *   CP-V-2 VEC-6C-STATE-MONITOR  — frame=5(初期化後)+ frame=90(パニック
+ *                                   直前)に、バイトオフセット $08 / $0C /
+ *                                   $60 / $6C のベクタスロットをスナップする。
+ *   CP-V-3 FF05E8-ENTRY-D7-SNAP  — PC ∈ [$ff05e8..$ff0626] 帯域への最初の進入、
+ *                                   ワンショット、frame>=80。D7 をスナップする
+ *                                   (下位バイト = lsr.w 後の vector_number / 4)。
+ *   CP-V-4 FF0622-ENTRY-PROBE    — PC ∈ [$ff0622..$ff0628] 帯域への最初の進入、
+ *                                   ワンショット、frame>=80。D7/SR/A7/A6 をスナップ
+ *                                   + 8 スロットの相異なる PC トレイルをダンプ。
+ *   CP-V-5 IRQH-ALL-LEVELS-SAMPLER — frame 80..95 の窓、1 フレーム 1 行
+ *                                    (上限 16)。IRQH[1..7] + IRQLine + IPL +
+ *                                    MFP IPRA/B + DMA0 CSR/CCR のスナップショット。
  * 全 probe は read-only、emit token は P82XV-PROBE-V2 〜 -V5 + P82XV-PROBE-V4-TRAIL。
  * 総 emit ≤ 24 行/run (V2: 2 + V3: 1 + V4: 2 + V5: 16 + 1 buffer)。
  * P82XV_ENABLE 0 で全 #if ブロックが消滅し pre-P82-X-V とバイト等価に戻る。 */
 #define P82XV_ENABLE                      0
-#define P82XV_V2_FRAME_POSTINIT           5u    /* CP-V-2 snap #1: post-init */
-#define P82XV_V2_FRAME_PANIC              90u   /* CP-V-2 snap #2: panic-near */
-#define P82XV_WIN_LO                      80    /* CP-V-3/V-4/V-5 arm gate lower bound */
-#define P82XV_WIN_HI                      95    /* CP-V-5 window upper bound (inclusive) */
-#define P82XV_V3_PC_LO                    0x00FF05E8u /* magic-walk band lower (M-1 範囲化) */
-#define P82XV_V3_PC_HI                    0x00FF0626u /* magic-walk band upper (inclusive) */
-#define P82XV_V4_PC_LO                    0x00FF0622u /* clr.w d7 / swap.w d7 / Lff0626 band */
-#define P82XV_V4_PC_HI                    0x00FF0628u /* band upper (inclusive) */
-#define MX68K_VEC_BUSERR_ADDR             0x00000008u /* vector  2: bus error */
-#define MX68K_VEC_ADDRERR_ADDR            0x0000000Cu /* vector  3: address error */
-#define MX68K_VEC_SPURIOUS_ADDR           0x00000060u /* vector 24: spurious interrupt */
-#define MX68K_VEC_6C_ADDR                 0x0000006Cu /* vector 27: level-3 autovector */
-#define P82XV_PC_TRAIL_DEPTH              8u    /* CP-V-4 distinct-PC ring depth */
-void p82xv_tick(void);                /* per-frame: CP-V-2 / CP-V-5 driver */
-void p82xv_on_chunk_pc(uint32_t pc);  /* per-chunk PC: CP-V-3 / CP-V-4 */
+#define P82XV_V2_FRAME_POSTINIT           5u    /* CP-V-2 スナップ #1: 初期化後 */
+#define P82XV_V2_FRAME_PANIC              90u   /* CP-V-2 スナップ #2: パニック直前 */
+#define P82XV_WIN_LO                      80    /* CP-V-3/V-4/V-5 の武装ゲートの下限 */
+#define P82XV_WIN_HI                      95    /* CP-V-5 の窓の上限(この値を含む) */
+#define P82XV_V3_PC_LO                    0x00FF05E8u /* マジックワード探索帯域の下限 (M-1 範囲化) */
+#define P82XV_V3_PC_HI                    0x00FF0626u /* マジックワード探索帯域の上限(この値を含む) */
+#define P82XV_V4_PC_LO                    0x00FF0622u /* clr.w d7 / swap.w d7 / Lff0626 の帯域 */
+#define P82XV_V4_PC_HI                    0x00FF0628u /* 帯域の上限(この値を含む) */
+#define MX68K_VEC_BUSERR_ADDR             0x00000008u /* ベクタ  2: バスエラー */
+#define MX68K_VEC_ADDRERR_ADDR            0x0000000Cu /* ベクタ  3: アドレスエラー */
+#define MX68K_VEC_SPURIOUS_ADDR           0x00000060u /* ベクタ 24: スプリアス割込み */
+#define MX68K_VEC_6C_ADDR                 0x0000006Cu /* ベクタ 27: レベル3 オートベクタ */
+#define P82XV_PC_TRAIL_DEPTH              8u    /* CP-V-4 の相異なる PC リングの深さ */
+void p82xv_tick(void);                /* フレームごと: CP-V-2 / CP-V-5 の駆動 */
+void p82xv_on_chunk_pc(uint32_t pc);  /* チャンクごとの PC: CP-V-3 / CP-V-4 */
 
 /* P87-A: $FF0628 panic への到達が (i) CPU 例外 vector fetch 経由か (ii) 通常
  *  control-flow 経由かを判別する診断プローブ。既存 CP-R-1 (p82xr_on_vec_fetch /
@@ -2190,7 +2191,7 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* per-chunk PC: CP-V-3 / CP-V-4 */
  *  (computed jmp / 直接到達)。判別子 G1-G6:
  *   G1 (corroborative): $FF05E8 の (a7)+ pop ($xxFF05E6 longword、hi-word first) を
  *      窓撤廃 (addr<0x10000) で生 latch。発火=handler 実行、nn=元ベクタ番号 (top byte)。
- *   G2 (validated primary): vec longword fetch (addr<0x400, aligned, lo24==$00FF05E4)
+ *   G2 (検証済みの主判別子): ベクタのロングワードフェッチ (addr<0x400, 整列済み, lo24==$00FF05E4)
  *      を全ベクタクラス網羅 latch。$B8 positive control 検証済 (c68k vec fetch は ReadW
  *      経由) → 発火=例外 dispatch 確証、不発=「$FF05E4 行き例外なし」を信頼可。
  *   G3 (形状): $FF0632 entry one-shot で a6/a7 pristine latch。a6==a7+6 で $FF0626
@@ -2319,7 +2320,7 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* per-chunk PC: CP-V-3 / CP-V-4 */
  * pre-P103 とバイト等価。 */
 #define P103_ENABLE   0
 
-/* P104-CLEANDISC: clean A7=$0 source discriminator (memory-sourced vs register-to-SP).
+/* P104-CLEANDISC: A7=$0 の供給元をきれいに判別するプローブ(メモリ由来 対 レジスタ→SP)。
  * P103 で残った核心: A7 が $1FF8->$0 に flip した source が memory-sourced (movea.l (ea),a7
  * など、値の data-read を伴い longword==新 A7) か register-to-SP (movea.l Dn,a7 with Dn=$0、
  * memory-invisible、値の data-read なし) か未決着。P103 VERDICT は ordering check の
@@ -2529,8 +2530,8 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* per-chunk PC: CP-V-3 / CP-V-4 */
 #define P111_SCLEAR_RING 64   /* S-bit 1->0 遷移 latch ring 深さ */
 #define P111_BAND_LO    0x001FF0u  /* writer-PC ring 採取 addr 帯 下限 (含む) */
 #define P111_BAND_HI    0x002000u  /* writer-PC ring 採取 addr 帯 上限 (排他) */
-#define P111_PC_HI_ADDR 0x001FF8u  /* PC longword HI half slot (= [$1FF8]) */
-#define P111_PC_LO_ADDR 0x001FFAu  /* PC longword LO half slot (= [$1FFA]) */
+#define P111_PC_HI_ADDR 0x001FF8u  /* PC ロングワードの上位半分のスロット (= [$1FF8]) */
+#define P111_PC_LO_ADDR 0x001FFAu  /* PC ロングワードの下位半分のスロット (= [$1FFA]) */
 #define P111_PC_TAG_VAL 0x0000212Cu /* pc_tag 期待 longword (recon($1FF8,$1FFA)) */
 #define P111_SR_TAG_ADDR 0x001FF6u  /* sr_tag slot (SR push 先) */
 
@@ -2611,7 +2612,7 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* per-chunk PC: CP-V-3 / CP-V-4 */
  * ==================================================================== */
 #define P114_ENABLE     0
 #define P114_SR_S       0x2000u  /* SR の supervisor (S) ビット (bit13)、P114-own 定数 */
-#define P114_SLOT0_ADDR 0x001FF6u /* named-slot idx0 (RTE pop SR primary, c68k OP_0x4E73) */
+#define P114_SLOT0_ADDR 0x001FF6u /* 名前付きスロット idx0 (RTE が pop する SR の主スロット, c68k OP_0x4E73) */
 #define P114_SLOT1_ADDR 0x001FF8u /* named-slot idx1 (secondary, a7 ambiguity 保険) */
 
 /* ====================================================================
@@ -2652,8 +2653,8 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* per-chunk PC: CP-V-3 / CP-V-4 */
 #define P119_A7_WATCH   0   /* 0 = control (no-op、P67 byte-identical), 1 = a7-watch 観測有効 */
 #endif
 #define P119_SR_S       0x2000u  /* SR の supervisor (S) ビット (bit13)、P119-own 定数 */
-#define P119_SLOT0_ADDR 0x001FF6u /* SSP slot idx0 (balanced pop = SR slot、$1FF6) */
-#define P119_SLOT1_ADDR 0x001FF8u /* SSP slot idx1 (offset pop = PC-hi slot、$1FF8) */
+#define P119_SLOT0_ADDR 0x001FF6u /* SSP スロット idx0 (釣り合った pop = SR スロット、$1FF6) */
+#define P119_SLOT1_ADDR 0x001FF8u /* SSP スロット idx1 (ずれた pop = PC 上位スロット、$1FF8) */
 #define P119_WIN_LO     0x001FE0u /* 例外 frame-push 観測帯 下限 (含む、SSP frame 領域) */
 #define P119_WIN_HI     0x002000u /* 例外 frame-push 観測帯 上限 (排他) */
 #define P119_PUSH_RING  48        /* frame-push event ring 深さ (head+tail preserve) */
@@ -2675,7 +2676,7 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* per-chunk PC: CP-V-3 / CP-V-4 */
 #define P120_POP_RING          32         /* RTE-pop event ring 深さ */
 
 /* ====================================================================
- * P122: S-clear (S 1->0) supply-source discriminator probe (observation-only)。
+ * P122: S クリア (S 1->0) の供給元を判別するプローブ(観測専用)。
  * panic 直前に bad SR=$0000(S=0) を生む S-bit clear の供給源が、RTE 系 (stack pop で
  * 新 SR を取る) か 非 RTE-SR-write 系 (MOVE/ANDI/EORI/ORI-to-SR が immediate/EA から取る)
  * かを、stack pop 署名の有無 (3-word 昇順 run + run 内 live S 1->0 straddle-S) で中立判別する。
@@ -2861,11 +2862,11 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* per-chunk PC: CP-V-3 / CP-V-4 */
 /* Part1 host-path runtime latch のレコード型 (EmulatorBridge.c 定義・
  *   m68000_bridge.c の p135_dump から extern 参照)。両 TU で layout 一致のため
  *   typedef をヘッダに置く。which_path: 0=A(init clear), 1=B-memset(vec-skip 0 clear),
- *   2=B-shadow(IPL→MEM byte-swap loop)。 */
+ *   2=B-shadow(IPL→MEM のバイトスワップループ)。 */
 typedef struct {
     unsigned char  set;        /* このスロットが書込済みか */
     unsigned char  which_path; /* 0/1/2 */
-    int            frame;      /* g_mx68k_frame_num at execution */
+    int            frame;      /* 実行時点の g_mx68k_frame_num */
     unsigned short mem_before; /* MEM[0x1FF6] LE16 (path 実行直前) */
     unsigned short mem_after;  /* MEM[0x1FF6] LE16 (path 実行直後) */
 } p135_hostlat_t;
@@ -2914,7 +2915,7 @@ void p136_poll(unsigned char step_id, int line);
 #endif
 
 /* ====================================================================
- * P117: frame-loop cadence A/B diagnostic — executed-vs-requested cycle feed.
+ * P117: フレームループの刻みの A/B 診断 — 実行サイクル数 対 要求サイクル数の供給。
  * MFP_Timer/RTC_Timer に供給する cycle 数を、現行の requested cycle (sc) から
  * 実行 cycle (ex = m68000_execute の戻り値) に切替えた時、frame≈90 の S=0 pop
  * (panic 経路) が消えるか + must-stay-green 7/7 が維持されるかを A/B で観測する。
@@ -2928,7 +2929,7 @@ void p136_poll(unsigned char step_id, int line);
  * 全コード P117_EXEC_CYCLE_FEED で gating、flag=0 で byte-equivalent (pure addition)。
  * ==================================================================== */
 #ifndef P117_EXEC_CYCLE_FEED
-#define P117_EXEC_CYCLE_FEED 0   /* 0 = control (feed sc; 7/7 baseline, byte-identical), 1 = experiment (feed ex) */
+#define P117_EXEC_CYCLE_FEED 0   /* 0 = 対照 (sc を供給。7/7 ベースライン、バイト同一), 1 = 実験 (ex を供給) */
 #endif
 
 #define P82XB_WIN_LO     0x001FB0u   /* C2 MEM[] スナップショット窓 下限 */
@@ -2941,13 +2942,13 @@ void p136_poll(unsigned char step_id, int line);
 #define P82XB_FAULT_LO   0x001F00u   /* C2 トリガ: fault_pc 近傍下限 */
 #define P82XB_FAULT_HI   0x002000u   /* C2 トリガ: fault_pc 近傍上限 */
 
-/* P57-A session-end summary (called from mx68k_shutdown and mx68k_atexit_summary;
- * P52 非依存 — Code Major-4 反映). Emits [P57A-SUMMARY] + [P57A-SUMMARY-DECISION]. */
+/* P57-A のセッション終了時サマリ(mx68k_shutdown と mx68k_atexit_summary から呼ばれる。
+ * P52 非依存 — Code Major-4 反映)。[P57A-SUMMARY] + [P57A-SUMMARY-DECISION] を出力する。 */
 void m68000_p57a_dump_summary(void);
 
-/* P56 helper — snapshot taker (called from mx68k_run_frame each frame; idempotent).
- * Implemented in m68000_bridge.c to keep snapshot table file-scope static.
- * /tmp/mx68k_P56_plan.md Edit F. */
+/* P56 補助関数 — スナップショット取得(mx68k_run_frame から毎フレーム呼ばれる。冪等)。
+ * スナップショットテーブルをファイルスコープの static に保つため m68000_bridge.c に実装。
+ * /tmp/mx68k_P56_plan.md Edit F。 */
 void m68000_p56_take_snapshot(int frame_num);
 
 /* ====================================================================
@@ -3707,7 +3708,7 @@ extern volatile uint64_t g_mx68k_dbg_bp_hits;
 extern volatile uint64_t g_mx68k_dbg_steps;
 extern volatile uint64_t g_mx68k_dbg_armed_chunks;
 
-// ---- Debug Logging ----
+// ---- デバッグログ ----
 /* P753: debug_log() の実行時ON/OFF。Debugビルドは既定ON、Releaseは既定OFF。 */
 void mx68k_set_debug_log_enabled(int enabled);
 int  mx68k_get_debug_log_enabled(void);
@@ -3717,7 +3718,7 @@ void mx68k_log(const char* msg);
 void mx68k_dump_framebuffer(void);
 void mx68k_set_trace_enabled(bool enabled);
 
-// ---- Error Codes ----
+// ---- エラーコード ----
 #define MX68K_OK                  0
 #define MX68K_ERR_BIOS_NOT_FOUND -1
 #define MX68K_ERR_BIOS_INVALID   -2
