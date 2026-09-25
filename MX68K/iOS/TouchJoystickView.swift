@@ -58,13 +58,13 @@ final class TouchJoystickInput {
     // 負論理: idle = 0xFF を起点に、押下されたビットを **クリア**する。
     // bit4 / bit7 は常時 1(未使用)。
 
-    /// bit0 = Up (`InputManager.swift:801`)
+    /// bit0 = 上 (`InputManager.swift:801`)
     static let bitUp: UInt8 = 0x01
-    /// bit1 = Down (`InputManager.swift:802`)
+    /// bit1 = 下 (`InputManager.swift:802`)
     static let bitDown: UInt8 = 0x02
-    /// bit2 = Left (`InputManager.swift:803`)
+    /// bit2 = 左 (`InputManager.swift:803`)
     static let bitLeft: UInt8 = 0x04
-    /// bit3 = Right (`InputManager.swift:804`)
+    /// bit3 = 右 (`InputManager.swift:804`)
     static let bitRight: UInt8 = 0x08
     /// bit5 = TRIG2 (`InputManager.swift:806`)
     static let bitTrig2: UInt8 = 0x20
