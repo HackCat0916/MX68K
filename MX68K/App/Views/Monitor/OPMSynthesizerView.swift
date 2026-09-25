@@ -65,7 +65,7 @@ struct OPMSynthesizerView: View {
     private static let octaveWidth: CGFloat = whiteKeyWidth * CGFloat(whiteNotes.count)
     private static let keyboardWidth: CGFloat = octaveWidth * CGFloat(keyboardOctaves.count)
 
-    // MARK: - body
+    // MARK: - 本体
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

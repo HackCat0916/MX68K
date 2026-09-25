@@ -38,7 +38,7 @@ struct StorageMonitorView: View {
             }
             Divider()
 
-            // ---- SASI (8 units) ----
+            // ---- SASI(8 ユニット) ----
             Text("SASI (internal, 8 units)").font(.subheadline)
             ForEach(0..<8, id: \.self) { unit in
                 sasiRow(unit: unit,
@@ -48,7 +48,7 @@ struct StorageMonitorView: View {
 
             Divider()
 
-            // ---- SCSI (ID 0-6) ----
+            // ---- SCSI(ID 0-6) ----
             HStack(spacing: 8) {
                 Text("SCSI (ID0-6)").font(.subheadline)
                 Text(scsiModeLabel(ext.scsiMode)).foregroundColor(.secondary)

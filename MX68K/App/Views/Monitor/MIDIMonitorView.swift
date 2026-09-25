@@ -47,7 +47,7 @@ struct MIDIMonitorView: View {
                 }
                 Divider()
 
-                // ---- Board / devices ----
+                // ---- ボード / デバイス ----
                 Text("Board (CZ-6BM1 / YM3802 $EAFA00)").font(.subheadline)
                 if !ext.midiEnabled {
                     Text("(not installed — enable it in Settings → Audio)")
@@ -65,7 +65,7 @@ struct MIDIMonitorView: View {
 
                 Divider()
 
-                // ---- TX (guest -> real MIDI device) ----
+                // ---- TX(ゲスト → 実 MIDI デバイス) ----
                 Text("TX (guest → device)").font(.subheadline)
                 row("messages:", "\(midi.txMessages)")
                 row("bytes:", "\(midi.txBytes)")
@@ -73,7 +73,7 @@ struct MIDIMonitorView: View {
 
                 Divider()
 
-                // ---- RX (real MIDI device -> guest) ----
+                // ---- RX(実 MIDI デバイス → ゲスト) ----
                 Text("RX (device → guest)").font(.subheadline)
                 // ★rx_messages の単位は CoreMIDI パケット。1 パケットに複数
                 //   メッセージが載りうるので、名前の通りの「メッセージ数」では
@@ -93,7 +93,7 @@ struct MIDIMonitorView: View {
 
                 Divider()
 
-                // ---- YM3802 registers ----
+                // ---- YM3802 レジスタ ----
                 Text("YM3802 registers").font(.subheadline)
                 row("RegHigh (bank):", hex8(midi.regs.reg_high))
                 row("Vector:", hex8(midi.regs.vector))
@@ -105,7 +105,7 @@ struct MIDIMonitorView: View {
 
                 Divider()
 
-                // ---- Current settings (Swift config, no new bridge API) ----
+                // ---- 現在の設定(Swift 側の設定値。新規 Bridge API は使わない) ----
                 Text("Settings").font(.subheadline)
                 row("send reset on init:", ext.midiResetOnInit ? "on" : "off")
                 row("reset command:", resetTypeLabel(ext.midiResetType))
@@ -124,7 +124,7 @@ struct MIDIMonitorView: View {
         .onDisappear { emulatorViewModel.engine.midiVisible = false }
     }
 
-    // MARK: - Rows
+    // MARK: - 行表示
 
     @ViewBuilder
     private func row(_ label: String, _ value: String) -> some View {
@@ -154,7 +154,7 @@ struct MIDIMonitorView: View {
         row("last raw:", String(format: "0x%08X", packed))
     }
 
-    // MARK: - Helpers
+    // MARK: - 補助関数
 
     private func hex8(_ v: UInt8) -> String { String(format: "0x%02X", v) }
 
