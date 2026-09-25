@@ -8,20 +8,20 @@
 //---------------------------------------------------------------------------
 
 //
-//	Ported to MX68K (macOS port of px68k) — Bridge layer. SCSI (MB89352) SPC
-//	register machine + SCSI phase state machine, HDD path only. Ported
-//	verbatim from XM6 vm/scsi.cpp; only Win32/XM6 environment type/macro
-//	shims (scsi_compat_shim.h) are applied and the emulation logic is
-//	preserved unchanged. Disk-layer commands delegate to the P249-ported
-//	Disk / SASIHD / SCSIHD / SCSIMO / SCSICD classes (scsi_disk.cpp). The MO
-//	drive is wired at SCSI ID5 (P668) and the CD-ROM drive at SCSI ID6
-//	(P676, READ TOC + data reads); XM6's live media swap accessors are wired
-//	(P674 for MO, P676 for CD). Only the CD-DA path remains excluded
-//	(#if 0); Save / Load / ApplyCfg / AssertDiag are minimal stubs (not wired).
+//	MX68K (px68k の macOS 移植) への移植 — Bridge 層。SCSI (MB89352) SPC の
+//	レジスタ機構 + SCSI フェーズステートマシン、HDD 経路のみ。XM6 vm/scsi.cpp
+//	からそのまま移植しており、適用したのは Win32/XM6 環境の型/マクロのシム
+//	(scsi_compat_shim.h) だけで、エミュレーションのロジックは無変更のまま
+//	保っている。ディスク層のコマンドは P249 で移植済みの
+//	Disk / SASIHD / SCSIHD / SCSIMO / SCSICD クラス (scsi_disk.cpp) へ委譲する。
+//	MO ドライブは SCSI ID5 (P668)、CD-ROM ドライブは SCSI ID6 (P676、READ TOC +
+//	データ読み出し) に配線済みで、XM6 のメディア活線交換アクセサも配線済み
+//	(MO は P674、CD は P676)。CD-DA 経路のみ除外したまま (#if 0) で、
+//	Save / Load / ApplyCfg / AssertDiag は最小スタブ (未配線)。
 //
-//	NOTE: This translation unit is compiled but NOT wired into the runtime —
-//	nothing instantiates or calls the SCSI class yet.
-//	See NOTICE-THIRD-PARTY.md at the repository root.
+//	注意: この翻訳単位はコンパイルされるが、まだランタイムへ配線されていない —
+//	SCSI クラスをインスタンス化・呼び出すものはまだ無い。
+//	リポジトリ直下の NOTICE-THIRD-PARTY.md を参照のこと。
 //
 //---------------------------------------------------------------------------
 
@@ -2384,7 +2384,7 @@ void FASTCALL SCSI::Execute()
 		case 0x48:
 			PlayAudioTrack();
 			return;
-#endif	// 0 (PLAY AUDIO / CD-DA commands excluded)
+#endif	// 0 (PLAY AUDIO / CD-DA コマンドは除外)
 	}
 
 	// それ以外は対応していない
@@ -3507,7 +3507,7 @@ void FASTCALL SCSI::ReadToc()
 	DataIn();
 }
 
-#if 0	// excluded (CD-DA path)
+#if 0	// 除外 (CD-DA 経路)
 //---------------------------------------------------------------------------
 //
 //	PLAY AUDIO(10)
@@ -3597,7 +3597,7 @@ void FASTCALL SCSI::PlayAudioTrack()
 	// ステータスフェーズ
 	Status();
 }
-#endif	// 0 (excluded)
+#endif	// 0 (除外)
 
 //---------------------------------------------------------------------------
 //
@@ -4119,7 +4119,7 @@ void FASTCALL SCSI::GetPath(Filepath& path, BOOL mo) const
 	path.Clear();
 }
 
-#if 0	// excluded (CD-DA path)
+#if 0	// 除外 (CD-DA 経路)
 //---------------------------------------------------------------------------
 //
 //	CD-DAバッファ取得
@@ -4143,4 +4143,4 @@ void FASTCALL SCSI::GetBuf(DWORD *buffer, int samples, DWORD rate)
 		}
 	}
 }
-#endif	// 0 (excluded)
+#endif	// 0 (除外)
