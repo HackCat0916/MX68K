@@ -36,7 +36,7 @@ struct RTCMonitorView: View {
                 }
                 Divider()
 
-                // ---- (1) Date / time = HOST clock proxy ----
+                // ---- (1) 日付・時刻 = ホスト時計の代理値 ----
                 Text("Date / time").font(.subheadline)
                 Text("⚠ These 7 values are a snapshot of the HOST system clock, not emulated guest state. The chip keeps no date/time counter of its own: every guest read of a date/time register is answered from the host clock, and anything the guest writes there is stored but never read back.")
                     .foregroundColor(.orange)
@@ -49,7 +49,7 @@ struct RTCMonitorView: View {
 
                 Divider()
 
-                // ---- Clock output / ADJ / hour mode ----
+                // ---- クロック出力 / ADJ / 時間表示モード ----
                 Text("Clock output & mode").font(.subheadline)
                 row("CLKOUT select:", "\(rtc.clkout_select) (\(clkoutLabel(rtc.clkout_select)))")
                 // ステータスバーの TIMER-LED と同じ生値をここに置き、ランプの
@@ -61,7 +61,7 @@ struct RTCMonitorView: View {
 
                 Divider()
 
-                // ---- Alarm registers ----
+                // ---- アラームレジスタ ----
                 Text("Alarm registers").font(.subheadline)
                 row("alarm time:", "\(pad2(rtc.alarm_hour)):\(pad2(rtc.alarm_min))")
                 row("alarm day:", "\(rtc.alarm_day)")
@@ -69,7 +69,7 @@ struct RTCMonitorView: View {
 
                 Divider()
 
-                // ---- (2) Leap-year counter: written value vs. value actually read back ----
+                // ---- (2) 閏年カウンタ: 書き込んだ値と実際に読み戻される値 ----
                 Text("Leap-year counter").font(.subheadline)
                 row("written by guest:", "\(rtc.leap_year_ctr)")
                 row("returned on read:", "\(rtc.leap_year_effective)")
@@ -79,7 +79,7 @@ struct RTCMonitorView: View {
 
                 Divider()
 
-                // ---- Bank / test / alarm output control (raw) ----
+                // ---- バンク / テスト / アラーム出力制御(生値) ----
                 Text("Bank / test / alarm output control").font(.subheadline)
                 row("$1B bank+enable:", hex8(rtc.reg_bank_ctrl))
                 row("$1D test mode:", hex8(rtc.reg_test))
@@ -104,7 +104,7 @@ struct RTCMonitorView: View {
         .onDisappear { emulatorViewModel.engine.rtcMonitorVisible = false }
     }
 
-    // MARK: - Rows
+    // MARK: - 行表示
 
     @ViewBuilder
     private func row(_ label: String, _ value: String) -> some View {
@@ -117,7 +117,7 @@ struct RTCMonitorView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - 補助関数
 
     private func hex8(_ v: UInt8) -> String { String(format: "0x%02X", v) }
 
