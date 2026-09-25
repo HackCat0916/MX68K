@@ -18380,9 +18380,9 @@ void p82xh_emit_verdict(void) {
 
 #if P82XI_ENABLE
 /* ===================================================================
- * P82-X-I Probe: vec 0x60 (FDC status interrupt) vector-table slot
- *                (guest 0x180 = hi word, 0x182 = lo word) write-trace
- *                staged capture — pure addition, read-only (type A).
+ * P82-X-I Probe: vec 0x60 (FDC ステータス割込み) のベクタテーブルスロット
+ *                (ゲスト 0x180 = 上位ワード、0x182 = 下位ワード) への書込トレースを
+ *                段階的に捕捉する — 純粋な追加、read-only (type A)。
  *
  * 目的: human302.xdf ブートが frame 87 で停止する真因を、IPLROM が
  *   vec 0x60 スロット 0x180/0x182 へ書き込む「生の 32bit ハンドラアドレス」と、
@@ -18657,7 +18657,7 @@ static int      s_p82xk_readdata_seen;   /* FDC ReadData cmd 0x06 観測 */
 static uint32_t s_p82xk_readdata_pc;     /* ReadData 発行 PC */
 static uint32_t s_p82xk_readdata_frame;  /* ReadData 発行フレーム */
 static int      s_p82xk_dmac_ch0_seen;   /* DMAC ch0 レジスタ write 観測 */
-static uint32_t s_p82xk_dmac_pc;         /* DMAC ch0 write PC */
+static uint32_t s_p82xk_dmac_pc;         /* DMAC ch0 書込時の PC */
 static uint32_t s_p82xk_dmac_frame;      /* DMAC ch0 write フレーム */
 static uint32_t s_p82xk_dmac_mtc;        /* DMAC ch0 MTC 書き込み値 */
 /* ---- CP-5 状態 ---- */
@@ -18672,8 +18672,8 @@ static inline int p82xk_in_window(void) {
 }
 
 /* 現在の guest PC（P82-X-H p82xh_guest_pc と同一手段）。
- * P82-X-Q (P82XQ-PROBE-Q1): redirect to BPC-safe accessor (Codex Round-4
- * finding 4 — second guest-PC helper sibling to p82xh_guest_pc). */
+ * P82-X-Q (P82XQ-PROBE-Q1): BPC 安全なアクセサへ切り替える (Codex Round-4
+ * 指摘 4 — p82xh_guest_pc の兄弟となる 2 つ目のゲスト PC ヘルパ)。 */
 static inline uint32_t p82xk_guest_pc(void) {
     return MX68KQ_GUEST_PC();
 }
@@ -18847,7 +18847,7 @@ void p82xk_emit_verdict(void) {
         }
     }
 
-    /* ---- §3 verdict ladder（first-match-wins）---- */
+    /* ---- §3 verdict 判定段（最初に一致したものを採用）---- */
     const char *cls;
     if (any_st0 && !sis_good) {
         cls = "K-ST0-BAD-AT-SOURCE";
@@ -18934,7 +18934,7 @@ void p82xk_emit_verdict(void) {
 
 #if P82XL_ENABLE
 /* ===================================================================
- * P82-X-L Probe: Recalibrate->ReadData transition diagnostic (TYPE A)
+ * P82-X-L Probe: Recalibrate->ReadData 遷移の診断 (TYPE A)
  *
  * Recalibrate が good ST0=0x20 で完了しているのに IPLROM はセクタ読み出し
  * ルーチン 0xff909a に入ることなく trap#14(0xff0628) へ分岐する。どの判定枝が
@@ -18990,10 +18990,10 @@ static int p82xl_verdict_done;
 /* CP-D 監視対象アドレス判定（[0xc8e,0xc98) FDC ISR work-area に加え調査命名候補
  * $933/$993/$9e1/$9e2/$9ee/$cb8 も捕捉し mis-route フラグが範囲外でも観測できる）。 */
 static inline int p82xl_is_ramwatch(uint32_t a) {
-    return (a >= 0x000C8E && a < 0x000C98)   /* FDC ISR work-area */
+    return (a >= 0x000C8E && a < 0x000C98)   /* FDC ISR ワーク領域 */
         || (a >= 0x0009E0 && a < 0x0009F0)   /* FDC ドライバ scratch $9e1/$9e2/$9ee */
         ||  a == 0x000933 || a == 0x000993   /* 0xff750a tst.b $993 ほか */
-        ||  a == 0x000CB8;                   /* calibration result */
+        ||  a == 0x000CB8;                   /* キャリブレーション結果 */
 }
 
 /* P82-X-L VERDICT one-shot — frame>=96 到達で EmulatorBridge.c から呼ばれる。
@@ -19115,8 +19115,8 @@ void p82xl_emit_verdict(void) {
 
 #if P82XM_ENABLE
 /* ===================================================================
- * P82-X-M Probe: boot-sector DMA delivery / IPLROM bootability-reject
- *                pinpoint (TYPE A — read-only, pure addition)
+ * P82-X-M Probe: ブートセクタ DMA 転送 / IPLROM の起動不可判定の
+ *                特定 (TYPE A — read-only、純粋な追加)
  *
  * IPLROM が valid な boot-sector ReadData (cmd 0x46, C=0/H=0/R=1/N=3, DMA mode)
  * を発行し FDC/DMAC Core はそれをサービス可能 — それでも IPLROM は disk を
@@ -19149,10 +19149,10 @@ void p82xl_emit_verdict(void) {
 /* CP-A′ ring: DMAC ch0 レジスタ writeB/writeW (24 件 keep-last) */
 struct p82xm_cpa_rec { uint32_t frame; uint8_t width; uint32_t addr; uint32_t value; };
 static struct p82xm_cpa_rec p82xm_cpa_dmac[24];
-static uint32_t p82xm_cpa_dmac_n;       /* total writes seen (incremented per record) */
-static uint32_t p82xm_cpa_dmac_idx;     /* ring index — modulo 24 */
+static uint32_t p82xm_cpa_dmac_n;       /* 観測した書込の総数 (記録ごとに加算) */
+static uint32_t p82xm_cpa_dmac_idx;     /* ring インデックス — 24 を法とする */
 
-/* CP-A′ latches */
+/* CP-A′ の latch 群 */
 static uint32_t p82xm_g_mar_captured;
 static uint32_t p82xm_g_mar_writes_n;
 static uint16_t p82xm_g_mar_hi;
@@ -19165,13 +19165,13 @@ static uint32_t p82xm_g_ccr_str_n;
 /* CP-B′ ring: $E94003 byte read 全件 (64 件 keep-last) */
 struct p82xm_cpb_rec { uint32_t frame; uint32_t ord; uint8_t value; };
 static struct p82xm_cpb_rec p82xm_cpb_e94003[64];
-static uint32_t p82xm_cpb_e94003_idx;   /* ring index — modulo 64 */
+static uint32_t p82xm_cpb_e94003_idx;   /* ring インデックス — 64 を法とする */
 
-/* CP-B′ counters + ReadData (cmd 0x46) result latch state */
+/* CP-B′ のカウンタ + ReadData (cmd 0x46) 結果 latch の状態 */
 static uint32_t p82xm_g_e94003_reads_n;
 static uint32_t p82xm_g_e94003_writes_n;
 static uint32_t p82xm_g_rd_cmd_writes_n;
-static int      p82xm_g_rd_param_remaining;  /* 8→0 countdown */
+static int      p82xm_g_rd_param_remaining;  /* 8→0 のカウントダウン */
 static int      p82xm_g_rd_result_armed;
 static int      p82xm_g_rd_result_idx;
 static uint8_t  p82xm_result_st0, p82xm_result_st1, p82xm_result_st2;
@@ -19202,21 +19202,21 @@ static struct p82xm_cpd_ram_rec p82xm_cpd_ram[64];
 static uint32_t p82xm_cpd_ram_n;
 static uint32_t p82xm_cpd_ram_idx;
 
-/* One-shot verdict guard — TU-local to m68000_bridge.c. EmulatorBridge.c does
- * NOT reference this; the per-frame caller does a plain p82xm_emit_verdict()
- * and the helper's own guard ensures one-shot. P82-X-L/-H/-K precedent. */
+/* one-shot の verdict ガード — m68000_bridge.c の TU ローカル。EmulatorBridge.c は
+ * これを参照しない。フレーム毎の呼出し側は単に p82xm_emit_verdict() を呼ぶだけで、
+ * ヘルパ自身のガードが one-shot を保証する。P82-X-L/-H/-K の前例に倣う。 */
 static int      p82xm_g_verdict_done;
 
-/* Frame-window + verdict-not-done short-circuit. Every capture helper
- * checks this first (per req-review note E). */
+/* フレーム窓 + verdict 未完了の短絡判定。すべての捕捉ヘルパは
+ * 最初にこれを確認する (req-review 指摘 E に従う)。 */
 static inline int p82xm_in_window(void) {
     return (!p82xm_g_verdict_done
          && g_mx68k_frame_num >= 80
          && g_mx68k_frame_num <= 95);
 }
 
-/* CP-D′ RAM-flag address-set predicate (FDC-driver work bytes the boot path
- * uses to decide drive state / command status / deciding branch input). */
+/* CP-D′ RAM フラグのアドレス集合判定 (起動経路がドライブ状態 / コマンド状態 /
+ * 分岐判断の入力を決めるのに使う FDC ドライバのワークバイト)。 */
 static inline int p82xm_is_fdc_flag(uint32_t a) {
     return (a == 0x0009E1)
         || (a >= 0x0009C2 && a <= 0x0009C5)
@@ -19224,8 +19224,8 @@ static inline int p82xm_is_fdc_flag(uint32_t a) {
         || (a == 0x000933);
 }
 
-/* CP-A′ helper — DMAC ch0 byte writes. Records CSR/OCR/CCR with width=1 and
- * updates the OCR / CCR-STR latches. read-only: value is NOT modified. */
+/* CP-A′ ヘルパ — DMAC ch0 へのバイト書込。CSR/OCR/CCR を width=1 で記録し、
+ * OCR / CCR-STR の latch を更新する。read-only: 値は変更しない。 */
 static void p82xm_note_dmac_writeb(uint32_t addr, uint8_t value) {
     if (!p82xm_in_window()) return;
     uint32_t a = addr & 0x00FFFFFFu;
@@ -19240,9 +19240,9 @@ static void p82xm_note_dmac_writeb(uint32_t addr, uint8_t value) {
     }
 }
 
-/* CP-A′ helper — DMAC ch0 word writes. Captures MTC (0xE8400A, single word)
- * and reconstructs MAR from c68k's MOVE.L decomposition into two WriteW
- * (hi=0xE8400C, lo=0xE8400E). read-only: value is NOT modified. */
+/* CP-A′ ヘルパ — DMAC ch0 へのワード書込。MTC (0xE8400A、単一ワード) を捕捉し、
+ * c68k が MOVE.L を 2 回の WriteW に分解したもの
+ * (hi=0xE8400C, lo=0xE8400E) から MAR を再構成する。read-only: 値は変更しない。 */
 static void p82xm_note_dmac_writew(uint32_t addr, uint16_t value) {
     if (!p82xm_in_window()) return;
     uint32_t a = addr & 0x00FFFFFFu;
@@ -19265,24 +19265,24 @@ static void p82xm_note_dmac_writew(uint32_t addr, uint16_t value) {
     }
 }
 
-/* CP-B′ helper — $E94003 byte write: runs the ReadData (cmd 0x46) arm /
- * 8-byte param countdown state machine. Cmd 0x46 detection masks the low
- * 5 bits ((v & 0x1F) == 0x06) so MFM-variant cmd codes (0x46, 0x66, etc.)
- * all arm consistently per the uPD72065 spec. Re-arming on a later 0x46
- * resets the result latches so the LAST ReadData's result wins. */
+/* CP-B′ ヘルパ — $E94003 へのバイト書込: ReadData (cmd 0x46) の arm /
+ * 8 バイトパラメータのカウントダウン状態機械を駆動する。cmd 0x46 の検出は下位
+ * 5 ビットをマスクする ((v & 0x1F) == 0x06) ため、MFM 系のコマンドコード (0x46, 0x66 等)
+ * はすべて uPD72065 の仕様どおり一貫して arm される。後続の 0x46 で再 arm すると
+ * 結果 latch がリセットされ、最後の ReadData の結果が優先される。 */
 static void p82xm_note_e94003_write(uint8_t value) {
     if (!p82xm_in_window()) return;
     p82xm_g_e94003_writes_n++;
     if (p82xm_g_rd_param_remaining > 0) {
-        /* in the middle of a ReadData param block — countdown the 8 params */
+        /* ReadData のパラメータブロックの途中 — 8 個のパラメータをカウントダウン */
         p82xm_g_rd_param_remaining--;
         if (p82xm_g_rd_param_remaining == 0) {
             p82xm_g_rd_result_armed = 1;
             p82xm_g_rd_result_idx   = 0;
         }
     } else if ((value & 0x1Fu) == 0x06u) {
-        /* cmd 0x46 (MFM ReadData) detected — arm 8-byte param countdown.
-         * Re-arming resets the result latches so the latest ReadData wins. */
+        /* cmd 0x46 (MFM ReadData) を検出 — 8 バイトパラメータのカウントダウンを arm する。
+         * 再 arm で結果 latch をリセットし、最新の ReadData を優先させる。 */
         p82xm_g_rd_param_remaining = 8;
         p82xm_g_rd_result_armed    = 0;
         p82xm_g_rd_result_idx      = 0;
@@ -19294,25 +19294,25 @@ static void p82xm_note_e94003_write(uint8_t value) {
     }
 }
 
-/* CP-B′ / CP-C′ / CP-D′ unified helper for trace_Memory_ReadB. Dispatches
- * on address: $E94003 → CP-B′ ring + ReadData result latch; MAR-region
- * (when latched & plausible) → CP-C′ ring + first-16 snapshot; FDC-driver
- * flag set → CP-D′ RAM ring. value is the c68k-returned read value at the
- * call site — NOT modified here (read-only). */
+/* trace_Memory_ReadB 用の CP-B′ / CP-C′ / CP-D′ 統合ヘルパ。アドレスで
+ * 振り分ける: $E94003 → CP-B′ ring + ReadData 結果 latch、MAR 領域
+ * (latch 済みかつ妥当な場合) → CP-C′ ring + 先頭 16 バイトのスナップショット、FDC ドライバの
+ * フラグ集合 → CP-D′ RAM ring。value は呼出し箇所で c68k が返した read 値であり、
+ * ここでは変更しない (read-only)。 */
 static void p82xm_note_readb(uint32_t addr, uint8_t value) {
     if (!p82xm_in_window()) return;
     uint32_t a = addr & 0x00FFFFFFu;
 
-    /* CP-B′: $E94003 read ring + ReadData result phase latch */
+    /* CP-B′: $E94003 の read ring + ReadData リザルトフェーズの latch */
     if (a == 0xE94003u) {
         uint32_t ord = p82xm_g_e94003_reads_n++;
         p82xm_cpb_e94003[p82xm_cpb_e94003_idx % 64] = (struct p82xm_cpb_rec){
             (uint32_t)g_mx68k_frame_num, ord, value };
         p82xm_cpb_e94003_idx++;
         if (p82xm_g_rd_result_armed && p82xm_g_rd_result_idx < 7) {
-            /* Result phase of the LATEST ReadData: bytes 0,1,2 = ST0,ST1,ST2;
-             * bytes 3..6 = C,H,R,N. We latch ST0..ST2 (decisive for the
-             * M-RESULT-REJECTED branch) and ignore C/H/R/N here. */
+            /* 最新の ReadData のリザルトフェーズ: バイト 0,1,2 = ST0,ST1,ST2、
+             * バイト 3..6 = C,H,R,N。ST0..ST2 を latch し (M-RESULT-REJECTED 分岐の
+             * 決め手となる)、ここでは C/H/R/N は無視する。 */
             if (p82xm_g_rd_result_idx == 0) {
                 p82xm_result_st0 = value; p82xm_result_seen_mask |= 1u;
             } else if (p82xm_g_rd_result_idx == 1) {
@@ -19325,8 +19325,8 @@ static void p82xm_note_readb(uint32_t addr, uint8_t value) {
         }
     }
 
-    /* CP-C′: MAR-region buffer read observation. Plausibility guard against
-     * latch race / mangled MAR producing a high-address gate. */
+    /* CP-C′: MAR 領域バッファの read 観測。latch の競合や MAR の異常値によって
+     * 高位アドレスのゲートが生じるのを防ぐ妥当性ガード付き。 */
     if (p82xm_g_mar_captured != 0u && p82xm_g_mar_captured < 0xC00000u) {
         uint32_t base = p82xm_g_mar_captured;
         if (a >= base && a < (base + 0x400u)) {
@@ -19343,7 +19343,7 @@ static void p82xm_note_readb(uint32_t addr, uint8_t value) {
         }
     }
 
-    /* CP-D′: FDC-driver RAM-flag read ring */
+    /* CP-D′: FDC ドライバ RAM フラグの read ring */
     if (p82xm_is_fdc_flag(a)) {
         uint32_t pc = p82xh_guest_pc() & 0x00FFFFFFu;
         p82xm_cpd_ram[p82xm_cpd_ram_idx % 64] = (struct p82xm_cpd_ram_rec){
@@ -19353,10 +19353,10 @@ static void p82xm_note_readb(uint32_t addr, uint8_t value) {
     }
 }
 
-/* CP-D′ vec-0x60 fetch counter — armed only on the high-half ReadW at 0x180.
- * 68000 vector longword fetches go through ReadW twice (0x180 then 0x182).
- * Counting the high half once per vector fetch is sufficient. (P82-X-H
- * documents the pattern.) */
+/* CP-D′ vec-0x60 フェッチカウンタ — 0x180 の上位半分 ReadW でのみ arm される。
+ * 68000 のベクタロングワードのフェッチは ReadW を 2 回経由する (0x180 の次に 0x182)。
+ * ベクタフェッチ 1 回につき上位半分を 1 回数えれば十分。(このパターンは P82-X-H
+ * に記載。) */
 static void p82xm_note_readw_vec(uint32_t addr) {
     if (!p82xm_in_window()) return;
     if ((addr & 0x00FFFFFFu) == 0x180u) {
@@ -19364,13 +19364,13 @@ static void p82xm_note_readw_vec(uint32_t addr) {
     }
 }
 
-/* CP-D′ chunk-trail: one PC sample per existing 4096-cycle chunk boundary
- * (mirrors P82-X-L exactly — same outer chunk loop, no own cycle counter).
- * trap#14 handler band detection: 2 consecutive hits in [0xFF0628,0xFF063E]
- * confirm panic reach (P82-X-L pattern; discards transient artifacts). */
+/* CP-D′ chunk 軌跡: 既存の 4096 サイクル chunk 境界ごとに PC を 1 サンプル
+ * (P82-X-L と完全に同じ — 同じ外側 chunk ループを使い、独自のサイクルカウンタは持たない)。
+ * trap#14 ハンドラ帯の検出: [0xFF0628,0xFF063E] に 2 回連続で該当したら
+ * panic 到達と確定する (P82-X-L のパターン。一過性のノイズは捨てる)。 */
 static void p82xm_note_chunk(uint32_t pc_now_h) {
     if (!p82xm_in_window()) return;
-    if (p82xm_g_trap14_reached) return;  /* freeze trail after panic confirmed */
+    if (p82xm_g_trap14_reached) return;  /* panic 確定後は軌跡を凍結 */
     uint32_t gpc = pc_now_h & 0x00FFFFFFu;
     int i = (int)(p82xm_cpd_trail_n % P82XM_TRAIL_MAX);
     p82xm_cpd_trail[i] = gpc;
@@ -19389,9 +19389,9 @@ static void p82xm_note_chunk(uint32_t pc_now_h) {
     }
 }
 
-/* Per-run reset — called from m68000_reset_p47d_counters(). Zeroes all state
- * so each hard-reset starts clean and the verdict can re-arm. guest memory
- * and c68k state are NOT touched. */
+/* 実行ごとのリセット — m68000_reset_p47d_counters() から呼ばれる。全状態をゼロにし、
+ * ハードリセットのたびにクリーンな状態から始めて verdict を再 arm できるようにする。ゲストメモリ
+ * と c68k の状態には触れない。 */
 static void p82xm_reset(void) {
     p82xm_g_mar_captured       = 0;
     p82xm_g_mar_writes_n       = 0;
@@ -19419,7 +19419,7 @@ static void p82xm_reset(void) {
     p82xm_cpc_buf_n            = 0;
     p82xm_cpc_buf_idx          = 0;
     p82xm_bufrd_first16_mask   = 0;
-    /* bufrd_first16[] need not be cleared — gated by mask. */
+    /* bufrd_first16[] はクリア不要 — mask でゲートされている。 */
 
     p82xm_cpd_trail_n          = 0;
     p82xm_cpd_trail_wrap       = 0;
@@ -19442,17 +19442,17 @@ void p82xm_emit_verdict(void) {
     if (p82xm_g_verdict_done) return;
     p82xm_g_verdict_done = 1;
 
-    /* xfer_mode classification (per plan §7 / Mo-1 thresholds): ReadData
-     * result phase + Recalibrate/SIS/Seek/Read-ID result phases account for
-     * ~16-20 bytes minimum; PIO transfer of the 1024-byte boot sector would
-     * push reads past 1024. */
+    /* xfer_mode の分類 (plan §7 / Mo-1 の閾値に従う): ReadData の
+     * リザルトフェーズ + Recalibrate/SIS/Seek/Read-ID の各リザルトフェーズで
+     * 最低 ~16-20 バイトになる。1024 バイトのブートセクタを PIO 転送した場合は
+     * read 数が 1024 を超える。 */
     const char *xfer_mode;
     if      (p82xm_g_e94003_reads_n <= 128u) xfer_mode = "DMA";
     else if (p82xm_g_e94003_reads_n >= 512u) xfer_mode = "PIO";
     else                                     xfer_mode = "UNKNOWN";
 
-    /* bufrd_all_e5 derivation: 1 iff every observed CP-C′ buffer byte is
-     * 0xE5 or 0x00 AND we actually observed reads. */
+    /* bufrd_all_e5 の導出: 観測した CP-C′ バッファのバイトがすべて
+     * 0xE5 か 0x00 で、かつ実際に read を観測した場合に限り 1。 */
     int bufrd_all_e5 = 0;
     if (p82xm_cpc_buf_n > 0u) {
         int n = (int)((p82xm_cpc_buf_n < 48u) ? p82xm_cpc_buf_n : 48u);
@@ -19464,7 +19464,7 @@ void p82xm_emit_verdict(void) {
         bufrd_all_e5 = all_stale;
     }
 
-    /* Verdict ladder — mutually exclusive, evaluated in order (plan §4). */
+    /* verdict 判定段 — 相互排他、順に評価する (plan §4)。 */
     const char *cls;
     if (p82xm_g_mtc_writes_n == 0u
         || p82xm_g_mtc_captured == 0u
@@ -19475,12 +19475,12 @@ void p82xm_emit_verdict(void) {
                && (p82xm_g_mar_captured == 0u
                    || p82xm_g_mar_captured >= 0xC00000u
                    || (p82xm_g_mar_captured & 0x00FF00FFu) == 0u)) {
-        /* MAR mangled — 0 / high-bits / 0xXX00YY00 byte-swap pattern. */
+        /* MAR の異常値 — 0 / 上位ビット / 0xXX00YY00 のバイトスワップパターン。 */
         cls = "M-DMA-MISDIR";
     } else if (p82xm_cpc_buf_n > 0u && !bufrd_all_e5
                && p82xm_bufrd_first16_mask != 0u) {
-        /* Bytes delivered but content differs from expectation. Definitive
-         * swap discrimination is performed by the Build & Test Agent (plan §7). */
+        /* バイトは届いたが内容が期待値と異なる。スワップかどうかの
+         * 最終判別は Build & Test Agent が行う (plan §7)。 */
         cls = "M-CONTENT-BAD";
     } else if ((p82xm_result_st0 & 0x40u) != 0u
                || (p82xm_g_trap14_reached
@@ -19513,7 +19513,7 @@ void p82xm_emit_verdict(void) {
               p82xm_g_trap14_reached, (unsigned)p82xm_g_trap14_frame,
               (unsigned)p82xm_g_trap14_entry_pc);
 
-    /* CP-A′: DMAC ch0 writeB+writeW（modulo keep-last） */
+    /* CP-A′: DMAC ch0 の writeB+writeW（剰余巡回で最新分を保持） */
     {
         uint32_t cnt   = (p82xm_cpa_dmac_n < 24u) ? p82xm_cpa_dmac_n : 24u;
         uint32_t start = (p82xm_cpa_dmac_n <= 24u) ? 0u
@@ -19529,7 +19529,7 @@ void p82xm_emit_verdict(void) {
         }
     }
 
-    /* CP-B′: $E94003 read ring (modulo keep-last, ordinals preserved) */
+    /* CP-B′: $E94003 の read ring (剰余巡回で最新分を保持、通し番号は保存) */
     {
         uint32_t cnt   = (p82xm_g_e94003_reads_n < 64u)
                             ? p82xm_g_e94003_reads_n : 64u;
@@ -19545,7 +19545,7 @@ void p82xm_emit_verdict(void) {
         }
     }
 
-    /* CP-C′: first-16 buffer snapshot + ring (modulo keep-last) */
+    /* CP-C′: バッファ先頭 16 バイトのスナップショット + ring (剰余巡回で最新分を保持) */
     {
         debug_log("[P82XM-CPC] bufrd_first16=%02x %02x %02x %02x %02x %02x %02x %02x "
                   "%02x %02x %02x %02x %02x %02x %02x %02x mask=0x%04x "
@@ -19570,7 +19570,7 @@ void p82xm_emit_verdict(void) {
         }
     }
 
-    /* CP-D′: chunk-trail tail (last 8) + RAM-flag ring (modulo keep-last) */
+    /* CP-D′: chunk 軌跡の末尾 (最後の 8 件) + RAM フラグ ring (剰余巡回で最新分を保持) */
     {
         debug_log("[P82XM-CPD] trail_n=%u trail_wrap=%d (tail up to 8)\n",
                   p82xm_cpd_trail_n, p82xm_cpd_trail_wrap);
@@ -19605,8 +19605,8 @@ void p82xm_emit_verdict(void) {
 #endif /* P82XM_ENABLE */
 
 /* ====================================================================
- * P82-X-N: boot-sector DMA delivery proof / boot-stub execution tripwire
- *           (TYPE A — read-only, pure addition)
+ * P82-X-N: ブートセクタ DMA 転送の証明 / ブートスタブ実行の検知線
+ *           (TYPE A — read-only、純粋な追加)
  *
  * Plan: /tmp/mx68k_P82-X-N_plan.md §3. P82-X-M Test#136 verdict は probe
  * false positive で本サイクル撤回。本プローブは
@@ -19618,18 +19618,18 @@ void p82xm_emit_verdict(void) {
  * すべて #if P82XN_ENABLE で gate。MEM[] / c68k state / guest 復帰値は不変。
  * ==================================================================== */
 #if P82XN_ENABLE
-#include <stdio.h>   /* fopen/fread/fclose for CP-B */
+#include <stdio.h>   /* CP-B 用の fopen/fread/fclose */
 
-/* ---- CP-A state: MEM[0x2000..0x23FF] snapshots (4 slots) ---- */
+/* ---- CP-A の状態: MEM[0x2000..0x23FF] のスナップショット (4 スロット) ---- */
 static uint8_t  p82xn_cpa_snap[4][1024];
 static uint32_t p82xn_cpa_frame[4];
 static uint32_t p82xn_cpa_taken_mask;
-static uint32_t p82xn_cpa_offset_when[4];   /* informational: 0xFFFFFFFF=pre, else +N */
+static uint32_t p82xn_cpa_offset_when[4];   /* 参考情報: 0xFFFFFFFF=事前、それ以外は +N */
 
-/* ---- STR=1 observation (DMAC CCR bit7 trigger for slot scheduling) ---- */
-static uint32_t p82xn_str_seen_frame;       /* 0 = unseen, else (frame + 1) */
+/* ---- STR=1 の観測 (スロット予定を決める DMAC CCR bit7 のトリガ) ---- */
+static uint32_t p82xn_str_seen_frame;       /* 0 = 未観測、それ以外は (frame + 1) */
 
-/* ---- CP-B state: host .xdf reference + comparison results ---- */
+/* ---- CP-B の状態: ホスト側 .xdf の参照データ + 比較結果 ---- */
 static uint8_t  p82xn_xdf_first1024[1024];
 static int      p82xn_xdf_loaded;           /* 0=未, 1=成功, -1=失敗 */
 static uint32_t p82xn_cpb_match_n;
@@ -19637,7 +19637,7 @@ static uint32_t p82xn_cpb_mismatch_n;
 static uint32_t p82xn_cpb_first_mismatch_off;
 static uint8_t  p82xn_cpb_first_mismatch_xdf;
 static uint8_t  p82xn_cpb_first_mismatch_mem;
-static int      p82xn_cpb_compared;         /* 1 once compare run */
+static int      p82xn_cpb_compared;         /* 比較実行後は 1 */
 
 /* ---- CP-C state: IPLROM signature 領域 (0x2000..0x201F) read ring ---- */
 typedef struct {
@@ -19651,9 +19651,9 @@ typedef struct {
 static p82xn_cpc_ent p82xn_cpc_ring[P82XN_CPC_RING];
 static uint32_t      p82xn_cpc_head;
 static uint32_t      p82xn_cpc_total;
-static uint32_t      p82xn_cpc_xsig_read_mask;   /* bits for off 0x04..0x0B */
+static uint32_t      p82xn_cpc_xsig_read_mask;   /* off 0x04..0x0B 用のビット */
 
-/* ---- CP-D state: FDC-driver RAM-flag access ring ---- */
+/* ---- CP-D の状態: FDC ドライバ RAM フラグのアクセス ring ---- */
 typedef struct {
     uint32_t frame;
     uint32_t pc;
@@ -19667,7 +19667,7 @@ static p82xn_cpd_ent p82xn_cpd_ring[P82XN_CPD_RING];
 static uint32_t      p82xn_cpd_head;
 static uint32_t      p82xn_cpd_total;
 
-/* ---- CP-E state: chunk-PC sampling boot-stub tripwire ---- */
+/* ---- CP-E の状態: chunk-PC サンプリングによるブートスタブ検知線 ---- */
 typedef struct {
     uint32_t frame;
     uint32_t chunk_pc;
@@ -19676,14 +19676,14 @@ typedef struct {
 static p82xn_cpe_ent p82xn_cpe_ring[P82XN_CPE_RING];
 static uint32_t      p82xn_cpe_head;
 static uint32_t      p82xn_cpe_total;
-static uint32_t      p82xn_cpe_ifetch_n;            /* alias of total */
-static uint32_t      p82xn_cpe_first_chunk_frame;   /* 0xFFFFFFFF if none */
+static uint32_t      p82xn_cpe_ifetch_n;            /* total の別名 */
+static uint32_t      p82xn_cpe_first_chunk_frame;   /* 無ければ 0xFFFFFFFF */
 static uint32_t      p82xn_cpe_first_chunk_pc;
 
-/* ---- verdict one-shot guard (TU-local) ---- */
+/* ---- verdict の one-shot ガード (TU ローカル) ---- */
 static int p82xn_verdict_done;
 
-/* ---- FNV-1a 32-bit (boot-sector hash for ladder-1 N-DMA-EMPTY) ---- */
+/* ---- FNV-1a 32 ビット (判定段 1 N-DMA-EMPTY 用のブートセクタハッシュ) ---- */
 static uint32_t p82xn_fnv1a32(const uint8_t *p, size_t n) {
     uint32_t h = 0x811c9dc5u;
     for (size_t i = 0; i < n; ++i) {
@@ -19693,27 +19693,27 @@ static uint32_t p82xn_fnv1a32(const uint8_t *p, size_t n) {
     return h;
 }
 
-/* ---- CP-A snapshot taker (1 shot per slot, MEM byte-swap aware) ---- */
+/* ---- CP-A スナップショット取得 (スロットごとに 1 回、MEM のバイトスワップを考慮) ---- */
 static void p82xn_cpa_take(int slot) {
     if (!MEM) return;
     if (slot < 0 || slot >= 4) return;
     if (p82xn_cpa_taken_mask & (1u << slot)) return;
     for (uint32_t i = 0; i < 1024; ++i) {
-        /* MEM[] holds main RAM as host-native 16-bit words (rm_main convention:
-         * even guest byte = high byte of word, odd guest byte = low byte). On
-         * a LE host, MEM[even^1] = MEM[even+1] = low byte = guest odd byte,
-         * MEM[odd^1] = MEM[odd-1] = high byte = guest even byte. So
-         * MEM[(0x2000+i) ^ 1] yields the guest byte at guest address 0x2000+i.
-         * Same idiom as mem_wrap.c rm_main and EmulatorBridge.c p47_read*. */
+        /* MEM[] はメイン RAM をホストネイティブの 16 ビットワードで保持する (rm_main の規約:
+         * ゲストの偶数バイト = ワードの上位バイト、奇数バイト = 下位バイト)。
+         * LE ホストでは MEM[even^1] = MEM[even+1] = 下位バイト = ゲストの奇数バイト、
+         * MEM[odd^1] = MEM[odd-1] = 上位バイト = ゲストの偶数バイトとなる。よって
+         * MEM[(0x2000+i) ^ 1] でゲストアドレス 0x2000+i のゲストバイトが得られる。
+         * mem_wrap.c の rm_main や EmulatorBridge.c の p47_read* と同じ書き方。 */
         p82xn_cpa_snap[slot][i] = MEM[(0x002000u + i) ^ 1u];
     }
     p82xn_cpa_frame[slot]  = (uint32_t)g_mx68k_frame_num;
     p82xn_cpa_taken_mask  |= (1u << slot);
 }
 
-/* ---- STR=1 observers (byte path + word path, plan §3.3) ---- */
+/* ---- STR=1 の観測 (バイト経路 + ワード経路、plan §3.3) ---- */
 static inline void p82xn_observe_dmac_str_b(uint32_t addr, uint8_t v) {
-    /* CCR for DMAC ch0 is at $E84007 (byte) — bit7=STR start bit. */
+    /* DMAC ch0 の CCR は $E84007 (バイト) — bit7=STR 開始ビット。 */
     if ((addr & 0x00FFFFFFu) == 0x00E84007u
         && (v & 0x80u)
         && p82xn_str_seen_frame == 0u) {
@@ -19722,8 +19722,8 @@ static inline void p82xn_observe_dmac_str_b(uint32_t addr, uint8_t v) {
 }
 
 static inline void p82xn_observe_dmac_str_w(uint32_t addr, uint16_t v) {
-    /* word write is even-aligned; a word write to $E84006 places the low byte
-     * at $E84007. Catch IPLROM `move.w #$xx80,$E84006` -> STR=1. */
+    /* ワード書込は偶数境界。$E84006 へのワード書込では下位バイトが
+     * $E84007 に入る。IPLROM の `move.w #$xx80,$E84006` -> STR=1 を捕捉する。 */
     uint32_t a = addr & 0x00FFFFFFu;
     if ((a & ~1u) == 0x00E84006u
         && (v & 0x80u)
@@ -19732,7 +19732,7 @@ static inline void p82xn_observe_dmac_str_w(uint32_t addr, uint16_t v) {
     }
 }
 
-/* ---- CP-B: open host .xdf (drive 0), read first 1024 bytes ---- */
+/* ---- CP-B: ホスト側 .xdf (ドライブ 0) を開き、先頭 1024 バイトを読む ---- */
 static void p82xn_cpb_load_xdf(void) {
     if (p82xn_xdf_loaded != 0) return;
     const char *path = mx68k_fdd_get_path(0);
@@ -19744,12 +19744,12 @@ static void p82xn_cpb_load_xdf(void) {
     p82xn_xdf_loaded = (n == 1024u) ? 1 : -1;
 }
 
-/* ---- CP-B: byte-for-byte compare against CP-A slot 1 (post-STR snapshot) ---- */
+/* ---- CP-B: CP-A スロット 1 (STR 後のスナップショット) とバイト単位で比較 ---- */
 static void p82xn_cpb_compare(void) {
     if (p82xn_cpb_compared) return;
     p82xn_cpb_first_mismatch_off = 0xFFFFFFFFu;
     if (p82xn_xdf_loaded != 1) return;
-    if (!(p82xn_cpa_taken_mask & 0x2u)) return;   /* slot 1 required */
+    if (!(p82xn_cpa_taken_mask & 0x2u)) return;   /* スロット 1 が必須 */
     p82xn_cpb_compared = 1;
     for (uint32_t i = 0; i < 1024; ++i) {
         if (p82xn_cpa_snap[1][i] == p82xn_xdf_first1024[i]) {
@@ -19765,9 +19765,9 @@ static void p82xn_cpb_compare(void) {
     }
 }
 
-/* ---- per-frame tick: schedule snapshots based on STR=1 boot event ---- */
+/* ---- フレーム毎の tick: STR=1 の起動イベントを基準にスナップショットを予定する ---- */
 void p82xn_cpa_tick(void) {
-    /* slot 0: pre-DMA failsafe at frame 5 (informational anchor) */
+    /* スロット 0: frame 5 での DMA 前の保険 (参考用の基準点) */
     if (g_mx68k_frame_num == 5 && !(p82xn_cpa_taken_mask & 0x1u)) {
         p82xn_cpa_take(0);
         p82xn_cpa_offset_when[0] = 0xFFFFFFFFu;
@@ -19779,7 +19779,7 @@ void p82xn_cpa_tick(void) {
     if (off == 2u && !(p82xn_cpa_taken_mask & 0x2u)) {
         p82xn_cpa_take(1);
         p82xn_cpa_offset_when[1] = 2u;
-        /* CP-B is driven off slot 1: load xdf once and compare immediately. */
+        /* CP-B はスロット 1 を起点に動く: xdf を一度読み込み即座に比較する。 */
         p82xn_cpb_load_xdf();
         p82xn_cpb_compare();
     } else if (off == 4u && !(p82xn_cpa_taken_mask & 0x4u)) {
@@ -19791,7 +19791,7 @@ void p82xn_cpa_tick(void) {
     }
 }
 
-/* ---- CP-C: record read into IPLROM signature window 0x2000..0x201F ---- */
+/* ---- CP-C: IPLROM シグネチャ窓 0x2000..0x201F への read を記録 ---- */
 static inline void p82xn_cpc_record(uint32_t addr, uint16_t width, uint16_t val) {
     uint32_t a = addr & 0x00FFFFFFu;
     if ((a & 0xFFFFE0u) != 0x002000u) return;
@@ -19815,7 +19815,7 @@ static inline void p82xn_cpc_record(uint32_t addr, uint16_t width, uint16_t val)
     }
 }
 
-/* ---- CP-D: target-address filter (FDC-driver work area) ---- */
+/* ---- CP-D: 対象アドレスのフィルタ (FDC ドライバのワーク領域) ---- */
 static inline int p82xn_cpd_is_target(uint32_t addr) {
     uint32_t a = addr & 0x00FFFFFFu;
     return (a == 0x000970u || a == 0x000971u
@@ -19842,9 +19842,9 @@ static inline void p82xn_cpd_record(uint32_t addr, uint16_t width,
     p82xn_cpd_total++;
 }
 
-/* ---- CP-E: chunk-PC sampling. Called from chunk-trail site adjacent to
- * p82xm_note_chunk (m68000_bridge.c chunk loop). Counts samples whose PC
- * lies in [0x2000, 0x2080). ---- */
+/* ---- CP-E: chunk-PC サンプリング。m68000_bridge.c の chunk ループにある
+ * p82xm_note_chunk に隣接した chunk 軌跡の箇所から呼ばれる。PC が
+ * [0x2000, 0x2080) に入るサンプルを数える。 ---- */
 static inline void p82xn_cpe_note_chunk(uint32_t pc_now_h) {
     uint32_t gpc = pc_now_h & 0x00FFFFFFu;
     if (gpc < 0x002000u || gpc >= 0x002080u) return;
@@ -19860,7 +19860,7 @@ static inline void p82xn_cpe_note_chunk(uint32_t pc_now_h) {
     p82xn_cpe_head = (p82xn_cpe_head + 1u) % P82XN_CPE_RING;
 }
 
-/* ---- Per-run reset, called from m68000_reset_p47d_counters() ---- */
+/* ---- 実行ごとのリセット。m68000_reset_p47d_counters() から呼ばれる ---- */
 static void p82xn_reset(void) {
     p82xn_str_seen_frame = 0;
 
@@ -19894,11 +19894,11 @@ static void p82xn_reset(void) {
     p82xn_verdict_done = 0;
 }
 
-/* ---- verdict classifier (mutually exclusive, evaluated top-down) ---- */
+/* ---- verdict 分類器 (相互排他、上から順に評価) ---- */
 static const char* p82xn_classify(void) {
-    /* ladder 1: N-DMA-EMPTY — slot 1 (post-STR snapshot) is fully zero.
-     * Uses head 32-byte zero check + FNV-1a 1024-byte hash equality with
-     * zeros-hash (avoids weak collision under naive XOR). */
+    /* 判定段 1: N-DMA-EMPTY — スロット 1 (STR 後のスナップショット) が全てゼロ。
+     * 先頭 32 バイトのゼロ確認 + 1024 バイトの FNV-1a ハッシュがゼロ列のハッシュと
+     * 一致するかで判定する (単純な XOR による弱い衝突を避ける)。 */
     if (p82xn_cpa_taken_mask & 0x2u) {
         int head32_zero = 1;
         for (int i = 0; i < 32; ++i) {
@@ -19925,12 +19925,12 @@ static const char* p82xn_classify(void) {
     return "N-OTHER";
 }
 
-/* ---- VERDICT one-shot emit ---- */
+/* ---- VERDICT の one-shot 出力 ---- */
 void p82xn_emit_verdict(void) {
     if (p82xn_verdict_done) return;
     p82xn_verdict_done = 1;
 
-    /* Compute per-slot hashes for the ANNOT row. */
+    /* ANNOT 行用にスロットごとのハッシュを計算する。 */
     uint32_t h[4] = {0u, 0u, 0u, 0u};
     for (int s = 0; s < 4; ++s) {
         if (p82xn_cpa_taken_mask & (1u << s)) {
@@ -19971,7 +19971,7 @@ void p82xn_emit_verdict(void) {
               (unsigned)p82xn_cpe_first_chunk_frame,
               (unsigned)p82xn_cpe_first_chunk_pc);
 
-    /* CP-A hex dumps: first 32 bytes per taken slot (2 rows of 16). */
+    /* CP-A の 16 進ダンプ: 取得済みスロットごとに先頭 32 バイト (16 バイト × 2 行)。 */
     for (int s = 0; s < 4; ++s) {
         if (!(p82xn_cpa_taken_mask & (1u << s))) continue;
         const uint8_t *b = p82xn_cpa_snap[s];
@@ -19989,7 +19989,7 @@ void p82xn_emit_verdict(void) {
                   b[24], b[25], b[26], b[27], b[28], b[29], b[30], b[31]);
     }
 
-    /* CP-B diff summary. */
+    /* CP-B の差分要約。 */
     if (p82xn_xdf_loaded == 1) {
         debug_log("[P82XN-CPB] xdf_loaded=1 match_n=%u mismatch_n=%u "
                   "first_mismatch_off=0x%x xdf=0x%02x mem=0x%02x\n",
@@ -20002,7 +20002,7 @@ void p82xn_emit_verdict(void) {
                   p82xn_xdf_loaded);
     }
 
-    /* CP-C ring dump (up to last P82XN_CPC_RING records, in head order). */
+    /* CP-C の ring ダンプ (直近 P82XN_CPC_RING 件まで、head 順)。 */
     {
         uint32_t cnt = (p82xn_cpc_total < P82XN_CPC_RING)
                             ? p82xn_cpc_total : P82XN_CPC_RING;
@@ -20024,7 +20024,7 @@ void p82xn_emit_verdict(void) {
         }
     }
 
-    /* CP-D ring dump. */
+    /* CP-D の ring ダンプ。 */
     {
         uint32_t cnt = (p82xn_cpd_total < P82XN_CPD_RING)
                             ? p82xn_cpd_total : P82XN_CPD_RING;
@@ -20043,7 +20043,7 @@ void p82xn_emit_verdict(void) {
         }
     }
 
-    /* CP-E ring dump. */
+    /* CP-E の ring ダンプ。 */
     {
         uint32_t cnt = (p82xn_cpe_total < P82XN_CPE_RING)
                             ? p82xn_cpe_total : P82XN_CPE_RING;
@@ -20062,7 +20062,7 @@ void p82xn_emit_verdict(void) {
 #endif /* P82XN_ENABLE */
 
 /* ====================================================================
- * P82-X-O diagnostic probe (TYPE A — read-only, pure addition)
+ * P82-X-O 診断プローブ (TYPE A — read-only、純粋な追加)
  * IPLROM 0xFF0628 panic 経路の例外配信 vec / 直前メモリアクセス ピンポイント
  * 診断プローブ。
  *   CP-O-1: ベクタテーブル longword フェッチ (handler==0xFF05E4 で one-shot latch)
@@ -20077,20 +20077,20 @@ void p82xn_emit_verdict(void) {
 
 #define P82XO_FF05E4   0x00FF05E4u
 
-/* ---- CP-O-1 state: vector fetch latch (one-shot) ---- */
+/* ---- CP-O-1 の状態: ベクタフェッチの latch (one-shot) ---- */
 typedef struct {
     uint32_t frame;
     uint32_t vec_num;          /* addr / 4 */
     uint32_t vec_addr;         /* テーブル内アドレス (== vec_num*4) */
     uint32_t handler;          /* MEM から直読した longword (FF05E4 のはず) */
     uint32_t a7;               /* 例外配信時の SSP */
-    uint32_t stack_fr0;        /* longword at A7 (group 1/2: SR<<16|PChi) */
-    uint32_t stacked_pc;       /* longword at A7+2 (group 1/2: PC) */
-    uint32_t stack_fr2;        /* longword at A7+8 (group 0: SR<<16|PChi) */
-    uint32_t stack_fr3;        /* longword at A7+10 (group 0: PC) */
-    uint32_t stack_fr_access;  /* longword at A7+2 (group 0: access addr) */
-    uint16_t stack_fr_funccode;/* word at A7 (group 0: func code) */
-    uint16_t stack_fr_iregs;   /* word at A7+6 (group 0: instr reg) */
+    uint32_t stack_fr0;        /* A7 位置のロングワード (group 1/2: SR<<16|PChi) */
+    uint32_t stacked_pc;       /* A7+2 位置のロングワード (group 1/2: PC) */
+    uint32_t stack_fr2;        /* A7+8 位置のロングワード (group 0: SR<<16|PChi) */
+    uint32_t stack_fr3;        /* A7+10 位置のロングワード (group 0: PC) */
+    uint32_t stack_fr_access;  /* A7+2 位置のロングワード (group 0: アクセスアドレス) */
+    uint16_t stack_fr_funccode;/* A7 位置のワード (group 0: ファンクションコード) */
+    uint16_t stack_fr_iregs;   /* A7+6 位置のワード (group 0: 命令レジスタ) */
     uint32_t d7;
     uint32_t d0;
     uint32_t a6;
@@ -20098,24 +20098,24 @@ typedef struct {
 static p82xo_latch_t p82xo_latch;
 static uint8_t       p82xo_latched;   /* one-shot */
 
-/* ---- CP-O-2 state: vector fetch wide ring (filter 無) ---- */
+/* ---- CP-O-2 の状態: ベクタフェッチの広域 ring (filter 無) ---- */
 typedef struct {
     uint32_t frame;
     uint32_t vec_num;
     uint32_t handler;
-    uint32_t pc_at_fetch;    /* C68K.PC - C68K.BasePC at fetch time */
+    uint32_t pc_at_fetch;    /* フェッチ時点の C68K.PC - C68K.BasePC */
 } p82xo_cpo2_ent;
 #define P82XO_CPO2_RING 64
 static p82xo_cpo2_ent p82xo_cpo2_ring[P82XO_CPO2_RING];
 static uint32_t       p82xo_cpo2_head;
 static uint32_t       p82xo_cpo2_total;
 
-/* ---- CP-O-3 state: vector table snapshot at 3 anchors ---- */
+/* ---- CP-O-3 の状態: 3 つの基準点でのベクタテーブルスナップショット ---- */
 #define P82XO_CPO3_TARGETS_N 28
 static const uint32_t p82xo_cpo3_targets[P82XO_CPO3_TARGETS_N] = {
-    /* vec 2 (bus err), vec 3 (addr err), vec 4 (illegal), vec 5 (zerodiv),
-     * vec 6 (CHK), vec 7 (TRAPV), vec 8 (priv), vec 9 (trace), vec 10/11
-     * (line-A/F), vec 24 (spurious), vec 25-31 (autovec L1-L7 IRQ),
+    /* vec 2 (バスエラー)、vec 3 (アドレスエラー)、vec 4 (不当命令)、vec 5 (ゼロ除算)、
+     * vec 6 (CHK)、vec 7 (TRAPV)、vec 8 (特権違反)、vec 9 (トレース)、vec 10/11
+     * (line-A/F)、vec 24 (スプリアス)、vec 25-31 (オートベクタ L1-L7 IRQ)、
      * vec 0x40-0x46 (MFP), vec 0x60-0x62 (FDC/DMAC) */
     2u, 3u, 4u, 5u, 6u, 7u, 8u, 9u, 10u, 11u,
     24u, 25u, 26u, 27u, 28u, 29u, 30u, 31u,
@@ -20145,7 +20145,7 @@ static uint32_t       p82xo_cpo4_last_frame_b;
 /* ---- CP-O-5 state: 直前メモリアクセス ring (fault addr 候補帯のみ) ---- */
 typedef struct {
     uint32_t frame;
-    uint32_t pc;            /* C68K.PC - BasePC at access */
+    uint32_t pc;            /* アクセス時点の C68K.PC - BasePC */
     uint32_t addr;
     uint16_t width;         /* 1=B, 2=W */
     uint16_t val;
@@ -20155,17 +20155,17 @@ typedef struct {
 static p82xo_cpo5_ent p82xo_cpo5_ring[P82XO_CPO5_RING];
 static uint32_t       p82xo_cpo5_head;
 static uint32_t       p82xo_cpo5_total;
-static uint8_t        p82xo_cpo5_frozen;        /* 1 after CP-O-1 latch */
+static uint8_t        p82xo_cpo5_frozen;        /* CP-O-1 の latch 後は 1 */
 
-/* ---- one-shot verdict guard (TU-local — does NOT cross translation units) ---- */
+/* ---- one-shot の verdict ガード (TU ローカル — 翻訳単位をまたがない) ---- */
 static int p82xo_verdict_done;
 
-/* ---- CP-O-3 forward decl (called from p82xo_on_vector_fetch) ---- */
+/* ---- CP-O-3 の前方宣言 (p82xo_on_vector_fetch から呼ばれる) ---- */
 static void p82xo_cpo3_take(int anchor);
 
-/* ---- CP-O-5 in-window classifier ---- */
+/* ---- CP-O-5 の窓内分類器 ---- */
 static inline int p82xo_cpo5_in_window(uint32_t a) {
-    if (a >= 0x000C80u && a < 0x000CB0u) return 1;     /* RAM shadow */
+    if (a >= 0x000C80u && a < 0x000CB0u) return 1;     /* RAM 上の写し */
     if (a >= 0xE84000u && a <= 0xE8403Fu) return 2;    /* DMAC ch0 */
     if (a == 0xE94001u || a == 0xE94003u) return 3;    /* FDC */
     return 0;
@@ -20182,10 +20182,10 @@ static void p82xo_on_vector_fetch(uint32_t addr) {
     if (p82xo_latched) return;
     if ((addr & 3u) != 0u) return;           /* longword 高位ワードのみ */
     if (addr >= 0x400u) return;              /* ベクタテーブル外 */
-    if ((uint32_t)g_mx68k_frame_num < P82XO_ARM_FRAME) return;  /* arm gate */
+    if ((uint32_t)g_mx68k_frame_num < P82XO_ARM_FRAME) return;  /* arm のゲート */
     uint32_t handler = MEM ? p47_read_long_le(addr) : 0u;
     if ((handler & 0x00FFFFFFu) != (P82XO_FF05E4 & 0x00FFFFFFu)) return;
-    /* latch one-shot — fields populated before flag set */
+    /* one-shot で latch — フラグを立てる前に各フィールドを格納 */
     p82xo_latch.frame    = (uint32_t)g_mx68k_frame_num;
     p82xo_latch.vec_num  = addr / 4u;
     p82xo_latch.vec_addr = addr;
@@ -20195,10 +20195,10 @@ static void p82xo_on_vector_fetch(uint32_t addr) {
     p82xo_latch.d7 = (uint32_t)C68k_Get_DReg(&C68K, 7);
     p82xo_latch.d0 = (uint32_t)C68k_Get_DReg(&C68K, 0);
     p82xo_latch.a6 = (uint32_t)C68k_Get_AReg(&C68K, 6);
-    /* group 1/2 stack frame (6 bytes): SR(2) + PC(4) */
+    /* group 1/2 のスタックフレーム (6 バイト): SR(2) + PC(4) */
     p82xo_latch.stack_fr0  = MEM ? p47_read_long_le(a7)      : 0xFFFFFFFFu;
     p82xo_latch.stacked_pc = MEM ? p47_read_long_le(a7 + 2u) : 0xFFFFFFFFu;
-    /* group 0 stack frame (14 bytes): FC(2) + accessAddr(4) + IR(2) + SR(2) + PC(4)
+    /* group 0 のスタックフレーム (14 バイト): FC(2) + accessAddr(4) + IR(2) + SR(2) + PC(4)
      * vec 2/3 のみ意味あり; 他 vec_num では garbage を保持するが verdict ladder
      * では参照しない。 */
     p82xo_latch.stack_fr_funccode = MEM ? (uint16_t)(p47_read_long_le(a7) >> 16)        : 0;
@@ -20213,7 +20213,7 @@ static void p82xo_on_vector_fetch(uint32_t addr) {
     p82xo_cpo5_frozen = 1u;
 }
 
-/* ---- CP-O-2: vector fetch wide ring (filter 無、補強) ---- */
+/* ---- CP-O-2: ベクタフェッチの広域 ring (filter 無、補強) ---- */
 static inline void p82xo_cpo2_record(uint32_t addr) {
     if ((addr & 3u) != 0u) return;
     if (addr >= 0x400u) return;
@@ -20226,7 +20226,7 @@ static inline void p82xo_cpo2_record(uint32_t addr) {
     p82xo_cpo2_total++;
 }
 
-/* ---- CP-O-3: vector table snapshot helper (anchor 0/1/2 one-shot each) ---- */
+/* ---- CP-O-3: ベクタテーブルのスナップショットヘルパ (基準点 0/1/2 それぞれ one-shot) ---- */
 static void p82xo_cpo3_take(int anchor) {
     if (anchor < 0 || anchor >= 3) return;
     if (p82xo_cpo3_snap[anchor].taken) return;
@@ -20276,14 +20276,14 @@ static inline void p82xo_cpo5_record(uint32_t addr, uint16_t width,
     p82xo_cpo5_total++;
 }
 
-/* ---- p82xo_tick: per-frame anchor 0/1 driver (anchor 2 in on_vector_fetch) ---- */
+/* ---- p82xo_tick: フレーム毎に基準点 0/1 を駆動 (基準点 2 は on_vector_fetch 内) ---- */
 void p82xo_tick(void) {
     if (g_mx68k_frame_num == 5)  p82xo_cpo3_take(0);
     if (g_mx68k_frame_num == 30) p82xo_cpo3_take(1);
     /* anchor 2 は p82xo_on_vector_fetch 内で latch 同 frame に同期 take */
 }
 
-/* ---- classify: verdict ladder (mutually exclusive, evaluated top-down) ---- */
+/* ---- classify: verdict 判定段 (相互排他、上から順に評価) ---- */
 static const char* p82xo_classify(uint32_t *last_addr_out, int *last_kind_out) {
     *last_addr_out = 0u;
     *last_kind_out = 0;
@@ -20307,7 +20307,7 @@ static const char* p82xo_classify(uint32_t *last_addr_out, int *last_kind_out) {
     return NULL;   /* emit 側で snprintf "O-OTHER-VEC-0xNN" 組み立て */
 }
 
-/* ---- emit_verdict: ring dump + verdict line (one-shot via p82xo_verdict_done) ---- */
+/* ---- emit_verdict: ring ダンプ + verdict 行 (p82xo_verdict_done による one-shot) ---- */
 void p82xo_emit_verdict(void) {
     if (p82xo_verdict_done) return;
     p82xo_verdict_done = 1;
@@ -20362,7 +20362,7 @@ void p82xo_emit_verdict(void) {
               (unsigned)p82xo_cpo5_total, (unsigned)p82xo_cpo5_frozen,
               (unsigned)last_addr, last_kind);
 
-    /* CP-O-2 ring dump (chronological) */
+    /* CP-O-2 の ring ダンプ (時系列順) */
     {
         uint32_t cnt = (p82xo_cpo2_total < (uint32_t)P82XO_CPO2_RING)
                           ? p82xo_cpo2_total : (uint32_t)P82XO_CPO2_RING;
@@ -20379,7 +20379,7 @@ void p82xo_emit_verdict(void) {
         }
     }
 
-    /* CP-O-3 snapshot dump (3 anchors × 28 vec) */
+    /* CP-O-3 のスナップショットダンプ (基準点 3 つ × 28 ベクタ) */
     for (int a = 0; a < 3; ++a) {
         debug_log("[P82XO-CPO3] anchor=%d frame=%u taken=%u\n",
                   a, (unsigned)p82xo_cpo3_snap[a].frame,
@@ -20392,7 +20392,7 @@ void p82xo_emit_verdict(void) {
         }
     }
 
-    /* CP-O-4 ring dump */
+    /* CP-O-4 の ring ダンプ */
     {
         uint32_t cnt = (p82xo_cpo4_total_a + p82xo_cpo4_total_b
                        < (uint32_t)P82XO_CPO4_RING)
@@ -20410,7 +20410,7 @@ void p82xo_emit_verdict(void) {
         }
     }
 
-    /* CP-O-5 ring dump (chronological) */
+    /* CP-O-5 の ring ダンプ (時系列順) */
     {
         uint32_t cnt = (p82xo_cpo5_total < (uint32_t)P82XO_CPO5_RING)
                           ? p82xo_cpo5_total : (uint32_t)P82XO_CPO5_RING;
@@ -20430,7 +20430,7 @@ void p82xo_emit_verdict(void) {
     debug_log("[P82XO-VERDICT] end\n");
 }
 
-/* ---- p82xo_reset: per-run cold-reset (called from m68000_reset_p47d_counters) ---- */
+/* ---- p82xo_reset: 実行ごとのコールドリセット (m68000_reset_p47d_counters から呼ばれる) ---- */
 static void p82xo_reset(void) {
     memset(&p82xo_latch, 0, sizeof(p82xo_latch));
     p82xo_latched = 0u;
@@ -20454,7 +20454,7 @@ static void p82xo_reset(void) {
 #endif /* P82XO_ENABLE */
 
 /* ====================================================================
- * P82-X-P diagnostic probe (TYPE A — read-only, pure addition)
+ * P82-X-P 診断プローブ (TYPE A — read-only、純粋な追加)
  *   BPC-drift artifact vs HUMAN.SYS-load-misdirection 切り分け +
  *   真の panic 経路直接 latch。
  *   CP-P-A: BasePC drift 直接検証 (vec fetch 間 BasePC tracker, enum 3 値)
@@ -20474,7 +20474,7 @@ extern int32_t BusErrHandling;
 
 #define P82XP_FF05E4   0x00FF05E4u
 
-/* ---- CP-P-A state: vec fetch 経路 BasePC drift detection ---- */
+/* ---- CP-P-A の状態: vec fetch 経路 BasePC drift detection ---- */
 typedef enum {
     P82XP_DRIFT_NONE       = 0,
     P82XP_DRIFT_TRANSIENT  = 1,
@@ -20485,10 +20485,10 @@ typedef struct {
     uint32_t  frame;
     uint32_t  vec_num;             /* addr / 4 */
     uint32_t  handler;             /* p47_read_long_le(addr) */
-    uint64_t  cur_basepc;          /* (uint64_t)(uintptr_t)C68K.BasePC at fetch */
-    uint64_t  prev_basepc;         /* s_p82xp_last_basepc_at_vec value */
-    uint64_t  raw_pc;              /* (uint64_t)(uintptr_t)C68K.PC at fetch */
-    uint64_t  basepc_at_call;      /* duplicate of cur for cross-check (3-way) */
+    uint64_t  cur_basepc;          /* フェッチ時点の (uint64_t)(uintptr_t)C68K.BasePC */
+    uint64_t  prev_basepc;         /* s_p82xp_last_basepc_at_vec の値 */
+    uint64_t  raw_pc;              /* フェッチ時点の (uint64_t)(uintptr_t)C68K.PC */
+    uint64_t  basepc_at_call;      /* 照合用の cur の複製 (3 者照合) */
     uint32_t  pc_log;              /* (uint32_t)(PC - BasePC) & 0x00FFFFFF */
     uint8_t   drift_state;         /* p82xp_drift_state_t */
     uint8_t   prev_was_set;        /* s_p82xp_last_basepc_at_vec != 0 ? 1 : 0 */
@@ -20497,27 +20497,27 @@ typedef struct {
 static p82xp_cppa_ent p82xp_cppa_ring[P82XP_CPPA_RING];
 static uint32_t       p82xp_cppa_head;
 static uint32_t       p82xp_cppa_total;
-/* M-1: P82XP-private vec-fetch BasePC tracker (NOT shared with P57A) */
+/* M-1: P82XP 専用の vec フェッチ BasePC tracker (P57A とは共有しない) */
 static uint64_t       s_p82xp_last_basepc_at_vec;
-/* Codex #1 sequence-of-2 tracker (Round 3 enum drift detection) */
+/* Codex #1 の 2 連続 tracker (Round 3 の enum による drift 検出) */
 static uint8_t        s_p82xp_prev_drift_state;
 
 /* ---- CP-P-B state: c68k group-0 frame 実装有無 meta-probe (one-shot latch) ---- */
 typedef struct {
     uint32_t  frame;
-    uint32_t  vec_num;             /* 2 or 3 only */
+    uint32_t  vec_num;             /* 2 または 3 のみ */
     uint32_t  vec_addr;            /* 0x008 or 0x00C */
     uint32_t  handler;             /* p47_read_long_le(addr) */
     uint32_t  a7;                  /* C68k_Get_AReg(&C68K, 7) — frame 先頭 */
     uint64_t  cur_basepc;
     uint64_t  prev_basepc;
-    /* Round 3 meta-probe: 14-byte raw dump at a7 (group-0 frame layout *if* impl):
+    /* Round 3 メタプローブ: a7 位置の 14 バイト生ダンプ (実装されて *いれば* group-0 フレーム配置):
      *   a7+0  FC (word)
      *   a7+2  accessAddr (long)
      *   a7+6  IR (word)
      *   a7+8  SR (word)
      *   a7+10 PC (long)
-     * Decoded fields trusted ONLY when pattern_verdict == PRESENT (1). */
+     * デコード済みフィールドは pattern_verdict == PRESENT (1) の場合に限り信頼する。 */
     uint8_t   raw14[14];
     uint16_t  funccode;            /* raw14[0..1] BE */
     uint32_t  access_addr;         /* raw14[2..5] BE */
@@ -20525,7 +20525,7 @@ typedef struct {
     uint16_t  sr;                  /* raw14[8..9] BE */
     uint32_t  stacked_pc;          /* raw14[10..13] BE */
     uint8_t   ssp_in_range;        /* a7 ∈ [0x000400, 0x002000] ? */
-    uint8_t   drift_state;         /* enum at latch time */
+    uint8_t   drift_state;         /* latch 時点の enum */
     uint8_t   trap14_match;        /* stacked_pc == 0xFF062A ? */
     uint8_t   pattern_verdict;     /* 0=ABSENT, 1=PRESENT, 2=AMBIGUOUS */
 } p82xp_cppb_latch_t;
@@ -20543,7 +20543,7 @@ static uint32_t       p82xp_cppc_head;
 static uint32_t       p82xp_cppc_total;
 static uint32_t       p82xp_cppc_last_frame;
 
-/* ---- CP-P-D D-1 state: post-access trace ring ---- */
+/* ---- CP-P-D D-1 の状態: アクセス後トレース ring ---- */
 typedef struct {
     uint32_t  frame;
     uint32_t  pc_log;
@@ -20561,7 +20561,7 @@ static uint32_t       p82xp_cppd_head;
 static uint32_t       p82xp_cppd_total;
 static int32_t        p82xp_cppd_last_seen_flag;
 
-/* ---- CP-P-D D-2 state: per-frame BusErrHandling sticky-edge ring ---- */
+/* ---- CP-P-D D-2 の状態: フレーム毎の BusErrHandling sticky エッジ ring ---- */
 typedef struct {
     uint32_t  frame;
     int32_t   buserr_flag;
@@ -20573,7 +20573,7 @@ static uint32_t              p82xp_cppd_perframe_head;
 static uint32_t              p82xp_cppd_perframe_total;
 static int32_t               s_p82xp_cppd_pf_last_handling;
 
-/* ---- CP-P-D D-3 state: BusErrHandling sticky-edge ring at trace callbacks
+/* ---- CP-P-D D-3 の状態: トレースコールバックでの BusErrHandling sticky エッジ ring
  *      (Round 3 / Codex #3: DMAC/SCSI BusErrFlag clear-race 回避 — edge を
  *       BusErrHandling 側で sample すれば clear race の影響を受けない). */
 typedef struct {
@@ -20590,7 +20590,7 @@ static uint32_t        p82xp_cppd_d3_head;
 static uint32_t        p82xp_cppd_d3_total;
 static int32_t         s_p82xp_cppd_d3_last_handling;
 
-/* ---- CP-P-E E-1 state: A7 sampling at chunk boundary ---- */
+/* ---- CP-P-E E-1 の状態: chunk 境界での A7 サンプリング ---- */
 typedef struct {
     uint32_t frame;
     uint32_t chunk_pc;
@@ -20601,7 +20601,7 @@ static p82xp_cppe_a7_ent p82xp_cppe_a7_ring[P82XP_CPPE_A7_RING];
 static uint32_t          p82xp_cppe_a7_head;
 static uint32_t          p82xp_cppe_a7_total;
 
-/* ---- CP-P-E E-2 state: 0x7A region write watch ---- */
+/* ---- CP-P-E E-2 の状態: 0x7A 領域への書込監視 ---- */
 typedef struct {
     uint32_t frame;
     uint32_t pc_log;
@@ -20614,7 +20614,7 @@ static p82xp_cppe_7awr_ent p82xp_cppe_7awr_ring[P82XP_CPPE_7AWR_RING];
 static uint32_t            p82xp_cppe_7awr_head;
 static uint32_t            p82xp_cppe_7awr_total;
 
-/* ---- CP-P-E E-3 state: trap#15 (vec 0x2F = vec_addr 0xBC) IOCS B_READ ledger ---- */
+/* ---- CP-P-E E-3 の状態: trap#15 (vec 0x2F = vec_addr 0xBC) の IOCS B_READ 台帳 ---- */
 typedef struct {
     uint32_t frame;
     uint32_t handler;
@@ -20626,12 +20626,12 @@ static p82xp_cppe_trap15_ent p82xp_cppe_trap15_ring[P82XP_CPPE_TRAP15_RING];
 static uint32_t              p82xp_cppe_trap15_head;
 static uint32_t              p82xp_cppe_trap15_total;
 
-/* ---- one-shot verdict guard (TU-local) ---- */
+/* ---- one-shot の verdict ガード (TU ローカル) ---- */
 static int p82xp_verdict_done;
 
-/* ---- byte read helper: bounds-checked, byte-swap-aware (MEM[addr^1]) ----
- *   wm_main stores: MEM[addr^1] = val (host LE16 swizzle, m68000_bridge.c:8881
- *   comment 確認). Therefore a guest byte at `addr` lives at MEM[addr ^ 1].
+/* ---- バイト read ヘルパ: 範囲チェック付き、バイトスワップ考慮 (MEM[addr^1]) ----
+ *   wm_main の格納: MEM[addr^1] = val (ホスト LE16 の入替、m68000_bridge.c:8881
+ *   comment 確認)。したがって `addr` のゲストバイトは MEM[addr ^ 1] にある。
  *   12MB RAM 上限を超える / MEM 未確保 / IPLROM 等 RAM 外を読もうとした場合は
  *   0xFF を返す (debug 用 OOB sentinel; group-0 frame は SSP=RAM が前提なので
  *   この値が現れた時点で「a7 範囲がそもそも RAM 外」と分かる). */
@@ -20641,37 +20641,37 @@ static uint8_t p82xp_read_byte_le(uint32_t addr) {
     return MEM[addr ^ 1u];
 }
 
-/* ---- drift classify (Round 3 / Codex #1) ---- */
+/* ---- drift 分類 (Round 3 / Codex #1) ---- */
 static uint8_t p82xp_classify_drift(uint64_t prev_bpc, uint64_t cur_bpc,
                                     uint32_t pc_log) {
     if (prev_bpc == 0u) return (uint8_t)P82XP_DRIFT_NONE;
     if (cur_bpc == prev_bpc) return (uint8_t)P82XP_DRIFT_NONE;
     uint64_t diff = (cur_bpc > prev_bpc) ? (cur_bpc - prev_bpc)
                                          : (prev_bpc - cur_bpc);
-    /* chunk-boundary heuristic: legitimate RAM↔IPLROM chunk switch is MB scale;
-     * within ±0x10000 (64KB) is a small drift. Suspicious pc + sequence-of-2
-     * promotes to CONFIRMED. */
+    /* chunk 境界の経験則: 正当な RAM↔IPLROM の chunk 切替は MB 規模。
+     * ±0x10000 (64KB) 以内は小さな drift。疑わしい pc + 2 連続で
+     * CONFIRMED に格上げする。 */
     if (diff < 0x10000ULL && pc_log < 0x700000u)
         return (uint8_t)P82XP_DRIFT_TRANSIENT;
     if (pc_log >= 0x700000u &&
         s_p82xp_prev_drift_state == (uint8_t)P82XP_DRIFT_CONFIRMED) {
-        return (uint8_t)P82XP_DRIFT_CONFIRMED;       /* sequence-of-2 */
+        return (uint8_t)P82XP_DRIFT_CONFIRMED;       /* 2 連続 */
     }
     if (pc_log >= 0x700000u) return (uint8_t)P82XP_DRIFT_CONFIRMED;
     return (uint8_t)P82XP_DRIFT_TRANSIENT;
 }
 
-/* ---- CP-P-B group-0 pattern classifier (Round 3 meta-probe core) ---- */
+/* ---- CP-P-B group-0 パターン分類器 (Round 3 メタプローブの中核) ---- */
 static uint8_t p82xp_classify_group0_pattern(const p82xp_cppb_latch_t *l) {
-    /* ABSENT signals (any 1 triggers ABSENT) */
+    /* ABSENT の兆候 (どれか 1 つで ABSENT) */
     int all_zero = 1;
     for (int i = 0; i < 14; ++i) {
         if (l->raw14[i] != 0u) { all_zero = 0; break; }
     }
     if (all_zero) return 0;
     if (l->funccode > 7u) return 0;
-    if ((l->sr & 0x2000u) == 0u) return 0;  /* S=0 impossible at exception entry */
-    /* PRESENT signals (all required) */
+    if ((l->sr & 0x2000u) == 0u) return 0;  /* 例外進入時に S=0 はありえない */
+    /* PRESENT の兆候 (すべて必須) */
     int pc_in_range =
         (l->stacked_pc < 0x00C00000u) ||
         (l->stacked_pc >= 0x00FE0000u && l->stacked_pc < 0x01000000u);
@@ -20680,7 +20680,7 @@ static uint8_t p82xp_classify_group0_pattern(const p82xp_cppb_latch_t *l) {
     return 2;
 }
 
-/* ---- CP-P-A dedupe append (M-2): keep-last by (vec_num, drift_state) ---- */
+/* ---- CP-P-A 重複除去付き追記 (M-2): (vec_num, drift_state) ごとに最新を保持 ---- */
 static void p82xp_cppa_append(const p82xp_cppa_ent *e) {
     uint32_t cnt = (p82xp_cppa_total < P82XP_CPPA_RING)
                        ? p82xp_cppa_total : (uint32_t)P82XP_CPPA_RING;
@@ -20696,7 +20696,7 @@ static void p82xp_cppa_append(const p82xp_cppa_ent *e) {
     if (p82xp_cppa_total < P82XP_CPPA_RING) p82xp_cppa_total++;
 }
 
-/* ---- CP-P-A/B unified vec-fetch hook ----
+/* ---- CP-P-A/B 統合 vec フェッチフック ----
  * 呼び出し場所: trace_Memory_ReadW 内 (P82XO 跡 = P82XO_ENABLE 0 で消滅した
  * 同位置). arm: g_mx68k_frame_num >= P82XP_ARM_FRAME, (addr & 3) == 0,
  * addr < 0x400. CP-P-A は drift detection + dedupe ring 記録、CP-P-B は
@@ -20714,7 +20714,7 @@ static void p82xp_on_vector_fetch(uint32_t addr) {
     uint8_t  ds       = p82xp_classify_drift(s_p82xp_last_basepc_at_vec,
                                              cur_bpc, pc_log);
 
-    /* CP-P-A: record + dedupe append */
+    /* CP-P-A: 記録 + 重複除去付き追記 */
     p82xp_cppa_ent e;
     e.frame          = (uint32_t)g_mx68k_frame_num;
     e.vec_num        = addr / 4u;
@@ -20728,7 +20728,7 @@ static void p82xp_on_vector_fetch(uint32_t addr) {
     e.prev_was_set   = (s_p82xp_last_basepc_at_vec != 0u) ? 1u : 0u;
     p82xp_cppa_append(&e);
 
-    /* CP-P-B: one-shot raw14 meta-probe latch (vec 2/3 + FF05E4 + SSP-in-range) */
+    /* CP-P-B: one-shot の raw14 メタプローブ latch (vec 2/3 + FF05E4 + SSP 範囲内) */
     if (!p82xp_cppb_latched &&
         (addr == 0x008u || addr == 0x00Cu) &&
         ((handler & 0x00FFFFFFu) == (P82XP_FF05E4 & 0x00FFFFFFu))) {
@@ -20743,11 +20743,11 @@ static void p82xp_on_vector_fetch(uint32_t addr) {
             p82xp_cppb_latch.prev_basepc  = s_p82xp_last_basepc_at_vec;
             p82xp_cppb_latch.ssp_in_range = 1u;
             p82xp_cppb_latch.drift_state  = ds;
-            /* 14-byte raw dump at a7 (read-only) */
+            /* a7 位置の 14 バイト生ダンプ (read-only) */
             for (int i = 0; i < 14; ++i) {
                 p82xp_cppb_latch.raw14[i] = p82xp_read_byte_le(a7 + (uint32_t)i);
             }
-            /* Decode BE fields */
+            /* BE フィールドをデコード */
             const uint8_t *r = p82xp_cppb_latch.raw14;
             p82xp_cppb_latch.funccode    = ((uint16_t)r[0] << 8) | r[1];
             p82xp_cppb_latch.access_addr = ((uint32_t)r[2] << 24)
@@ -20768,12 +20768,12 @@ static void p82xp_on_vector_fetch(uint32_t addr) {
         }
     }
 
-    /* Update trackers AFTER record so this fetch is compared against prior */
+    /* 記録の後で tracker を更新し、このフェッチが直前の値と比較されるようにする */
     s_p82xp_last_basepc_at_vec = cur_bpc;
     s_p82xp_prev_drift_state   = ds;
 }
 
-/* ---- CP-P-C: chunk-PC trail filter for trap#14 帯 [0xFF0620, 0xFF0640) ---- */
+/* ---- CP-P-C: trap#14 帯用の chunk-PC 軌跡フィルタ [0xFF0620, 0xFF0640) ---- */
 static inline void p82xp_cppc_note_chunk(uint32_t pc_now_h) {
     uint32_t gpc = pc_now_h & 0x00FFFFFFu;
     if (gpc < 0x00FF0620u || gpc >= 0x00FF0640u) return;
@@ -20784,14 +20784,14 @@ static inline void p82xp_cppc_note_chunk(uint32_t pc_now_h) {
     p82xp_cppc_total++;
 }
 
-/* ---- CP-P-D D-1: post-access trace ring + D-3 BusErrHandling sticky edge ----
+/* ---- CP-P-D D-1: アクセス後トレース ring + D-3 BusErrHandling sticky エッジ ----
  *   D-1: BusErrFlag != 0 のとき重複抑制 append (clear race の影響を受ける).
  *   D-3: BusErrHandling sticky edge (rising) を edge-trigger で append
  *        (BusErrFlag clear race の影響なし — Round 3 / Codex #3). */
 static inline void p82xp_cppd_record(uint32_t addr, uint16_t width, uint32_t val,
                                      uint8_t op, uint32_t callsite) {
     if ((uint32_t)g_mx68k_frame_num < P82XP_ARM_FRAME) return;
-    /* D-1 path */
+    /* D-1 経路 */
     if ((BusErrFlag != 0) || (BusErrHandling != 0)) {
         if ((BusErrFlag != p82xp_cppd_last_seen_flag) ||
             (BusErrHandling != 0 && p82xp_cppd_total == 0u)) {
@@ -20810,7 +20810,7 @@ static inline void p82xp_cppd_record(uint32_t addr, uint16_t width, uint32_t val
             p82xp_cppd_last_seen_flag = BusErrFlag;
         }
     }
-    /* D-3 path: BusErrHandling sticky edge in trace callbacks */
+    /* D-3 経路: トレースコールバック内の BusErrHandling sticky エッジ */
     if (BusErrHandling != s_p82xp_cppd_d3_last_handling && BusErrHandling != 0) {
         p82xp_cppd_d3_t *e = &p82xp_cppd_d3_ring[p82xp_cppd_d3_head];
         e->frame          = (uint32_t)g_mx68k_frame_num;
@@ -20824,7 +20824,7 @@ static inline void p82xp_cppd_record(uint32_t addr, uint16_t width, uint32_t val
     s_p82xp_cppd_d3_last_handling = BusErrHandling;
 }
 
-/* ---- CP-P-E E-1: A7 sampling at chunk boundary ---- */
+/* ---- CP-P-E E-1: chunk 境界での A7 サンプリング ---- */
 static inline void p82xp_cppe_a7_note_chunk(uint32_t pc_now_h) {
     if ((uint32_t)g_mx68k_frame_num < 85u ||
         (uint32_t)g_mx68k_frame_num > 92u) return;
@@ -20836,7 +20836,7 @@ static inline void p82xp_cppe_a7_note_chunk(uint32_t pc_now_h) {
     if (p82xp_cppe_a7_total < P82XP_CPPE_A7_RING) p82xp_cppe_a7_total++;
 }
 
-/* ---- CP-P-E E-2: 0x7A region write watch (called from WriteW/WriteB) ---- */
+/* ---- CP-P-E E-2: 0x7A 領域への書込監視 (WriteW/WriteB から呼ばれる) ---- */
 static inline void p82xp_cppe_7a_record(uint32_t addr, uint32_t val, uint8_t width) {
     if ((uint32_t)g_mx68k_frame_num < P82XP_ARM_FRAME) return;
     uint32_t a = addr & 0x00FFFFFFu;
@@ -20851,8 +20851,8 @@ static inline void p82xp_cppe_7a_record(uint32_t addr, uint32_t val, uint8_t wid
     if (p82xp_cppe_7awr_total < P82XP_CPPE_7AWR_RING) p82xp_cppe_7awr_total++;
 }
 
-/* ---- CP-P-E E-3: trap#15 ($BC) vector fetch ledger (called from on_vector_fetch
- *      sibling path — separate from CP-P-A/B SSP-in-range gate) ---- */
+/* ---- CP-P-E E-3: trap#15 ($BC) ベクタフェッチ台帳 (on_vector_fetch の
+ *      兄弟経路から呼ばれる — CP-P-A/B の SSP 範囲内ゲートとは別) ---- */
 static inline void p82xp_cppe_trap15_record(uint32_t addr) {
     if ((addr & 3u) != 0u) return;
     if (addr != 0x000000BCu) return;
@@ -20867,9 +20867,9 @@ static inline void p82xp_cppe_trap15_record(uint32_t addr) {
     if (p82xp_cppe_trap15_total < P82XP_CPPE_TRAP15_RING) p82xp_cppe_trap15_total++;
 }
 
-/* ---- p82xp_tick: per-frame driver — D-2 BusErrHandling sticky edge sample ----
- *   Called from EmulatorBridge.c per-frame loop. Picks up BusError events that
- *   the trace callbacks (D-1/D-3) miss (DMAC/SCSI/MIDI 等 trace 非経由経路). */
+/* ---- p82xp_tick: フレーム毎の駆動 — D-2 BusErrHandling sticky エッジのサンプル ----
+ *   EmulatorBridge.c のフレーム毎ループから呼ばれる。トレースコールバック (D-1/D-3)
+ *   が取りこぼす BusError イベントを拾う (DMAC/SCSI/MIDI 等 trace 非経由経路)。 */
 void p82xp_tick(void) {
     if ((int32_t)BusErrHandling != s_p82xp_cppd_pf_last_handling &&
         (int32_t)BusErrHandling != 0) {
@@ -20886,7 +20886,7 @@ void p82xp_tick(void) {
     s_p82xp_cppd_pf_last_handling = BusErrHandling;
 }
 
-/* ---- classify: verdict ladder (mutually exclusive, evaluated top-down).
+/* ---- classify: verdict 判定段 (相互排他、上から順に評価)。
  *   14 段 (Round 3 — §6). PRESENT が pattern_verdict==1 gating. */
 static const char *p82xp_classify(void) {
     /* 1. P-BPC-DRIFT-CONFIRMED */
@@ -20898,7 +20898,7 @@ static const char *p82xp_classify(void) {
     }
     /* 2. P-GROUP0-FRAME-PRESENT */
     if (p82xp_cppb_latched && p82xp_cppb_latch.pattern_verdict == 1u) {
-        /* PRESENT — examine sub-verdicts (3..5) gated on drift_state == NONE */
+        /* PRESENT — drift_state == NONE を条件に下位 verdict (3..5) を調べる */
         if (p82xp_cppb_latch.drift_state == (uint8_t)P82XP_DRIFT_NONE) {
             if (p82xp_cppb_latch.trap14_match == 1u)
                 return "P-TRAP14-CONFIRMED-VEC-FETCH";
@@ -20920,7 +20920,7 @@ static const char *p82xp_classify(void) {
     /* 7. P-GROUP0-FRAME-AMBIGUOUS */
     if (p82xp_cppb_latched && p82xp_cppb_latch.pattern_verdict == 2u)
         return "P-GROUP0-FRAME-AMBIGUOUS";
-    /* 8. P-BPC-DRIFT-TRANSIENT (Round 3 new) */
+    /* 8. P-BPC-DRIFT-TRANSIENT (Round 3 新設) */
     {
         int saw_transient = 0;
         for (uint32_t i = 0; i < p82xp_cppa_total && i < P82XP_CPPA_RING; ++i) {
@@ -20931,7 +20931,7 @@ static const char *p82xp_classify(void) {
     }
     /* 9. P-BUSERR-OBSERVED-TRACE */
     if (p82xp_cppd_total > 0u) return "P-BUSERR-OBSERVED-TRACE";
-    /* 10. P-BUSERR-OBSERVED-HANDLING-EDGE (Round 3 new / Codex #3) */
+    /* 10. P-BUSERR-OBSERVED-HANDLING-EDGE (Round 3 新設 / Codex #3) */
     if (p82xp_cppd_d3_total > 0u) return "P-BUSERR-OBSERVED-HANDLING-EDGE";
     /* 11. P-BUSERR-OBSERVED-FRAMEPOLL */
     if (p82xp_cppd_perframe_total > 0u) return "P-BUSERR-OBSERVED-FRAMEPOLL";
@@ -20952,7 +20952,7 @@ static const char *p82xp_classify(void) {
     return "P-NO-LATCH";
 }
 
-/* ---- emit_verdict: ring dump + verdict line (one-shot via p82xp_verdict_done) */
+/* ---- emit_verdict: ring ダンプ + verdict 行 (p82xp_verdict_done による one-shot) */
 void p82xp_emit_verdict(void) {
     if (p82xp_verdict_done) return;
     p82xp_verdict_done = 1;
@@ -20963,7 +20963,7 @@ void p82xp_emit_verdict(void) {
               g_mx68k_frame_num);
     debug_log("[P82XP-VERDICT] classification=%s\n", cls);
 
-    /* Anchor line (M-1 補強) — host BasePC references for offline sanity-check */
+    /* 基準行 (M-1 補強) — オフラインでの妥当性確認用のホスト BasePC 参照値 */
     debug_log("[P82XP-ANCHOR] frame=%d mem_base=0x%016llx basepc_now=0x%016llx "
               "ipl_fetch0=0x%016llx\n",
               g_mx68k_frame_num,
@@ -20971,7 +20971,7 @@ void p82xp_emit_verdict(void) {
               (unsigned long long)(uintptr_t)C68K.BasePC,
               (unsigned long long)(uintptr_t)C68K.Fetch[0xFE]);
 
-    /* CP-P-A ring dump */
+    /* CP-P-A の ring ダンプ */
     debug_log("[P82XP-ANNOT] cppa_total=%u cppa_head=%u\n",
               (unsigned)p82xp_cppa_total, (unsigned)p82xp_cppa_head);
     {
@@ -21013,7 +21013,7 @@ void p82xp_emit_verdict(void) {
                   (unsigned)l->handler);
     }
 
-    /* CP-P-C ring dump */
+    /* CP-P-C の ring ダンプ */
     debug_log("[P82XP-ANNOT] cppc_total=%u last_frame=%u\n",
               (unsigned)p82xp_cppc_total, (unsigned)p82xp_cppc_last_frame);
     {
@@ -21029,7 +21029,7 @@ void p82xp_emit_verdict(void) {
         }
     }
 
-    /* CP-P-D D-1 ring dump */
+    /* CP-P-D D-1 の ring ダンプ */
     debug_log("[P82XP-ANNOT] cppd_d1_total=%u cppd_d2_total=%u cppd_d3_total=%u\n",
               (unsigned)p82xp_cppd_total,
               (unsigned)p82xp_cppd_perframe_total,
@@ -21051,7 +21051,7 @@ void p82xp_emit_verdict(void) {
                       (int)e->buserr_flag, (int)e->buserr_handling);
         }
     }
-    /* D-2 dump */
+    /* D-2 のダンプ */
     {
         uint32_t cnt = (p82xp_cppd_perframe_total < (uint32_t)P82XP_CPPD_PERFRAME_RING)
                            ? p82xp_cppd_perframe_total
@@ -21066,7 +21066,7 @@ void p82xp_emit_verdict(void) {
                       (int)e->buserr_flag, (int)e->buserr_handling);
         }
     }
-    /* D-3 dump */
+    /* D-3 のダンプ */
     {
         uint32_t cnt = (p82xp_cppd_d3_total < (uint32_t)P82XP_CPPD_D3_RING)
                            ? p82xp_cppd_d3_total : (uint32_t)P82XP_CPPD_D3_RING;
@@ -21083,7 +21083,7 @@ void p82xp_emit_verdict(void) {
         }
     }
 
-    /* CP-P-E rings */
+    /* CP-P-E の ring 群 */
     debug_log("[P82XP-ANNOT] cppe_a7_total=%u cppe_7awr_total=%u "
               "cppe_trap15_total=%u\n",
               (unsigned)p82xp_cppe_a7_total,
@@ -21135,7 +21135,7 @@ void p82xp_emit_verdict(void) {
     debug_log("[P82XP-VERDICT] end\n");
 }
 
-/* ---- p82xp_reset: per-run cold-reset (called from m68000_reset_p47d_counters) */
+/* ---- p82xp_reset: 実行ごとのコールドリセット (m68000_reset_p47d_counters から呼ばれる) */
 static void p82xp_reset(void) {
     /* CP-P-A */
     memset(p82xp_cppa_ring, 0, sizeof(p82xp_cppa_ring));
@@ -21176,7 +21176,7 @@ static void p82xp_reset(void) {
     p82xp_cppe_7awr_total   = 0u;
     p82xp_cppe_trap15_head  = 0u;
     p82xp_cppe_trap15_total = 0u;
-    /* verdict guard */
+    /* verdict ガード */
     p82xp_verdict_done = 0;
 }
 
@@ -21276,7 +21276,7 @@ static void p82l_stack_dump(uint32_t pc_now_h) {
 
 #if P82M_ENABLE
 /* ===================================================================
- * P82-M: per-chunk fine-grained stacktop observation
+ * P82-M: per-chunk の細粒度スタックトップ観測
  *
  * 観測原理: per-chunk hook fire ごとに pc_now_h と A7 を取得。
  *   pc_now_h ∈ [0xFF0000, 0xFFFFFF] かつ A7 ∈ [0x1F80, 0x2000) なら
@@ -21336,7 +21336,7 @@ static void p82m_record(uint32_t pc_now_h) {
     uint32_t top1 = MEM ? p47_read_long_le(a7 + 4u)   : 0xFFFFFFFFu;
     if (a7 == s_p82m_last_a7
         && top0 == s_p82m_last_top0
-        && top1 == s_p82m_last_top1) return;     /* dedup */
+        && top1 == s_p82m_last_top1) return;     /* 重複除去 */
     p82m_rec_t *r = &s_p82m_ring[s_p82m_pos];
     r->seq    = ++s_p82m_seq;
     r->pc     = pc_now_h;
@@ -21374,24 +21374,24 @@ static void p82m_dump(uint32_t pc_now_h) {
 
 #if P82O_ENABLE
 /* ===================================================================
- * P82-O: IPLROM CPU-clock self-measurement calibration probe.
+ * P82-O: IPLROM による CPU クロック自己計測キャリブレーションのプローブ。
  *
- * Tests two competing hypotheses (H1: MFP Timer-C precision miss vs
- * H2: real Line-F exception elsewhere) by snapshotting CPU + MFP
- * state across the calibration routine 0xFF0AA6-0xFF0B58, latching
- * the RTS at 0xFF0B34, capturing caller_return_PC, and one-shot
- * dumping at panic band [0xFF0632, 0xFF063C].
+ * 競合する 2 つの仮説 (H1: MFP Timer-C の精度不足 vs
+ * H2: 別箇所での本物の Line-F 例外) を検証する。キャリブレーションルーチン
+ * 0xFF0AA6-0xFF0B58 の全域で CPU + MFP の状態をスナップショットし、
+ * 0xFF0B34 の RTS を latch し、caller_return_PC を捕捉して、panic 帯
+ * [0xFF0632, 0xFF063C] で one-shot ダンプする。
  *
- * All reads are side-effect-free (direct MFP[] / Timer_Count[] /
- * C68k_Get_*() accessors / p47_read_long_le). No change to chunk
- * size / gating / interrupt delivery. Frame >= P82O_FRAME_ARM (18)
- * arm gate matches P82-J/L/M precedent. Setting P82O_ENABLE 0 in
- * EmulatorBridge.h reverts to baseline byte-equivalent. */
+ * すべての read は副作用なし (MFP[] / Timer_Count[] の直読み /
+ * C68k_Get_*() アクセサ / p47_read_long_le)。chunk サイズ / ゲート /
+ * 割込み配送は変更しない。Frame >= P82O_FRAME_ARM (18) の
+ * arm ゲートは P82-J/L/M の前例に揃える。EmulatorBridge.h で
+ * P82O_ENABLE を 0 にするとベースラインとバイト等価に戻る。 */
 
-/* Per-chunk snapshot ring entry. */
+/* per-chunk スナップショット ring のエントリ。 */
 typedef struct {
     uint32_t seq;
-    uint32_t pc;             /* chunk-start PC at sample time */
+    uint32_t pc;             /* サンプル時点の chunk 開始 PC */
     uint32_t d0, d1, d2;
     uint32_t a6, a7;
     uint16_t sr;
@@ -21400,16 +21400,16 @@ typedef struct {
     uint8_t  tcdr;
     uint8_t  iprb;
     uint8_t  imrb;
-    uint8_t  in_spin;        /* 1 if pc ∈ [0xFF0B48, 0xFF0B4C) */
-    int8_t   pass_origin;    /* 0 = ROM-pass, 1 = RAM-pass, -1 = unknown */
-    uint16_t call_idx;       /* which call-of-0xFF0AA6 this sample belongs to */
+    uint8_t  in_spin;        /* pc ∈ [0xFF0B48, 0xFF0B4C) なら 1 */
+    int8_t   pass_origin;    /* 0 = ROM-pass、1 = RAM-pass、-1 = 不明 */
+    uint16_t call_idx;       /* このサンプルが何回目の 0xFF0AA6 呼出しに属するか */
     uint16_t _pad;
 } p82o_rec_t;
 
-/* Per-call summary (Codex BLOCKING-2). Bounded to detect 2nd+ call shadowing. */
+/* 呼出しごとの要約 (Codex BLOCKING-2)。2 回目以降の呼出しによる上書き隠蔽を検出できるよう件数上限付き。 */
 #define P82O_CALL_MAX  4
 typedef struct {
-    uint32_t call_idx;                       /* 1-based; 0 means slot empty */
+    uint32_t call_idx;                       /* 1 始まり。0 はスロット空を意味する */
     uint16_t entry_frame;
     uint8_t  reached_b34;
     uint8_t  _pad;
@@ -21422,9 +21422,9 @@ typedef struct {
     uint32_t chunks_in_band_this_call;
 } p82o_call_t;
 
-/* IPRB[5] rising-edge context log (Codex PATCH-4). Independent of main
- * ring; captures (chunk_pc, TCDCR, IMRB, iprb_before/after) so post-hoc
- * analysis can filter guest-write-induced rises from genuine Timer-C IRQs. */
+/* IPRB[5] 立ち上がりエッジの文脈ログ (Codex PATCH-4)。主 ring とは独立。
+ * (chunk_pc, TCDCR, IMRB, iprb_before/after) を捕捉し、事後解析で
+ * ゲストの書込による立ち上がりと本物の Timer-C IRQ を区別できるようにする。 */
 #define P82O_IPRB_LOG_MAX  8
 typedef struct {
     uint32_t seq;
@@ -21442,24 +21442,24 @@ static uint32_t s_p82o_ring_count     = 0;
 static uint32_t s_p82o_seq            = 0;
 static int      s_p82o_dumped         = 0;
 
-/* per-call ring */
+/* 呼出しごとの ring */
 static p82o_call_t s_p82o_calls[P82O_CALL_MAX];
-static uint32_t s_p82o_call_count     = 0;   /* total entries observed */
-static uint32_t s_p82o_active_call    = 0;   /* 0 = no active call yet */
-static int      s_p82o_in_active_call = 0;   /* 1 while between 0xFF0AA6 entry and 0xFF0B34 RTS */
+static uint32_t s_p82o_call_count     = 0;   /* 観測した進入の総数 */
+static uint32_t s_p82o_active_call    = 0;   /* 0 = まだ実行中の呼出しなし */
+static int      s_p82o_in_active_call = 0;   /* 0xFF0AA6 進入から 0xFF0B34 の RTS までの間は 1 */
 
-/* IPRB rising-edge log */
+/* IPRB 立ち上がりエッジのログ */
 static p82o_iprb_evt_t s_p82o_iprb_log[P82O_IPRB_LOG_MAX];
 static uint32_t s_p82o_iprb_log_pos   = 0;
 static uint32_t s_p82o_iprb_log_count = 0;
 
-/* dedup state */
+/* 重複除去の状態 */
 static uint32_t s_p82o_last_pc        = 0xFFFFFFFFu;
 static uint16_t s_p82o_last_d1_lo     = 0xFFFFu;
 static uint8_t  s_p82o_last_tcdr      = 0xFFu;
 static int      s_p82o_dedup_valid    = 0;
 
-/* aggregate counters (sum across all calls) */
+/* 集計カウンタ (全呼出しの合計) */
 static uint32_t s_p82o_total_in_band   = 0;
 static uint32_t s_p82o_spin_chunks     = 0;
 static uint32_t s_p82o_iprb_rise_chunk = 0;
@@ -21467,19 +21467,19 @@ static uint32_t s_p82o_isr_vec_reads   = 0;
 static uint8_t  s_p82o_iprb_prev       = 0;
 static int      s_p82o_iprb_prev_valid = 0;
 
-/* first-call completion latch retained for backward-compat dump readability */
+/* 旧形式ダンプの読みやすさのために残している初回呼出し完了の latch */
 static int      s_p82o_reached_b34    = 0;
 static uint32_t s_p82o_d0_at_b34      = 0;
 static uint32_t s_p82o_a7_at_b34      = 0;
 static uint32_t s_p82o_caller_ret_pc  = 0;
 
-/* cross-channel gate: last chunk's PC, used by ReadW(0x114) hook */
+/* チャネル横断ゲート: 直前 chunk の PC。ReadW(0x114) フックが使用する */
 static uint32_t s_p82o_last_chunk_pc  = 0;
 
-/* RAM-copy range: routine body is copied to (A6 - 0x2E) and lives there
- * for 0x2A bytes (the inner sub 0xFF0B36..0xFF0B5F minus the LINK/UNLK
- * prologue). A6 is captured at calibration entry; RAM range is computed
- * once per call. */
+/* RAM コピー範囲: ルーチン本体は (A6 - 0x2E) にコピーされ、そこに
+ * 0x2A バイト置かれる (内側サブルーチン 0xFF0B36..0xFF0B5F から LINK/UNLK の
+ * プロローグを除いたもの)。A6 はキャリブレーション進入時に捕捉し、RAM 範囲は
+ * 呼出しごとに 1 回計算する。 */
 static uint32_t s_p82o_ram_copy_lo    = 0;
 static uint32_t s_p82o_ram_copy_hi    = 0;
 
@@ -21490,13 +21490,13 @@ static inline int p82o_in_spin(uint32_t pc) {
     return (pc >= 0xFF0B48u) && (pc < 0xFF0B4Cu);
 }
 static inline int p82o_in_rom_pass(uint32_t pc) {
-    /* ROM-resident copy of the inner measurement sub */
+    /* 内側計測サブルーチンの ROM 常駐版 */
     return (pc >= 0xFF0B36u) && (pc <= 0xFF0B5Fu);
 }
 static inline int p82o_in_ram_pass(uint32_t pc) {
-    /* RAM-copy of the inner sub, anchored by routine_A6 captured at
-     * call entry. routine_A6 = A7_at_entry - 4 (see entry detection in
-     * p82o_record); RAM-copy range = [routine_A6 - 0x2E, routine_A6). */
+    /* 内側サブルーチンの RAM コピー版。呼出し進入時に捕捉した routine_A6
+     * を基準とする。routine_A6 = A7_at_entry - 4 (p82o_record の進入検出を
+     * 参照)。RAM コピー範囲 = [routine_A6 - 0x2E, routine_A6)。 */
     if (s_p82o_ram_copy_lo == 0u) return 0;
     return (pc >= s_p82o_ram_copy_lo) && (pc < s_p82o_ram_copy_hi);
 }
@@ -21506,10 +21506,10 @@ static inline int8_t p82o_pass_origin(uint32_t pc) {
     return -1;
 }
 
-/* Helper: get currently-active call slot pointer, or NULL */
+/* ヘルパ: 現在実行中の呼出しスロットへのポインタを返す。無ければ NULL */
 static p82o_call_t *p82o_active_call_ptr(void) {
     if (!s_p82o_in_active_call || s_p82o_active_call == 0u) return NULL;
-    /* Linear scan — P82O_CALL_MAX == 4, trivial */
+    /* 線形走査 — P82O_CALL_MAX == 4 なので軽微 */
     for (uint32_t i = 0; i < P82O_CALL_MAX; i++) {
         if (s_p82o_calls[i].call_idx == s_p82o_active_call) {
             return &s_p82o_calls[i];
@@ -21522,13 +21522,13 @@ static void p82o_record(uint32_t pc_now_h) {
     if (s_p82o_dumped) return;
     if (g_mx68k_frame_num < P82O_FRAME_ARM) return;
 
-    s_p82o_last_chunk_pc = pc_now_h;   /* always update gate */
+    s_p82o_last_chunk_pc = pc_now_h;   /* ゲートは常に更新 */
 
-    /* chunk-edge IPRB[5] rising-edge sampler — runs even outside band
-     * so we don't miss the very first rise as we enter the band.
-     * Codex PATCH-4: record context (chunk_pc, TCDCR, IMRB, iprb_before/after)
-     * to dedicated mini-log so post-hoc analysis can filter guest-write
-     * induced rises from genuine Timer-C IRQ deliveries. */
+    /* chunk 境界での IPRB[5] 立ち上がりエッジのサンプラ — 帯へ入る瞬間の
+     * 最初の立ち上がりを取りこぼさないよう、帯の外でも動かす。
+     * Codex PATCH-4: 文脈 (chunk_pc, TCDCR, IMRB, iprb_before/after) を
+     * 専用の小ログに記録し、事後解析でゲストの書込による立ち上がりと
+     * 本物の Timer-C IRQ 配送を区別できるようにする。 */
     {
         uint8_t iprb_now = (uint8_t)MFP[MFP_IPRB];
         if (s_p82o_iprb_prev_valid &&
@@ -21536,10 +21536,10 @@ static void p82o_record(uint32_t pc_now_h) {
             s_p82o_iprb_rise_chunk++;
             p82o_call_t *ac = p82o_active_call_ptr();
             if (ac) ac->iprb_rise_this_call++;
-            /* Circular ring: always insert (mod-wrap), saturate count.
-             * (Code-review S6 / req-review #1: removed redundant outer
-             * guard `if (... || P82O_IPRB_LOG_MAX > 0)` since the second
-             * disjunct is always true.) */
+            /* 循環 ring: 常に挿入し (剰余で折り返し)、件数は飽和させる。
+             * (Code-review S6 / req-review #1: 冗長な外側の
+             * ガード `if (... || P82O_IPRB_LOG_MAX > 0)` を削除した。第 2 項が
+             * 常に真であるため。) */
             p82o_iprb_evt_t *e = &s_p82o_iprb_log[s_p82o_iprb_log_pos];
             e->seq         = ++s_p82o_seq;
             e->chunk_pc    = pc_now_h;
@@ -21559,17 +21559,17 @@ static void p82o_record(uint32_t pc_now_h) {
 
     if (!p82o_in_band(pc_now_h)) return;
 
-    /* Codex BLOCKING-2: detect 0xFF0AA6 entry to open a new call slot,
-     * even if PC=0xFF0AA6 is observed mid-band (not all chunks land
-     * exactly on entry; record opens whenever a chunk-start PC equals
-     * 0xFF0AA6 AND we are not already inside an active call).
+    /* Codex BLOCKING-2: 0xFF0AA6 への進入を検出して新しい呼出しスロットを開く。
+     * PC=0xFF0AA6 が帯の途中で観測された場合も同様 (すべての chunk が
+     * ちょうど進入点に着地するわけではない。chunk 開始 PC が 0xFF0AA6 に等しく、
+     * かつ実行中の呼出しの内側にいなければ、常に記録を開く)。
      *
-     * Code-review B5 fix: at PC=0xFF0AA6 the LINK.W A6,#$FFD2 instruction
-     * has NOT yet executed (PC convention = next-to-execute), so
-     * `C68k_Get_AReg(&C68K, 6)` returns the CALLER's A6 — unrelated to
-     * the routine's local frame. The routine's A6 is established by LINK
-     * as `caller_SP - 8` after the auto-push of A6 onto the stack. At
-     * entry, A7 = caller_SP - 4 (only the BSR return PC pushed), so:
+     * Code-review B5 修正: PC=0xFF0AA6 の時点では LINK.W A6,#$FFD2 命令は
+     * まだ実行されていない (PC の規約 = 次に実行する命令) ため、
+     * `C68k_Get_AReg(&C68K, 6)` は呼出し元の A6 を返す — ルーチン自身の
+     * ローカルフレームとは無関係。ルーチンの A6 は、A6 がスタックへ自動 push
+     * された後に LINK によって `caller_SP - 8` として確立される。進入時点では
+     * A7 = caller_SP - 4 (BSR の戻り PC のみ push 済み) なので:
      *     routine_A6   = A7_at_entry - 4
      *     RAM-copy lo  = routine_A6 - 0x2E = A7_at_entry - 0x32
      *     RAM-copy hi  = routine_A6        = A7_at_entry - 4
@@ -21580,9 +21580,9 @@ static void p82o_record(uint32_t pc_now_h) {
         s_p82o_call_count++;
         s_p82o_active_call  = s_p82o_call_count;
         s_p82o_in_active_call = 1;
-        /* RAM-copy lives at (routine_A6 - 0x2E)..(routine_A6) per
-         * IPLROM convention (derived from LINK.W A6,#$FFD2 frame
-         * reservation; the inner sub-call uses `lea -$2e(a6),a1`). */
+        /* RAM コピーは IPLROM の規約により (routine_A6 - 0x2E)..(routine_A6) に
+         * 置かれる (LINK.W A6,#$FFD2 のフレーム確保から導出。内側の
+         * サブルーチン呼出しは `lea -$2e(a6),a1` を使う)。 */
         s_p82o_ram_copy_lo = routine_a6 - 0x2Eu;
         s_p82o_ram_copy_hi = routine_a6;
         uint32_t slot = (s_p82o_call_count - 1u) % P82O_CALL_MAX;
@@ -21611,7 +21611,7 @@ static void p82o_record(uint32_t pc_now_h) {
         if (ac) ac->spin_chunks_this_call++;
     }
 
-    /* Read CPU + MFP state (all side-effect-free) */
+    /* CPU + MFP の状態を読む (すべて副作用なし) */
     uint32_t d0 = C68k_Get_DReg(&C68K, 0);
     uint32_t d1 = C68k_Get_DReg(&C68K, 1);
     uint32_t d2 = C68k_Get_DReg(&C68K, 2);
@@ -21623,9 +21623,9 @@ static void p82o_record(uint32_t pc_now_h) {
     uint8_t  iprb  = (uint8_t)MFP[MFP_IPRB];
     uint8_t  imrb  = (uint8_t)MFP[MFP_IMRB];
 
-    /* Completion: PC at chunk start equals 0xFF0B34 (RTS). Record into
-     * BOTH the first-hit aggregate latch (for backward-compat dump) AND
-     * the active per-call slot (for multi-call shadowing detection). */
+    /* 完了: chunk 開始時の PC が 0xFF0B34 (RTS) に等しい。初回到達の集計 latch
+     * (旧形式ダンプ用) と、実行中の呼出しごとのスロット (複数回呼出しによる
+     * 上書き隠蔽の検出用) の両方へ記録する。 */
     if (pc_now_h == 0xFF0B34u) {
         if (!s_p82o_reached_b34) {
             s_p82o_reached_b34   = 1;
@@ -21640,14 +21640,14 @@ static void p82o_record(uint32_t pc_now_h) {
             ac->a7_at_b34        = a7;
             ac->caller_return_pc = p47_read_long_le(a7);
         }
-        /* Closing the active call: next observed 0xFF0AA6 will open
-         * a fresh slot (handles repeat calls cleanly). */
+        /* 実行中の呼出しを閉じる: 次に 0xFF0AA6 を観測したら新しいスロットを
+         * 開く (繰り返し呼出しを綺麗に扱う)。 */
         s_p82o_in_active_call = 0;
         s_p82o_ram_copy_lo    = 0;
         s_p82o_ram_copy_hi    = 0;
     }
 
-    /* Dedup by (pc, d1_lo16, tcdr) */
+    /* (pc, d1_lo16, tcdr) で重複除去 */
     uint16_t d1_lo = (uint16_t)(d1 & 0xFFFFu);
     if (s_p82o_dedup_valid &&
         s_p82o_last_pc == pc_now_h &&
@@ -21660,7 +21660,7 @@ static void p82o_record(uint32_t pc_now_h) {
     s_p82o_last_tcdr    = tcdr;
     s_p82o_dedup_valid  = 1;
 
-    /* Insert into ring */
+    /* ring へ挿入 */
     p82o_rec_t *r = &s_p82o_ring[s_p82o_ring_pos];
     r->seq         = ++s_p82o_seq;
     r->pc          = pc_now_h;
@@ -21684,13 +21684,13 @@ static void p82o_record(uint32_t pc_now_h) {
     if (s_p82o_ring_count < P82O_RING_SIZE) s_p82o_ring_count++;
 }
 
-/* invoked from trace_Memory_ReadW when addr == 0x114u */
+/* addr == 0x114u のとき trace_Memory_ReadW から呼ばれる */
 static void p82o_observe_vec_fetch(void) {
     if (s_p82o_dumped) return;
     if (g_mx68k_frame_num < P82O_FRAME_ARM) return;
-    /* Count only when the last observed chunk-start PC was in the
-     * calibration band; this scopes the count to "ISR dispatches
-     * that happened while the IPLROM was in the calibration body". */
+    /* 直近に観測した chunk 開始 PC がキャリブレーション帯の中にあった
+     * 場合のみ数える。これにより計数対象を「IPLROM がキャリブレーション本体
+     * を実行中に起きた ISR ディスパッチ」に限定する。 */
     if (!p82o_in_band(s_p82o_last_chunk_pc)) return;
     s_p82o_isr_vec_reads++;
     {
@@ -21719,15 +21719,15 @@ static void p82o_dump(uint32_t pc_now_h) {
         debug_log("[P82-O]   first-call: (RTS at 0xFF0B34 never observed at chunk start)\n");
     }
 
-    /* Per-call summary (Codex BLOCKING-2). Oldest first. */
+    /* 呼出しごとの要約 (Codex BLOCKING-2)。古い順。 */
     debug_log("[P82-O]   per-call summary (max %d most-recent calls):\n",
               P82O_CALL_MAX);
     uint32_t shown = (s_p82o_call_count < P82O_CALL_MAX)
                      ? s_p82o_call_count
                      : P82O_CALL_MAX;
     for (uint32_t i = 0; i < shown; i++) {
-        /* Slots fill in order ((call_idx-1) % MAX). The oldest of the
-         * still-resident calls is at slot (call_count - shown) % MAX. */
+        /* スロットは順に埋まる ((call_idx-1) % MAX)。まだ残っている呼出しの
+         * うち最も古いものはスロット (call_count - shown) % MAX にある。 */
         uint32_t slot = ((s_p82o_call_count - shown) + i) % P82O_CALL_MAX;
         p82o_call_t *c = &s_p82o_calls[slot];
         if (c->call_idx == 0u) continue;
@@ -21739,7 +21739,7 @@ static void p82o_dump(uint32_t pc_now_h) {
                   c->isr_reads_this_call, c->iprb_rise_this_call);
     }
 
-    /* IPRB rising-edge context log (Codex PATCH-4) */
+    /* IPRB 立ち上がりエッジの文脈ログ (Codex PATCH-4) */
     debug_log("[P82-O]   IPRB[5]_rise context log (count=%u):\n",
               s_p82o_iprb_log_count);
     uint32_t ip_start = (s_p82o_iprb_log_count < P82O_IPRB_LOG_MAX)
@@ -21773,7 +21773,7 @@ static void p82o_dump(uint32_t pc_now_h) {
                   r->iprb, r->imrb, r->in_spin);
     }
 
-    /* Last-call summary line (Codex BLOCKING-2 final-line requirement) */
+    /* 最終呼出しの要約行 (Codex BLOCKING-2 の最終行要件) */
     if (s_p82o_call_count > 0u) {
         uint32_t last_slot = (s_p82o_call_count - 1u) % P82O_CALL_MAX;
         p82o_call_t *lc = &s_p82o_calls[last_slot];
@@ -21789,25 +21789,25 @@ static void p82o_dump(uint32_t pc_now_h) {
 #endif /* P82O_ENABLE */
 
 #if P82P_ENABLE
-/* P82-P: MFP IRQ delivery diagnostics (4 independent rings).
+/* P82-P: MFP IRQ 配送の診断 (独立した 4 つの ring)。
  *
- * Disclaimer: 1987 Sharp X68000 emulator (MX68K) debugging. All addresses
- * refer to emulated guest memory inside the emulator process.
+ * 注記: 1987 年のシャープ X68000 エミュレータ (MX68K) のデバッグ。アドレスは
+ * すべてエミュレータプロセス内のエミュレートされたゲストメモリを指す。
  *
- * Goal: partition between H-D1 (MFP IPRB[5]→CPU IRQ-pending not asserted)
- * and H-D2 (CPU sees pending but does not accept) by observing vector-table
- * read on $114/$116 after IPRB[5] rise (seq=39 at frame=21 from P82-O).
+ * 目的: H-D1 (MFP IPRB[5]→CPU の IRQ ペンディングが立たない) と
+ * H-D2 (CPU はペンディングを認識するが受け付けない) を切り分ける。IPRB[5] 立ち上がり
+ * (P82-O での frame=21 の seq=39) 後の $114/$116 ベクタテーブル read を観測して判定する。
  *
- * Rings:
- *  - trace_ring (N=256, non-dedup): chunk start PC inside IPLROM band
- *  - stack_ring (N=32, dedup by (a7,stk0,stk1)): A7..A7+0x1C word window
- *    at first hit of pc_now_h ∈ {0xFF0B36, 0xFF0B48}
- *  - vfetch_ring (N=16, non-dedup): word fetch at addr ∈ {$114, $116}
- *  - tcdcr_ring (N=16, non-dedup): byte write at $E8801D (MFP TCDCR)
+ * ring 構成:
+ *  - trace_ring (N=256、重複除去なし): IPLROM 帯内の chunk 開始 PC
+ *  - stack_ring (N=32、(a7,stk0,stk1) で重複除去): A7..A7+0x1C のワード窓を
+ *    pc_now_h ∈ {0xFF0B36, 0xFF0B48} の初回該当時に記録
+ *  - vfetch_ring (N=16、重複除去なし): addr ∈ {$114, $116} のワードフェッチ
+ *  - tcdcr_ring (N=16、重複除去なし): $E8801D (MFP TCDCR) へのバイト書込
  *
- * All rings one-shot dumped at PC ∈ [0xFF0632, 0xFF063C] when frame ≥ 18.
- * Read-only: C68k_Get_AReg/SR/PC + p47_read_long_le + direct MFP[] read,
- * no state mutation. */
+ * 全 ring は frame ≥ 18 で PC ∈ [0xFF0632, 0xFF063C] のとき one-shot ダンプされる。
+ * read-only: C68k_Get_AReg/SR/PC + p47_read_long_le + MFP[] の直読みのみで、
+ * 状態は変更しない。 */
 
 typedef struct {
     uint32_t seq;
@@ -21870,7 +21870,7 @@ static uint32_t s_p82p_tcdcr_head   = 0;
 static uint32_t s_p82p_tcdcr_count  = 0;
 static int      s_p82p_tcdcr_dumped = 0;
 
-/* trace ring — record chunk start PC inside IPLROM band, non-dedup. */
+/* trace ring — IPLROM 帯内の chunk 開始 PC を記録、重複除去なし。 */
 static void p82p_trace_record(uint32_t pc_now_h) {
     if (s_p82p_trace_dumped) return;
     if (g_mx68k_frame_num < P82P_FRAME_ARM) return;
@@ -21886,8 +21886,8 @@ static void p82p_trace_record(uint32_t pc_now_h) {
     if (s_p82p_trace_count < P82P_TRACE_RING_SIZE) s_p82p_trace_count++;
 }
 
-/* stack ring — A7..A7+0x1C 8-longword window on 0xFF0B36 / 0xFF0B48 hit,
- * dedup by (a7, stk[0], stk[1]) so a long DBRA spin records only once. */
+/* stack ring — 0xFF0B36 / 0xFF0B48 該当時の A7..A7+0x1C の 8 ロングワード窓。
+ * (a7, stk[0], stk[1]) で重複除去し、長い DBRA スピンは 1 回だけ記録する。 */
 static void p82p_stack_record(uint32_t pc_now_h) {
     if (s_p82p_stack_dumped) return;
     if (g_mx68k_frame_num < P82P_FRAME_ARM) return;
@@ -21919,7 +21919,7 @@ static void p82p_stack_record(uint32_t pc_now_h) {
     s_p82p_stack_last_stk1 = stk1;
 }
 
-/* vfetch ring — called from trace_Memory_ReadW for addr ∈ {$114, $116}. */
+/* vfetch ring — addr ∈ {$114, $116} のとき trace_Memory_ReadW から呼ばれる。 */
 static void p82p_observe_vec_fetch(uint32_t addr, uint32_t val) {
     if (s_p82p_vfetch_dumped) return;
     if (g_mx68k_frame_num < P82P_VFETCH_FRAME_ARM) return;
@@ -21935,7 +21935,7 @@ static void p82p_observe_vec_fetch(uint32_t addr, uint32_t val) {
     if (s_p82p_vfetch_count < P82P_VFETCH_RING_SIZE) s_p82p_vfetch_count++;
 }
 
-/* tcdcr ring — called from trace_Memory_WriteB for addr == 0xE8801D. */
+/* tcdcr ring — addr == 0xE8801D のとき trace_Memory_WriteB から呼ばれる。 */
 static void p82p_observe_tcdcr_write(uint8_t new_val, uint8_t prev_val) {
     if (s_p82p_tcdcr_dumped) return;
     if (g_mx68k_frame_num < P82P_VFETCH_FRAME_ARM) return;
@@ -22031,27 +22031,27 @@ static void p82p_tcdcr_dump(uint32_t pc_now_h) {
 #endif /* P82P_ENABLE */
 
 #if P82Q_ENABLE
-/* P82-Q: IRQ-pending lifecycle probe (5 independent rings).
+/* P82-Q: IRQ ペンディングのライフサイクルプローブ (独立した 5 つの ring)。
  *
- * Disclaimer: 1987 Sharp X68000 emulator (MX68K) debugging. All addresses
- * refer to emulated guest memory inside the emulator process.
+ * 注記: 1987 年のシャープ X68000 エミュレータ (MX68K) のデバッグ。アドレスは
+ * すべてエミュレータプロセス内のエミュレートされたゲストメモリを指す。
  *
- * Goal: partition H-D3 (IRQ-ack timing) into 5 sub-hypotheses by observing
- * the temporal sequence of Timer-C IRQ delivery (assert → mask → accept →
- * vector fetch → ISR → EOI) at chunk granularity, with per-instruction
- * compensation via ReadB / WriteB piggyback hooks on MFP IPR/ISR/IMR/VR.
+ * 目的: H-D3 (IRQ 受付のタイミング) を 5 つの下位仮説に切り分ける。Timer-C IRQ 配送の
+ * 時系列 (assert → mask → accept →
+ * ベクタフェッチ → ISR → EOI) を chunk 粒度で観測し、MFP IPR/ISR/IMR/VR への
+ * ReadB / WriteB 相乗りフックで命令単位の精度を補う。
  *
- * Rings:
- *  - mfp_ring (N=128, dedup by 7-byte tuple): IPRA/IPRB/IMRA/IMRB/ISRA/ISRB/VR
- *    snapshot per chunk + TCDR field recorded but not in dedup key (M-4)
- *  - cpu_ring (N=64, dedup by 3-field): C68K.IRQLine, ipl_mask, IRQH_IRQ[6]
- *  - isr_ring (N=32): ISR band entry/exit detection (vec 0x114 / 0x116 targets)
- *  - iprbrd_ring (N=16, event-driven): ReadB to MFP IPR/ISR/IMR
- *  - iprbwr_ring (N=16, event-driven): WriteB to MFP IPR/ISR/IMR/VR
+ * ring 構成:
+ *  - mfp_ring (N=128、7 バイト組で重複除去): IPRA/IPRB/IMRA/IMRB/ISRA/ISRB/VR の
+ *    chunk ごとのスナップショット + TCDR フィールド (記録するが重複除去キーには含めない、M-4)
+ *  - cpu_ring (N=64、3 フィールドで重複除去): C68K.IRQLine、ipl_mask、IRQH_IRQ[6]
+ *  - isr_ring (N=32): ISR 帯の進入/退出検出 (vec 0x114 / 0x116 の飛び先)
+ *  - iprbrd_ring (N=16、イベント駆動): MFP IPR/ISR/IMR への ReadB
+ *  - iprbwr_ring (N=16、イベント駆動): MFP IPR/ISR/IMR/VR への WriteB
  *
- * All rings one-shot dumped at PC ∈ [0xFF0632, 0xFF063C] when frame ≥ 16.
- * Read-only: direct MFP[] / C68K.IRQLine / C68k_Get_SR / C68k_Get_AReg /
- * IRQH_IRQ[6] read, no state mutation. */
+ * 全 ring は frame ≥ 16 で PC ∈ [0xFF0632, 0xFF063C] のとき one-shot ダンプされる。
+ * read-only: MFP[] / C68K.IRQLine / C68k_Get_SR / C68k_Get_AReg /
+ * IRQH_IRQ[6] の直読みのみで、状態は変更しない。 */
 
 typedef struct {
     uint32_t seq;
@@ -22064,7 +22064,7 @@ typedef struct {
     uint8_t  isra;
     uint8_t  isrb;
     uint8_t  vr;
-    uint8_t  tcdr;      /* Timer-C data register snapshot (M-4); not in dedup key */
+    uint8_t  tcdr;      /* Timer-C データレジスタのスナップショット (M-4)。重複除去キーには含めない */
 } p82q_mfp_rec_t;
 
 static p82q_mfp_rec_t s_p82q_mfp_ring[P82Q_MFP_RING_SIZE];
@@ -22110,7 +22110,7 @@ typedef struct {
     uint8_t  isrb_at_enter;
     uint8_t  iprb_at_exit;
     uint8_t  isrb_at_exit;
-    uint8_t  band_id;   /* 1 = FF15A0-FF15B0 band, 2 = FF0B58-FF0B68 band */
+    uint8_t  band_id;   /* 1 = FF15A0-FF15B0 帯、2 = FF0B58-FF0B68 帯 */
     uint8_t  _pad[3];
 } p82q_isr_rec_t;
 
@@ -22159,7 +22159,7 @@ static int s_p82q_dumped = 0;
 #endif /* P82Q_ENABLE */
 
 #if P82Q_ENABLE
-/* Ring A — MFP state snapshot per chunk; record only on tuple change. */
+/* Ring A — chunk ごとの MFP 状態スナップショット。組が変化したときのみ記録。 */
 static inline void p82q_record_mfp(uint32_t pc_now_h) {
     if (s_p82q_dumped) return;
     if (g_mx68k_frame_num < P82Q_FRAME_ARM) return;
@@ -22206,7 +22206,7 @@ static inline void p82q_record_mfp(uint32_t pc_now_h) {
     s_p82q_prev_mfp_valid = 1;
 }
 
-/* Ring B — CPU pending + IPL-mask per chunk; record only on tuple change. */
+/* Ring B — chunk ごとの CPU ペンディング + IPL マスク。組が変化したときのみ記録。 */
 static inline void p82q_record_cpu(uint32_t pc_now_h) {
     if (s_p82q_dumped) return;
     if (g_mx68k_frame_num < P82Q_FRAME_ARM) return;
@@ -22240,7 +22240,7 @@ static inline void p82q_record_cpu(uint32_t pc_now_h) {
     s_p82q_prev_cpu_valid = 1;
 }
 
-/* Ring C — ISR band entry/exit. band 1: FF15A0-FF15B0, band 2: FF0B58-FF0B68. */
+/* Ring C — ISR 帯の進入/退出。帯 1: FF15A0-FF15B0、帯 2: FF0B58-FF0B68。 */
 static inline uint8_t p82q_classify_band(uint32_t pc) {
     if (pc >= 0xFF15A0u && pc <= 0xFF15B0u) return 1u;
     if (pc >= 0xFF0B58u && pc <= 0xFF0B68u) return 2u;
@@ -22255,7 +22255,7 @@ static inline void p82q_update_isr(uint32_t pc_now_h, uint32_t a7) {
     uint8_t in_band = (band != 0u) ? 1u : 0u;
 
     if (!s_p82q_isr_prev_in_band && in_band) {
-        /* enter: latch pending state */
+        /* 進入: ペンディング状態を latch */
         s_p82q_isr_pending_enter_pc   = pc_now_h;
         s_p82q_isr_pending_enter_a7   = a7;
         s_p82q_isr_pending_enter_iprb = MFP[MFP_IPRB];
@@ -22264,7 +22264,7 @@ static inline void p82q_update_isr(uint32_t pc_now_h, uint32_t a7) {
         s_p82q_isr_pending_seq        = ++s_p82q_isr_seq;
         s_p82q_isr_prev_band_id       = band;
     } else if (s_p82q_isr_prev_in_band && !in_band) {
-        /* exit: commit record */
+        /* 退出: 記録を確定 */
         p82q_isr_rec_t *r = &s_p82q_isr_ring[s_p82q_isr_idx];
         r->seq           = s_p82q_isr_pending_seq;
         r->frame         = s_p82q_isr_pending_frame;
@@ -22284,7 +22284,7 @@ static inline void p82q_update_isr(uint32_t pc_now_h, uint32_t a7) {
     s_p82q_isr_prev_in_band = in_band;
 }
 
-/* Ring D — IPR/ISR/IMR ReadB piggyback (event-driven, no dedup). */
+/* Ring D — IPR/ISR/IMR の ReadB 相乗り (イベント駆動、重複除去なし)。 */
 static inline void p82q_record_iprbrd(uint32_t addr, uint8_t val) {
     if (s_p82q_dumped) return;
     if (g_mx68k_frame_num < P82Q_FRAME_ARM) return;
@@ -22300,7 +22300,7 @@ static inline void p82q_record_iprbrd(uint32_t addr, uint8_t val) {
     if (s_p82q_iprbrd_count < P82Q_IPRBRD_RING_SIZE) s_p82q_iprbrd_count++;
 }
 
-/* Ring E — IPR/ISR/IMR/VR WriteB piggyback (event-driven, no dedup). */
+/* Ring E — IPR/ISR/IMR/VR の WriteB 相乗り (イベント駆動、重複除去なし)。 */
 static inline void p82q_record_iprbwr(uint32_t addr, uint8_t val_new, uint8_t val_prev) {
     if (s_p82q_dumped) return;
     if (g_mx68k_frame_num < P82Q_FRAME_ARM) return;
@@ -22425,43 +22425,43 @@ static void p82q_dump_all(uint32_t pc_now_h) {
 #endif /* P82Q_ENABLE */
 
 #if P82R_ENABLE
-/* === P82-R: Timer-C tick rate + calibration cycle probe ===
- * Three independent rings:
- *   Ring F — TCDR/TCDCR/IPRB/IMRB + abs_cycle (non-dedup, calibration band)
- *   Ring G — per-chunk pc_entry/pc_exit + cycle_req/cycle_exec + abs_cycle (IPLROM scope)
- *   Ring H — key-event abs_cycle snapshot
- *            (1=cal entry 0xFF0AA6, 2=cal RTS 0xFF0B34 + D0,
- *             3=Timer-C fire IPRB[5] rise, 4=panic 0xFF0632-0xFF063C)
- * Read-only, side-effect-free. One-shot dump at panic-band.
+/* === P82-R: Timer-C の tick 速度 + キャリブレーションサイクルのプローブ ===
+ * 独立した 3 つの ring:
+ *   Ring F — TCDR/TCDCR/IPRB/IMRB + abs_cycle (重複除去なし、キャリブレーション帯)
+ *   Ring G — chunk ごとの pc_entry/pc_exit + cycle_req/cycle_exec + abs_cycle (IPLROM 範囲)
+ *   Ring H — 主要イベント時の abs_cycle スナップショット
+ *            (1=キャリブレーション進入 0xFF0AA6、2=キャリブレーション RTS 0xFF0B34 + D0、
+ *             3=Timer-C 発火 IPRB[5] 立ち上がり、4=panic 0xFF0632-0xFF063C)
+ * read-only、副作用なし。panic 帯で one-shot ダンプ。
  * Plan: /tmp/mx68k_P82R_plan.md §4 / §5 / §8. */
 
-/* Absolute cycle accumulator (uint64_t — guarded against negative `executed`).
- * Sign-guard rationale: c68k.c:118/125/132 (HALTED / WAITING / FAULTED) can
- * return executed=-1; without `if (executed > 0)` the cast
- * `(uint64_t)(int32_t)-1` would inject 0xFFFFFFFFFFFFFFFF into the counter
- * and silently corrupt every Ring F/G/H abs_cycle delta. */
+/* 絶対サイクル累積値 (uint64_t — 負の `executed` に対するガード付き)。
+ * 符号ガードの根拠: c68k.c:118/125/132 (HALTED / WAITING / FAULTED) は
+ * executed=-1 を返しうる。`if (executed > 0)` が無いと、キャスト
+ * `(uint64_t)(int32_t)-1` によりカウンタへ 0xFFFFFFFFFFFFFFFF が加算され、
+ * Ring F/G/H の abs_cycle 差分がすべて気付かぬうちに誤った値になる。 */
 static uint64_t s_p82r_abs_cycles = 0;
 static int      s_p82r_dumped     = 0;
 
-/* MFP prescaler table — Bridge-side const copy of
- * Core/px68k/x68k/mfp.c:22 Timer_Prescaler[8]. The px68k-internal values
- * are pre-scaled by 2.5× from the raw MC68901 datasheet values
- * (raw {1,4,10,16,50,64,100,200} × 2.5 = {1,10,25,40,125,160,250,500})
- * so they directly express the X68000 10MHz CPU cycle period of one
- * prescaler tick. Used in p82r_dump_all() to expand each Ring F entry's
- * raw TCDCR field to a human-readable `presc=N` column (avoids
- * -Wunused-function on the helper and keeps the dead-code surface zero). */
+/* MFP プリスケーラ表 — 次の Bridge 側 const 複製:
+ * Core/px68k/x68k/mfp.c:22 Timer_Prescaler[8]。px68k 内部の値は
+ * MC68901 データシートの生の値から 2.5 倍に事前換算されている
+ * (生の値 {1,4,10,16,50,64,100,200} × 2.5 = {1,10,25,40,125,160,250,500})
+ * ため、プリスケーラ 1 tick の周期を X68000 10MHz CPU のサイクル数で
+ * 直接表す。p82r_dump_all() で各 Ring F エントリの生の TCDCR フィールドを
+ * 人が読める `presc=N` 列へ展開するのに使う (ヘルパの -Wunused-function
+ * を避け、デッドコードをゼロに保つ)。 */
 static const int32_t s_p82r_prescaler[8] = {1, 10, 25, 40, 125, 160, 250, 500};
 
 static inline int32_t p82r_tcdcr_prescaler(uint8_t tcdcr) {
     return s_p82r_prescaler[(tcdcr >> 4) & 0x7u];
 }
 
-/* === Ring F: TCDR / TCDCR / IPRB / IMRB per chunk in calibration band === */
+/* === Ring F: キャリブレーション帯内の chunk ごとの TCDR / TCDCR / IPRB / IMRB === */
 typedef struct {
     uint32_t seq;
     uint32_t frame;
-    uint32_t pc;             /* chunk entry PC */
+    uint32_t pc;             /* chunk 進入時の PC */
     uint64_t abs_cycle;
     uint8_t  tcdr;
     uint8_t  tcdcr;
@@ -22471,13 +22471,13 @@ typedef struct {
 static p82r_tcdr_rec_t s_p82r_tcdr_ring[P82R_TCDR_RING_SIZE];
 static uint32_t s_p82r_tcdr_seq = 0, s_p82r_tcdr_idx = 0, s_p82r_tcdr_count = 0;
 
-/* === Ring G: chunk boundary cycle delta (IPLROM 0xFC0000-0xFFFFFF scope) === */
+/* === Ring G: chunk 境界のサイクル差分 (IPLROM 0xFC0000-0xFFFFFF 範囲) === */
 typedef struct {
     uint32_t seq;
     uint32_t pc_entry;
     uint32_t pc_exit;
     int32_t  cycle_requested;
-    int32_t  cycle_executed;  /* signed — sign-bit preserved as diagnostic value */
+    int32_t  cycle_executed;  /* 符号付き — 診断値として符号ビットを保持 */
     uint64_t abs_cycle_at_exit;
     uint16_t frame;
     uint16_t _pad;
@@ -22485,10 +22485,10 @@ typedef struct {
 static p82r_chunkdelta_rec_t s_p82r_chunk_ring[P82R_CHUNK_RING_SIZE];
 static uint32_t s_p82r_chunk_seq = 0, s_p82r_chunk_idx = 0, s_p82r_chunk_count = 0;
 
-/* === Ring H: key-event abs_cycle snapshot === */
+/* === Ring H: 主要イベント時の abs_cycle スナップショット === */
 typedef struct {
     uint32_t seq;
-    uint32_t event_id;   /* 1=cal entry, 2=cal RTS + D0, 3=Timer-C fire, 4=panic */
+    uint32_t event_id;   /* 1=キャリブレーション進入、2=キャリブレーション RTS + D0、3=Timer-C 発火、4=panic */
     uint32_t pc_at_event;
     uint64_t abs_cycle;
     uint32_t d0_at_event;
@@ -22502,15 +22502,15 @@ typedef struct {
 static p82r_event_rec_t s_p82r_event_ring[P82R_EVENT_RING_SIZE];
 static uint32_t s_p82r_event_seq = 0, s_p82r_event_idx = 0, s_p82r_event_count = 0;
 
-/* IPRB[5] (Timer-C pending) rise-edge detect — chunk-granularity. */
+/* IPRB[5] (Timer-C ペンディング) の立ち上がりエッジ検出 — chunk 粒度。 */
 static uint8_t  s_p82r_prev_iprb = 0;
 static int      s_p82r_prev_iprb_valid = 0;
 
-/* === Ring F record helper === */
+/* === Ring F 記録ヘルパ === */
 static inline void p82r_tcdr_record(uint32_t pc_now_h) {
     if (s_p82r_dumped) return;
     if (g_mx68k_frame_num < P82R_FRAME_ARM) return;
-    /* Calibration band scope: routine entry 0xFF0AA6 .. ISR addr 0xFF0B58. */
+    /* キャリブレーション帯の範囲: ルーチン進入 0xFF0AA6 .. ISR アドレス 0xFF0B58。 */
     if (pc_now_h < 0xFF0AA6u || pc_now_h >= 0xFF0B58u) return;
 
     p82r_tcdr_rec_t *r = &s_p82r_tcdr_ring[s_p82r_tcdr_idx];
@@ -22526,14 +22526,14 @@ static inline void p82r_tcdr_record(uint32_t pc_now_h) {
     if (s_p82r_tcdr_count < P82R_TCDR_RING_SIZE) s_p82r_tcdr_count++;
 }
 
-/* === Ring G record helper (called from chunk-exit) === */
+/* === Ring G 記録ヘルパ (chunk 終了時に呼ばれる) === */
 static inline void p82r_chunkdelta_record(uint32_t pc_entry,
                                           uint32_t pc_exit,
                                           int32_t requested,
                                           int32_t executed) {
     if (s_p82r_dumped) return;
     if (g_mx68k_frame_num < P82R_FRAME_ARM) return;
-    /* IPLROM scope (0xFC0000-0xFFFFFF). */
+    /* IPLROM 範囲 (0xFC0000-0xFFFFFF)。 */
     if (pc_entry < 0xFC0000u || pc_entry >= 0x1000000u) return;
 
     p82r_chunkdelta_rec_t *r = &s_p82r_chunk_ring[s_p82r_chunk_idx];
@@ -22541,7 +22541,7 @@ static inline void p82r_chunkdelta_record(uint32_t pc_entry,
     r->pc_entry          = pc_entry;
     r->pc_exit           = pc_exit;
     r->cycle_requested   = requested;
-    r->cycle_executed    = executed;  /* signed — diagnostic, sign-bit preserved */
+    r->cycle_executed    = executed;  /* 符号付き — 診断用、符号ビットを保持 */
     r->abs_cycle_at_exit = s_p82r_abs_cycles;
     r->frame             = (uint16_t)g_mx68k_frame_num;
     r->_pad              = 0;
@@ -22549,7 +22549,7 @@ static inline void p82r_chunkdelta_record(uint32_t pc_entry,
     if (s_p82r_chunk_count < P82R_CHUNK_RING_SIZE) s_p82r_chunk_count++;
 }
 
-/* === Ring H record helper === */
+/* === Ring H 記録ヘルパ === */
 static inline void p82r_event_record(uint32_t event_id,
                                      uint32_t pc_at_event,
                                      uint32_t d0_val) {
@@ -22572,14 +22572,14 @@ static inline void p82r_event_record(uint32_t event_id,
     if (s_p82r_event_count < P82R_EVENT_RING_SIZE) s_p82r_event_count++;
 }
 
-/* === Dump (one-shot at panic band) === */
+/* === ダンプ (panic 帯で one-shot) === */
 static void p82r_dump_all(uint32_t pc_now_h) {
     if (s_p82r_dumped) return;
     if (pc_now_h < 0xFF0632u || pc_now_h > 0xFF063Cu) return;
     if (g_mx68k_frame_num < P82R_FRAME_ARM) return;
     s_p82r_dumped = 1;
 
-    /* Ring F — TCDR observation (each entry expanded with `presc=N`) */
+    /* Ring F — TCDR の観測 (各エントリを `presc=N` 付きで展開) */
     {
         uint32_t start = (s_p82r_tcdr_count < P82R_TCDR_RING_SIZE) ? 0u : s_p82r_tcdr_idx;
         for (uint32_t i = 0; i < s_p82r_tcdr_count; i++) {
@@ -22598,7 +22598,7 @@ static void p82r_dump_all(uint32_t pc_now_h) {
                   (unsigned)s_p82r_tcdr_seq, (unsigned)s_p82r_tcdr_count);
     }
 
-    /* Ring G — chunk delta */
+    /* Ring G — chunk 差分 */
     {
         uint32_t start = (s_p82r_chunk_count < P82R_CHUNK_RING_SIZE) ? 0u : s_p82r_chunk_idx;
         for (uint32_t i = 0; i < s_p82r_chunk_count; i++) {
@@ -22615,7 +22615,7 @@ static void p82r_dump_all(uint32_t pc_now_h) {
                   (unsigned)s_p82r_chunk_seq, (unsigned)s_p82r_chunk_count);
     }
 
-    /* Ring H — key events (event_id=2 d0 is the primary datum) */
+    /* Ring H — 主要イベント (event_id=2 の d0 が主たるデータ) */
     {
         uint32_t start = (s_p82r_event_count < P82R_EVENT_RING_SIZE) ? 0u : s_p82r_event_idx;
         for (uint32_t i = 0; i < s_p82r_event_count; i++) {
@@ -22635,9 +22635,9 @@ static void p82r_dump_all(uint32_t pc_now_h) {
                   (unsigned)s_p82r_event_seq, (unsigned)s_p82r_event_count);
     }
 
-    /* Footer — INCONCLUSIVE conditions flagged per plan §10:
-     *   (a) event_id=2 count == 0 ⇒ cal RTS 0xFF0B34 unreached
-     *   (b) event_id=3 count == 0 ⇒ Timer-C fire (IPRB[5] rise) unseen */
+    /* フッタ — plan §10 に従い INCONCLUSIVE 条件を明示する:
+     *   (a) event_id=2 の件数 == 0 ⇒ キャリブレーション RTS 0xFF0B34 に未到達
+     *   (b) event_id=3 の件数 == 0 ⇒ Timer-C 発火 (IPRB[5] 立ち上がり) を未観測 */
     {
         uint32_t ev2 = 0, ev3 = 0;
         uint32_t start = (s_p82r_event_count < P82R_EVENT_RING_SIZE) ? 0u : s_p82r_event_idx;
@@ -22663,28 +22663,28 @@ static void p82r_dump_all(uint32_t pc_now_h) {
 }
 #endif /* P82R_ENABLE */
 
-/* === P82-S-A: calibration spin D1 trace + cal_entry->Timer-C fire delta === */
+/* === P82-S-A: キャリブレーションスピン中の D1 トレース + cal_entry->Timer-C 発火の差分 === */
 #if P82S_ENABLE && !P82R_ENABLE
 #error "P82S requires P82R"
 #endif
 
 #if P82S_ENABLE && P82R_ENABLE
-/* P82-S-A diagnostic-only probe. Read-only sibling of P82-R: reuses
- * P82-R's s_p82r_abs_cycles (cycle axis) and s_p82r_event_ring[] (Timer-C
- * fire ev=3 / panic ev=4 abs_cycle) by read reference only — P82-R record /
- * hook / dump logic is unchanged. Adds:
- *   Ring I            — D1 spin trace (non-dedup, 64 slot) in spin band
- *   cal_entry detector — own PC-range landmark (P82-R Ring H ev=1 was not
- *                        recorded in Test#119 due to chunk-exact-PC gating)
- *   p82s_dump         — Ring I dump + DELTA footer (cal_entry→fire/→panic)
- * Plan: /tmp/mx68k_P82S_plan.md §4 / §8. One-shot dump at panic-band. */
+/* P82-S-A 診断専用プローブ。P82-R の read-only な兄弟: P82-R の
+ * s_p82r_abs_cycles (サイクル軸) と s_p82r_event_ring[] (Timer-C
+ * 発火 ev=3 / panic ev=4 の abs_cycle) を読み取り参照のみで再利用する — P82-R の記録 /
+ * フック / ダンプ処理は変更しない。追加するもの:
+ *   Ring I            — スピン帯での D1 スピントレース (重複除去なし、64 スロット)
+ *   cal_entry detector — 独自の PC 範囲による目印 (P82-R Ring H の ev=1 は
+ *                        chunk 境界 PC の完全一致によるゲートのため Test#119 で記録されなかった)
+ *   p82s_dump         — Ring I のダンプ + DELTA フッタ (cal_entry→発火/→panic)
+ * Plan: /tmp/mx68k_P82S_plan.md §4 / §8. panic 帯で one-shot ダンプ。 */
 
-/* === Ring I: D1 spin trace (non-dedup, P82S_D1_RING_SIZE slot) === */
+/* === Ring I: D1 スピントレース (重複除去なし、P82S_D1_RING_SIZE スロット) === */
 typedef struct {
     uint32_t seq;        /* 表示用 1-indexed 採番カウンタ */
     uint32_t pc;         /* チャンク開始 PC */
     uint64_t abs_cycle;  /* s_p82r_abs_cycles を read 流用 (P82-R と時間軸共有) */
-    uint32_t d1;         /* C68k_Get_DReg(&C68K, 1) — dbra spin counter */
+    uint32_t d1;         /* C68k_Get_DReg(&C68K, 1) — dbra スピンカウンタ */
     uint8_t  tcdr;       /* MFP[MFP_TCDR] */
     uint8_t  iprb;       /* MFP[MFP_IPRB] */
     uint16_t frame;      /* 現在 frame 番号 */
@@ -22694,15 +22694,15 @@ static uint32_t s_p82s_d1_count = 0;   /* 総記録件数 (折り返し前提) *
 static uint32_t s_p82s_d1_seq   = 0;   /* 表示用 1-indexed seq 採番カウンタ */
 
 /* === cal_entry edge detector (P82-S 自前ランドマーク — BLOCKING-1 fix) === */
-static uint8_t  s_p82s_cal_seen  = 0;   /* one-shot guard */
+static uint8_t  s_p82s_cal_seen  = 0;   /* one-shot ガード */
 static uint64_t s_p82s_cal_abs   = 0;   /* cal_entry 到達時の abs_cycle */
 static uint32_t s_p82s_cal_pc    = 0;   /* 捕捉したチャンク開始 PC */
 static uint16_t s_p82s_cal_frame = 0;   /* 捕捉時 frame */
 
-/* dump one-shot guard. */
+/* ダンプの one-shot ガード。 */
 static int s_p82s_dumped = 0;
 
-/* === Ring I record helper === */
+/* === Ring I 記録ヘルパ === */
 /* spin band 判定済み前提で D1 / TCDR / IPRB / abs を 1 件書き込む。
  * 格納 index = count % P82S_D1_RING_SIZE（count を ++ する前に算出）。 */
 static inline void p82s_d1_record(uint32_t pc, uint16_t frame) {
@@ -22719,7 +22719,7 @@ static inline void p82s_d1_record(uint32_t pc, uint16_t frame) {
     s_p82s_d1_count++;
 }
 
-/* === Dump (one-shot at panic band) === */
+/* === ダンプ (panic 帯で one-shot) === */
 static void p82s_dump(void) {
     if (s_p82s_dumped) return;
     s_p82s_dumped = 1;
@@ -22911,7 +22911,7 @@ static void p82s_dump(void) {
  *   ① IRQ delivery 段 — Timer-C (vect==0x45) accept が 0 件
  *   ② vector->jump 段 — accept あり & jump_target が期待 ISR でない
  *   ③ ISR / post-ISR 段 — accept あり & jump_target = 0x00FF0B5A
- * Ring A — interrupt accept ring (mx68k_diag_irqh_callback piggyback)
+ * Ring A — 割込み受付 ring (mx68k_diag_irqh_callback への相乗り)
  * Ring B — accept 後 chunk-PC trace ring (per-chunk hook)
  * 段判定は vect==0x45 厳密一致 + first-Timer-C one-shot ラッチで行う。
  * 期待 ISR 0xFF0B5A の根拠: P82-P Test#117 で spin 中 $114=0x00FF0B5A
@@ -22919,7 +22919,7 @@ static void p82s_dump(void) {
  * (vfetch 系の重複 ring は作らない)。
  * Plan: /tmp/mx68k_P82T_plan.md §4 / §5 / §8. */
 
-/* === Ring A: interrupt accept ring (callback piggyback, 主リング) === */
+/* === Ring A: 割込み受付 ring (コールバック相乗り、 主リング) === */
 typedef struct {
     uint32_t seq;             /* 1-indexed 採番 (= 総 accept 件数, 全 vect) */
     uint32_t frame;           /* g_mx68k_frame_num */
@@ -22944,7 +22944,7 @@ static uint32_t s_p82t_first_tc_seq  = 0;  /* その accept の seq (時系列�
 
 /* === Ring B: accept 後 PC trace ring (per-chunk, 補助リング) === */
 typedef struct {
-    uint32_t seq;     /* 1-indexed */
+    uint32_t seq;     /* 1 始まり */
     uint32_t frame;
     uint32_t pc;      /* chunk 開始 PC */
     uint32_t sr;
@@ -22956,10 +22956,10 @@ static uint32_t s_p82t_pctrace_idx   = 0;
 static uint32_t s_p82t_pctrace_count = 0;
 static int      s_p82t_mfp_accept_seen = 0; /* MFP 系 accept 検出フラグ (Ring B トリガ専用) */
 
-/* dump one-shot guard. */
+/* ダンプの one-shot ガード。 */
 static int s_p82t_dumped = 0;
 
-/* === Ring A record helper ===
+/* === Ring A 記録ヘルパ ===
  * accept 1 件を記録する。vect==0x45 厳密一致のときのみ段判定カウンタを
  * 加算し、最初の vect==0x45 accept で one-shot ラッチを確定する。
  * jump_target は piggyback 呼び出し側で guarded read 済みの値を受け取る
@@ -22999,7 +22999,7 @@ static inline void p82t_record_accept(uint32_t level, uint32_t vect,
     }
 }
 
-/* === Ring B record helper ===
+/* === Ring B 記録ヘルパ ===
  * MFP 系 accept 検出後の chunk 開始 PC を 1 件記録する。
  * 起動条件 (s_p82t_mfp_accept_seen / frame) は呼び出し側で判定済み。 */
 static inline void p82t_record_pctrace(uint32_t pc, uint32_t sr,
@@ -23015,7 +23015,7 @@ static inline void p82t_record_pctrace(uint32_t pc, uint32_t sr,
     if (s_p82t_pctrace_count < P82T_PCTRACE_RING_SIZE) s_p82t_pctrace_count++;
 }
 
-/* === Dump (one-shot at panic band) === */
+/* === ダンプ (panic 帯で one-shot) === */
 static void p82t_dump(void) {
     if (s_p82t_dumped) return;
     s_p82t_dumped = 1;
@@ -23117,7 +23117,7 @@ static p82u_wrec_t s_p82u_ring[P82U_RING_SIZE];
 static uint32_t s_p82u_seq   = 0;   /* 累積採番（折り返し後も総件数を保持） */
 static uint32_t s_p82u_head  = 0;   /* ring 書込位置 */
 static uint32_t s_p82u_count = 0;   /* ring 有効件数 min(seq, RING_SIZE) */
-static int      s_p82u_dumped = 0;  /* one-shot dump guard */
+static int      s_p82u_dumped = 0;  /* one-shot のダンプガード */
 
 /* --- first-bad latch: slot32 が初めて 0x00FF0B5A になった瞬間を確定保存。
  *     非 dedup ring が満杯で早期 record を上書きしても、不正値を最初に
@@ -23165,7 +23165,7 @@ static void p82u_dump(uint32_t pc_now_h) {
     uint32_t ring_count   = s_p82u_count;
     uint32_t v114_now     = MEM ? p47_read_long_le(0x114u) : 0xFFFFFFFFu;
 
-    /* --- header --- */
+    /* --- ヘッダ --- */
     debug_log("[P82-U-A-HDR] P82-U-A $114/$116 WriteW probe  frame=%d  "
               "dump_pc=0x%06x\n", g_mx68k_frame_num, (unsigned)pc_now_h);
     debug_log("[P82-U-A-HDR] writes_total=%u ring_count=%u v114_now=0x%08x\n",
@@ -23264,7 +23264,7 @@ typedef enum {
     P82W_B_ROMSTRAY  /* in_calib 中の上記以外の ROM PC (wild jump の疑い)    */
 } p82w_band_t;
 
-/* ---- band record ring (run-length dedup, §5.1) ---- */
+/* ---- 帯記録 ring (ランレングス重複除去、§5.1) ---- */
 typedef struct {
     uint32_t seq;        /* 1-indexed 採番 (= 総 dedup band 件数) */
     uint32_t pc;         /* chunk 開始 PC (logical, & 0x00FFFFFF) */
@@ -23298,14 +23298,14 @@ static int      s_p82w_ram_base_set = 0; /* ram_base latch 済フラグ */
 static uint32_t s_p82w_first_ram_pc = 0; /* in_calib 中の最初の RAM chunk 開始 PC */
 static p82w_band_t s_p82w_last_band = P82W_B_NONE; /* §5.1 F1 橋渡し */
 
-static int      s_p82w_dumped       = 0; /* dump one-shot guard */
+static int      s_p82w_dumped       = 0; /* ダンプの one-shot ガード */
 
-/* ---- Stage 2 — Timer-C accept ring (§5.2) ---- */
+/* ---- Stage 2 — Timer-C 受付 ring (§5.2) ---- */
 typedef struct {
     uint32_t seq;          /* 1-indexed (vect==0x45 accept のみ採番) */
     uint8_t  frame;
     uint8_t  in_calib;     /* accept 時 s_p82w_in_calib だったか */
-    uint8_t  pass;         /* ★F1: 0=unknown / 1=ROM-pass / 2=RAM-pass */
+    uint8_t  pass;         /* ★F1: 0=不明 / 1=ROM-pass / 2=RAM-pass */
     uint8_t  _pad;
     uint32_t level;        /* callback 引数 IRQ level (MFP 系=6) */
     uint32_t jtgt;         /* [vect*4] = これから jump する ISR address */
@@ -23371,7 +23371,7 @@ static const char *p82w_band_name(uint8_t b)
     }
 }
 
-/* ---- Stage 1 — per-chunk band trace (§5.1) ----
+/* ---- Stage 1 — chunk ごとの帯トレース (§5.1) ----
  * 処理順 (順序規律 m2): (1) A1 latch 更新 → (2) ram_base latch (RAM 初遷移時)
  *  → (3) band 分類 → (4) ring 記録。 */
 static void p82w_stage1_record(uint32_t pc)
@@ -23470,7 +23470,7 @@ static void p82w_stage1_record(uint32_t pc)
     s_p82w_band_have = 1;
 }
 
-/* ---- Stage 2 — IRQ callback piggyback (§5.2) ----
+/* ---- Stage 2 — IRQ コールバック相乗り (§5.2) ----
  * 完全 read-only。callback 引数 level / 戻り値 vect は変更しない。
  * stale な C68K.PC は使わない。 */
 static void p82w_stage2_accept(uint32_t level, uint32_t vect,
@@ -23483,14 +23483,14 @@ static void p82w_stage2_accept(uint32_t level, uint32_t vect,
         return;
     }
 
-    /* vect==0x45 (Timer-C) accept */
+    /* vect==0x45 (Timer-C) の受付 */
     s_p82w_tc_accept_total++;
 
     /* pass 決定 (★F1) — s_p82w_last_band を参照。 */
     uint8_t pass = 0;
     if (s_p82w_last_band == P82W_B_BODY)      pass = 1;  /* ROM-pass */
     else if (s_p82w_last_band == P82W_B_RAM)  pass = 2;  /* RAM-pass */
-    else                                      pass = 0;  /* unknown   */
+    else                                      pass = 0;  /* 不明      */
 
     if (s_p82w_in_calib) {
         if (pass == 1)      s_p82w_tc_rom++;
@@ -23583,7 +23583,7 @@ static void p82w_dump(uint32_t pc_now_h)
         }
     }
 
-    /* ---- FOOTER — verdict cascade (§6.1) ---- */
+    /* ---- FOOTER — verdict の段階判定 (§6.1) ---- */
     {
         int      A     = s_p82w_cal_seen;
         int      R     = s_p82w_cal_returned;
@@ -23678,17 +23678,17 @@ static void p82w_dump(uint32_t pc_now_h)
 }
 #endif /* P82W_ENABLE */
 
-/* P82-X-D build-provenance token. Defined next to the corrected function so
- * the token and the fix live in the same compilation neighbourhood. Referenced
- * both here (init-time, Part 2) and indirectly by the literal in the fix branch
- * (Part 1) — the literal spelling MUST match this define exactly. */
+/* P82-X-D のビルド由来トークン。修正した関数のすぐ隣で定義し、
+ * トークンと修正がコンパイル上の同じ近傍に置かれるようにする。参照元は
+ * ここ (初期化時、Part 2) と、修正分岐内のリテラルによる間接参照 (Part 1)
+ * の両方 — そのリテラルの綴りはこの define と完全に一致しなければならない。 */
 #define P82XD_BUILD_TOKEN   "P82XD-127-romfix"
 
 /* P254: $FC0000-$FC1FFF SCSI IPL ROM データread overlay ゲートシンボル。
    fetch overlay(scsi_in_fetch_overlay_apply, ~26016)と同条件を共有する。 */
 extern uint8_t s_scsi_in_rom[];            /* EmulatorBridge.c(P247), LE16スワップ済 */
 extern bool    s_scsi_in_rom_loaded;       /* 同(P247) */
-int            mx68k_get_machine_type(void);/* EmulatorBridge.c(P253) getter */
+int            mx68k_get_machine_type(void);/* EmulatorBridge.c(P253) の getter */
 
 #if P602_ENABLE
 /* ====================================================================
@@ -23737,7 +23737,7 @@ static uint32_t s_p602_run_seq = 0;   /* p602_workarea_snapshot() 毎に +1 */
  *   p84a_read_byte_le / p85a_read_op は `#if P82XY_ENABLE` の内側にあり、
  *   同フラグは現在 0(EmulatorBridge.h:1300)なので実体が存在しない。
  *   P84-A が同じ理由で P82XY-local な読み出しヘルパーを置いた前例に倣う。
- * 規約: MEM[] はワードスワップ格納なので guest byte at addr = MEM[addr ^ 1]。
+ * 規約: MEM[] はワードスワップ格納なので addr のゲストバイト = MEM[addr ^ 1]。
  *   IPL[] だけはスワップを掛けない生 BE 順(Core の rm16_main と同じ規約 ——
  *   Bridge/EmulatorBridge.c:8776-8785 の P600_STORE_IPL 注記に一次情報源あり)。
  *   どちらにも該当しない窓(GVRAM/TVRAM/I/O)は 0xFF を返す —— c68k は GVRAM を
@@ -24187,8 +24187,8 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     p602_pc_parity_note();
 #endif
 #if P82XR_ENABLE
-    /* P82-X-R CP-R-5: BusErr / AdrErr extern sticky-edge sample
-     * (supporting only, Codex F3). callsite=1 → ReadB. */
+    /* P82-X-R CP-R-5: BusErr / AdrErr の extern sticky エッジのサンプル
+     * (補助用途のみ、Codex F3)。callsite=1 → ReadB。 */
     p82xr_buserr_sample(1u);
 #endif
 #if P82XC_ENABLE
@@ -24207,19 +24207,19 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
 #endif
     if (addr >= 0xfc0000 && addr <= 0xffffff) {
         uint32_t offset = addr & 0x1ffff;
-        /* P82-X-A / re-applied P82-X-D: IPL[] is raw big-endian (IPLROM.DAT
-         * file order); a guest byte address maps directly to the file offset.
-         * trace_Memory_ReadW was already corrected to explicit BE assembly
-         * (P17-FIX-C, line ~4166); the sibling byte path was missed and still
-         * applied a little-endian (effective addr^1) convention, returning
-         * byte-swapped values. A guest byte-granular ROM->RAM copy (IPLROM
-         * clock-calibration RAM-pass, move.b loop) therefore produced a
-         * byte-swapped code image that the LE16 opcode fetch decoded as
-         * garbage. Return the true guest byte directly. */
+        /* P82-X-A / P82-X-D で再適用: IPL[] は生のビッグエンディアン (IPLROM.DAT
+         * のファイル順) であり、ゲストのバイトアドレスはそのままファイルオフセットに対応する。
+         * trace_Memory_ReadW は既に明示的な BE 組み立てに修正済みだった
+         * (P17-FIX-C、~4166 行目) が、兄弟であるバイト経路は見落とされており、依然として
+         * リトルエンディアン (実質 addr^1) の規約を適用して、バイトスワップされた値を
+         * 返していた。そのためゲストのバイト単位の ROM->RAM コピー (IPLROM の
+         * クロックキャリブレーション RAM-pass、move.b ループ) はバイトスワップされた
+         * コードイメージを生成し、LE16 のオペコードフェッチがそれを無意味な命令として
+         * デコードしていた。真のゲストバイトを直接返す。 */
         val = IPL[offset];
-        /* P82-X-D build-provenance: prove the corrected BE byte-read line is
-         * in the running binary. Emitted once, from inside the very branch
-         * that was edited — token presence is 1:1 with the fix. */
+        /* P82-X-D ビルド由来証明: 修正済みの BE バイト read 行が実行中のバイナリに
+         * 含まれていることを証明する。編集したまさにその分岐の内側から 1 回だけ
+         * 出力する — トークンの有無は修正の有無と 1:1 に対応する。 */
         {
             static int s_p82xd_marked = 0;
             if (!s_p82xd_marked) {
@@ -24239,7 +24239,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
             val = s_scsi_in_rom[(addr & 0x1fff) ^ 1];
         }
 #if P82XC_ENABLE
-        p82xc_branch = 1u;   /* ROM/IPL branch */
+        p82xc_branch = 1u;   /* ROM/IPL 分岐 */
 #endif
     } else if (addr >= 0xf00000 && addr <= 0xfbffff) {
         if (addr & 1) {
@@ -24323,7 +24323,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
             uint32_t a413 = addr & 0x00FFFFFFu;
             int in_range =
                    (a413 >= 0xEC0000u && a413 <= 0xEC8001u)   /* AWESOME-X */
-                || (a413 >= 0xEE0000u && a413 <= 0xEEFFFFu)   /* G-RAM bank */
+                || (a413 >= 0xEE0000u && a413 <= 0xEEFFFFu)   /* G-RAM バンク */
                 || (a413 >= 0xEFF800u && a413 <= 0xEFF83Fu)   /* POLYPHON #0 */
                 || (a413 >= 0xEFF880u && a413 <= 0xEFF8BFu)   /* POLYPHON #1 */
                 || (a413 >= 0xEAFC00u && a413 <= 0xEAFC3Fu);  /* RS-232C #0-3 */
@@ -24356,7 +24356,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
         }
 #endif
 #if P82XC_ENABLE
-        p82xc_branch = 2u;   /* main-RAM branch (Memory_ReadB) */
+        p82xc_branch = 2u;   /* メイン RAM 分岐 (Memory_ReadB) */
 #endif
     }
 #if P218_PROBE
@@ -24451,8 +24451,8 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
         /* P686 (D-70): $E94005(ドライブステータス)read の分母。 */
         if ((addr & 0x00FFFFFFu) == 0xE94005u) p686_e94005_rd++;
     }
-    /* P163: FDC data-port dialogue capture in the 2nd-burst stall window
-     * (frames ~55-80). Read-only, bounded. $E94001=main status, $E94003=data/result. */
+    /* P163: 2 回目のバースト停滞窓 (frames ~55-80) における FDC データポートの
+     * やり取りを捕捉。read-only、件数上限付き。$E94001=メインステータス、$E94003=データ/リザルト。 */
     {
         static int s_p163_rd = 0;
         uint32_t a163 = addr & 0x00FFFFFF;
@@ -24467,8 +24467,8 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
             s_p163_rd++;
         }
     }
-    /* P165: capture FDC result-phase bytes (st0/st1/.../C/H/R/N) the CPU reads while
-     * spinning in the ff93xx read-retry loop. Read-only, bounded. */
+    /* P165: ff93xx の読込リトライループでスピン中に CPU が読む FDC リザルトフェーズの
+     * バイト (st0/st1/.../C/H/R/N) を捕捉。read-only、件数上限付き。 */
     {
         static int s_p165r = 0;
         uint32_t a165 = addr & 0x00FFFFFF;
@@ -24540,11 +24540,11 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
         g_trace_count++;
     }
 #if P63_PROBE_ENABLE
-    /* Probe-B: log reads to guest addr 0xe94001 (FDC Status Register).
-     * The IOCS disk-read handler reads this to check FDC ready state.
-     * Expect bit7=MRQ=1 (= value 0x80 minimum) for FDC-ready.
-     * addr here is the raw bus address; mask to 24 bits to match the
-     * X68000 external address bus (same pattern as the P44-DIAG block). */
+    /* Probe-B: ゲストアドレス 0xe94001 (FDC ステータスレジスタ) への read を記録する。
+     * IOCS のディスク読込ハンドラは FDC のレディ状態を確認するためにこれを読む。
+     * FDC レディなら bit7=MRQ=1 (= 値は最低 0x80) となるはず。
+     * ここでの addr は生のバスアドレス。X68000 の外部アドレスバスに合わせて
+     * 24 ビットにマスクする (P44-DIAG ブロックと同じパターン)。 */
     if (s_p63_fdcst_count < P63_FDCST_LOG_MAX &&
         (addr & 0x00FFFFFFu) == 0x00e94001u) {
         uint32_t p63_pc = MX68KQ_GUEST_PC();
@@ -24563,10 +24563,10 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     p82i_trace_record(0, addr, val);   /* P82-I: ReadB */
 #endif
 #if P82Q_ENABLE
-    /* P82-Q Ring D: MFP IPR/ISR/IMR ReadB piggyback. Records guest reads of
-     * IPRA/IPRB/ISRA/ISRB/IMRA/IMRB at per-instruction resolution so the
-     * Ring A chunk-granular snapshot can be cross-referenced with the PC of
-     * whichever instruction observed the IRQ state. Read-only. */
+    /* P82-Q Ring D: MFP IPR/ISR/IMR の ReadB 相乗り。IPRA/IPRB/ISRA/ISRB/IMRA/IMRB
+     * へのゲスト read を命令単位の分解能で記録し、Ring A の chunk 粒度の
+     * スナップショットを、IRQ 状態を観測した命令の PC と突き合わせ
+     * られるようにする。read-only。 */
     {
         uint32_t p82q_addr = addr & 0x00FFFFFFu;
         if (p82q_addr == 0xE8800Bu || p82q_addr == 0xE8800Du ||
@@ -24662,8 +24662,8 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
 #endif
 #if P82XM_ENABLE
     /* P82-X-M: byte read 経路。CP-B′（$E94003 全件 + ReadData result-phase
-     * latch）+ CP-C′（MAR-region buffer reads）+ CP-D′（FDC-driver RAM-flag
-     * reads）。窓 frames 80-95（ヘルパ内 p82xm_in_window() で短絡）。val は
+     * latch）+ CP-C′（MAR 領域バッファの read）+ CP-D′（FDC ドライバ RAM フラグの
+     * read）。窓 frames 80-95（ヘルパ内 p82xm_in_window() で短絡）。val は
      * guest へ返る確定値で無改変（観測のみ・return 直前）。 */
     p82xm_note_readb(addr, (uint8_t)(val & 0xFFu));
 #endif
@@ -24679,17 +24679,17 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     p82xo_cpo5_record(addr, 1u, (uint16_t)(val & 0xFFu), 0u);
 #endif
 #if P82XP_ENABLE
-    /* P82-X-P CP-P-D D-1/D-3 (ReadB path, callsite=1 placeholder — B-path).
+    /* P82-X-P CP-P-D D-1/D-3 (ReadB 経路、callsite=1 は仮置き — B 経路)。
      * BusErrFlag/BusErrHandling 後段 sample (Memory_ReadB 後 — wm_main 経由で
      * set 済). read-only. */
     p82xp_cppd_record(addr, 1u, (uint32_t)val, 0u, 1u);
 #endif
 #if P82XY_ENABLE
-    /* P83-C: IO read trail push (filter IO ranges, freeze after CP-Y-1 fire).
-     * Precedent: P41-DIAG IOC/FDC/DMA ReadB hooks at :10389-10413 use the same
-     * MX68KQ_GUEST_PC() + addr filter pattern. The freeze gate s_p82xy_y1_done
-     * ensures the ring captures the IO ReadB history immediately preceding the
-     * vec $B8 fetch (CP-Y-1 firing site in trace_Memory_ReadW). */
+    /* P83-C: IO read 軌跡への push (IO 範囲でフィルタ、CP-Y-1 発火後は凍結)。
+     * 前例: :10389-10413 の P41-DIAG IOC/FDC/DMA ReadB フックも同じ
+     * MX68KQ_GUEST_PC() + addr フィルタのパターンを使う。凍結ゲート s_p82xy_y1_done
+     * により、ring は vec $B8 フェッチ (trace_Memory_ReadW 内の CP-Y-1 発火箇所)
+     * の直前の IO ReadB 履歴を確実に捕捉する。 */
     {
         uint32_t io_a = addr & 0x00FFFFFFu;
         int is_io =
@@ -24708,17 +24708,17 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     }
 #endif /* P82XY_ENABLE */
 #if P207C_BUSERR_ENABLE
-    /* P207c: a read of an absent option-board I/O region sets BusErrFlag on a
-     * real machine. c68k has no bus-error path, so we latch it here and
-     * synthesize the 68000 group-0 exception at the instruction boundary (see
-     * mx68k_synth_buserror). C68k_Release_Cycle makes the current C68k_Exec
-     * return right after this instruction so the frame's PC is a clean
-     * instruction boundary. Read-only w.r.t. the returned val.
-     * P209: widen from the MIDI-only window (0xEAFA00-0xEAFAFF) to the whole
-     * option-board I/O window 0xEA0000-0xEFFFFF. BusErrFlag&1 is set on a READ
-     * only by genuinely-absent hardware (rm_buserr + MIDI-off default); real
-     * devices (SCSI/BG/SRAM) and Mercury never set it on a read, so the wider
-     * bound stays safe and normal boot never trips &1 in this window. */
+    /* P207c: 実機では、存在しない拡張ボードの I/O 領域を read すると BusErrFlag が
+     * 立つ。c68k にはバスエラー経路が無いため、ここで latch し、命令境界で
+     * 68000 の group-0 例外を合成する (mx68k_synth_buserror を
+     * 参照)。C68k_Release_Cycle により現在の C68k_Exec はこの命令の直後に
+     * 戻るため、フレームの PC はきれいな命令境界になる。
+     * 返す val に関しては read-only。
+     * P209: MIDI 専用の窓 (0xEAFA00-0xEAFAFF) から拡張ボード I/O 窓全体
+     * 0xEA0000-0xEFFFFF へ拡大。READ で BusErrFlag&1 が立つのは本当に存在しない
+     * ハードウェアの場合のみ (rm_buserr + MIDI オフ既定)。実在する
+     * デバイス (SCSI/BG/SRAM) や Mercury は read でこれを立てないため、広げた
+     * 範囲でも安全であり、通常起動でこの窓の &1 が立つことはない。 */
     {
         uint32_t a207c = addr & 0x00FFFFFFu;
         if (a207c >= 0xEA0000u && a207c <= 0xEFFFFFu && (BusErrFlag & 1)) {
@@ -24729,11 +24729,11 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     }
 #endif
 #if P220B_MEMBOUND_ENABLE
-    /* P220b: byte read above the configured-RAM boundary (up to VRAM at
-     * 0xC00000) has no responding RAM on a real machine -> bus error. Joins the
-     * shared P207c latch/synth. Read-only w.r.t. val (the exception aborts the
-     * instruction at the boundary; the probe loop keys on the fault, not the
-     * value). is_write stays 0 (SSW bit4=read). */
+    /* P220b: 設定 RAM 境界より上 (0xC00000 の VRAM まで) へのバイト read は、
+     * 実機では応答する RAM が無い -> バスエラー。共有の
+     * P207c latch/合成に合流する。val に関しては read-only (例外は命令境界で命令を
+     * 中断し、プローブループは値ではなくフォールトを手掛かりにする)。
+     * is_write は 0 のまま (SSW bit4=read)。 */
     {
         uint32_t a220 = addr & 0x00FFFFFFu;
         if (a220 >= s_p220b_membound && a220 < 0x00C00000u) {
@@ -24757,10 +24757,10 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     }
 #endif
 #if P221D_MERCURY_BUSERR
-    /* P221d: byte read in the Mercury window ($ECC000-$ECDFFF).
-     * Synth when the board is ABSENT (Core mercury.c returns 0 without
-     * BusErrFlag, so the P209 branch never fires here). Joins the shared
-     * P207c latch/synth.
+    /* P221d: Mercury 窓 ($ECC000-$ECDFFF) でのバイト read。
+     * ボードが未装着のとき合成する (Core の mercury.c は BusErrFlag を立てずに
+     * 0 を返すため、P209 分岐はここでは発火しない)。共有の
+     * P207c latch/合成に合流する。
      * P483 (Read) / P483b: 装着時はレジスタ範囲($ECC080-$ECC0FF、MCRY_REG_BASE
      * -MCRY_REG_END)のみ疎通させる。$ECC000-$ECC07F は装着時もバスエラー
      * (P483b で下限を $ECC000 から絞り込み。V4/MK-MU10 相当を名乗る MX 固有の
@@ -24805,21 +24805,21 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     }
 #endif
 #if P419_BUSERR_ENABLE
-    /* P419: byte read in the FPU-board window ($E9E000-$E9FFFF). This range is
-     * the CIR window of the genuine Sharp FPU boards (CZ-6BP1/CZ-6BP1A, MC68881)
-     * — only 2 boards x 32 bytes ever respond on real hw (Outside X68000
-     * p.87-88 / Inside X68000 p.112 — address-map confirmation). MX has no FPU
-     * emulation at all, i.e. it is the "FPU not installed" case, so the whole
-     * range bus-errors.
-     * Evidence note: no book passage states the "bus error when not installed"
-     * behaviour itself; that rests on ONE reference implementation (XM6
-     * windrv.cpp:740,857, which treats the same range as an unconditional bus
-     * error apart from the $E9F000/$E9F001 host-drive hook) plus general 68000
-     * architecture knowledge (an unpopulated I/O slot never asserts DTACK).
-     * Core treats this range as rm_nop (returns 0 WITHOUT setting BusErrFlag),
-     * so the P209 `BusErrFlag & 1` branch above is permanently false here — an
-     * unconditional synth of the P221d shape is the only thing that works.
-     * Joins the shared P207c latch/synth. Read-only w.r.t. the returned val. */
+    /* P419: FPU ボード窓 ($E9E000-$E9FFFF) でのバイト read。この範囲は
+     * シャープ純正 FPU ボード (CZ-6BP1/CZ-6BP1A、MC68881) の CIR 窓
+     * — 実機で応答するのは 2 ボード x 32 バイトのみ (Outside X68000
+     * p.87-88 / Inside X68000 p.112 — アドレスマップで確認)。MX には FPU
+     * エミュレーションが一切無い、つまり「FPU 未装着」の場合に当たるため、範囲全体
+     * がバスエラーになる。
+     * 根拠に関する注記: 「未装着時にバスエラー」という挙動そのものを述べた書籍の
+     * 記述は無い。これは 1 つの参照実装 (XM6
+     * windrv.cpp:740,857。$E9F000/$E9F001 のホストドライブフックを除き、同範囲を
+     * 無条件にバスエラーとして扱う) と、68000 の一般的なアーキテクチャ知識
+     * (未実装の I/O スロットは DTACK をアサートしない) に基づく。
+     * Core はこの範囲を rm_nop として扱う (BusErrFlag を立てずに 0 を返す) ため、
+     * 上の P209 の `BusErrFlag & 1` 分岐はここでは常に偽となる —
+     * P221d と同じ形の無条件合成が唯一有効な手段である。
+     * 共有の P207c latch/合成に合流する。返す val に関しては read-only。 */
     {
         uint32_t a419b = addr & 0x00FFFFFFu;
         /* P642: Windrv 装着時のみ $E9F000/$E9F001 の 2 番地をこのバスエラーから
@@ -24841,24 +24841,24 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     if (windrv_claims_addr(addr)) {
         val = windrv_mmio_read(addr & 0x00FFFFFFu, /*size=*/1);
     }
-    /* P506 (D-28): byte/word read in the external SCSI board window
-     * ($EA0000-$EA1FFF). XM6 vm/scsi.cpp:41-42 (memdev.first/last) +
-     * :568-583 (ReadByte) / :686 (ReadWord, delegates to ReadByte)
-     * unconditionally bus-errors this range when scsi.type != 1 (external
-     * board not installed, cpu->BusErr(addr, TRUE)). MX/px68k Core
-     * (scsi.c:717) instead returns the zero-filled SCSIIPL[] without
-     * setting BusErrFlag when not installed, so si (System Information
-     * benchmark) reads "readable but wrong signature" and reports
-     * SCSIEX_UNKNOWN ("unknown device") where XM6 reports nothing (D-28).
-     * Gate on g_scsi_ext_board_wired (confirmed at the most recent
-     * mx68k_reset_hard(), mirrors g_wired_machine_type, includes the
-     * machine-type exclusivity XM6's scsi.type has — see symbol table)
-     * so a config change before the next hard reset does not shift
-     * guest-visible memory response mid-session. Joins the shared P207c
-     * latch/synth (no return: the existing P209 dispatch consumes the
-     * fault flag from the common path, matching P419/P221d Read). When
-     * installed, fall through unchanged (existing SCSI_Read passthrough
-     * is correct and untouched). */
+    /* P506 (D-28): 外付け SCSI ボード窓 ($EA0000-$EA1FFF) でのバイト/ワード
+     * read。XM6 vm/scsi.cpp:41-42 (memdev.first/last) +
+     * :568-583 (ReadByte) / :686 (ReadWord、ReadByte へ委譲) は
+     * scsi.type != 1 (外付けボード未装着、cpu->BusErr(addr, TRUE)) のとき
+     * この範囲を無条件にバスエラーにする。MX/px68k の Core
+     * (scsi.c:717) は代わりに、未装着時も BusErrFlag を立てずにゼロ埋めの
+     * SCSIIPL[] を返すため、si (System Information
+     * ベンチマーク) は「読めるがシグネチャが違う」と判断して
+     * SCSIEX_UNKNOWN (「unknown device」) を報告する。XM6 では何も報告されない (D-28)。
+     * g_scsi_ext_board_wired (直近の mx68k_reset_hard() で確定、
+     * g_wired_machine_type と同様の方式で、XM6 の scsi.type と同じ機種排他性を
+     * 含む — 記号表を参照) でゲートし、
+     * 次のハードリセット前に設定を変えても、セッション途中でゲストから見える
+     * メモリ応答が変わらないようにする。共有の P207c
+     * latch/合成に合流する (ここでは return しない: 既存の P209 振り分けが
+     * 共通経路からフォールトフラグを受け取る。P419/P221d の Read と同じ)。装着時は
+     * そのまま素通りする (既存の SCSI_Read への受け渡しは
+     * 正しく、変更しない)。 */
     {
         uint32_t a506 = addr & 0x00FFFFFFu;
         if (a506 >= 0x00EA0000u && a506 <= 0x00EA1FFFu && !g_scsi_ext_board_wired) {
@@ -24868,15 +24868,15 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
         }
     }
 #if P221_PROBE
-    /* P221 (a): observe the MFP GPIP self-test poll at $E88001. addr is raw here
-     * (24-bit masked for the compare, matching the P220b block above). val holds
-     * the byte just read. GPIP bit1/bit2 are what FF11D8 waits on. Read-only. */
+    /* P221 (a): $E88001 での MFP GPIP 自己テストのポーリングを観測する。ここでの addr は生の値
+     * (比較用に 24 ビットでマスク、上の P220b ブロックと同じ)。val は
+     * 今読んだバイトを保持する。FF11D8 が待つのは GPIP bit1/bit2。read-only。 */
     {
         uint32_t a221 = addr & 0x00FFFFFFu;
         if (a221 == 0x00E88001u) {
             uint8_t gpip = (uint8_t)(val & 0xFFu);
             if (!s_p221_gpip_active) {
-                /* open a new burst */
+                /* 新しいバーストを開始 */
                 s_p221_gpip_active  = 1;
                 s_p221_gpip_reads   = 1;
                 s_p221_gpip_pc0     = MX68KQ_GUEST_PC();
@@ -24885,7 +24885,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
                 s_p221_gpip_nextpow = 2;
             } else {
                 s_p221_gpip_reads++;
-                /* value transition (e.g. the awaited bit finally asserts) */
+                /* 値の遷移 (例: 待っていたビットがついに立つ) */
                 if (gpip != s_p221_gpip_last && s_p221_gpip_lines < 40u) {
                     s_p221_gpip_lines++;
                     debug_log("[P221-GPIP] TRANSITION pc0=0x%06x N=%u "
@@ -24898,7 +24898,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
                               g_mx68k_frame_num);
                 }
                 s_p221_gpip_last = gpip;
-                /* power-of-two milestone: cheap magnitude trace of a long poll */
+                /* 2 のべき乗の節目: 長いポーリングの規模を低コストで追跡 */
                 if (s_p221_gpip_reads >= s_p221_gpip_nextpow
                     && s_p221_gpip_lines < 40u) {
                     s_p221_gpip_lines++;
@@ -24913,7 +24913,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
                 }
             }
         } else if (s_p221_gpip_active) {
-            /* burst ends: the reader left $E88001. Emit a closing summary. */
+            /* バースト終了: 読み手が $E88001 から離れた。締めの要約を出力する。 */
             s_p221_gpip_active = 0;
             if (s_p221_gpip_lines < 40u) {
                 s_p221_gpip_lines++;
@@ -24965,12 +24965,12 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     return val;
 }
 
-/* P19-DIAG: vector table read anomaly detection counter */
+/* P19-DIAG: ベクタテーブル read の異常検出カウンタ */
 static int g_p19_vec_corrupt_count = 0;
 #define P19_VEC_CORRUPT_LOG_MAX 10
 
 static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
-    uint32_t addr = addr_raw & 0x00FFFFFF;  // X68000 24-bit address bus
+    uint32_t addr = addr_raw & 0x00FFFFFF;  // X68000 の 24 ビットアドレスバス
     uint32_t val;
 #if P424_ENABLE
     s_p424_rw++;
@@ -24991,25 +24991,25 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         }
     }
 #endif
-    /* P82-X-Q (P82XQ-PROBE-Q1): §4.1 + §4.2 verify probe — observe
-     * legacy idiom vs new accessor disagreement and same-call recheck
-     * drift within the verify window. Cheap (window gate + at most 3
-     * sample calls + 2 compares). */
+    /* P82-X-Q (P82XQ-PROBE-Q1): §4.1 + §4.2 の検証プローブ — 検証窓内で
+     * 旧来の書き方と新アクセサの不一致、および同一呼出し内の再確認での
+     * drift を観測する。低コスト (窓ゲート + 最大 3 回の
+     * サンプル呼出し + 2 回の比較)。 */
     p82xq_verify_sample(addr_raw);
 #if P82XR_ENABLE
-    /* P82-X-R CP-R-1: vec table fetch latch (decisive anchor). Fires on
-     * longword-aligned vec-table addresses in [0, 0x400). Read-only —
-     * uses p47_read_long_le for handler identity and OOB-safe stacked
-     * SR/PC reconstruction (Codex F5a). Cookie sanity gate REMOVED
-     * (Codex F2 — P59G10 strip makes high-word top byte unreliable). */
+    /* P82-X-R CP-R-1: ベクタテーブルフェッチの latch (決定的な基準点)。[0, 0x400) の
+     * ロングワード境界のベクタテーブルアドレスで発火する。read-only —
+     * ハンドラの特定と、範囲外でも安全な stacked
+     * SR/PC の再構成に p47_read_long_le を使う (Codex F5a)。cookie 妥当性ゲートは削除
+     * (Codex F2 — P59G10 の strip により上位ワードの最上位バイトが当てにならないため)。 */
     {
         uint32_t r_addr = addr_raw & 0x00FFFFFFu;
         if ((r_addr & 3u) == 0u && r_addr < 0x400u) {
             p82xr_on_vec_fetch(r_addr);
         }
     }
-    /* P82-X-R CP-R-5: BusErr / AdrErr extern sticky-edge sample
-     * (DEMOTED — supporting only, Codex F3). callsite=2 → ReadW. */
+    /* P82-X-R CP-R-5: BusErr / AdrErr の extern sticky エッジのサンプル
+     * (格下げ — 補助用途のみ、Codex F3)。callsite=2 → ReadW。 */
     p82xr_buserr_sample(2u);
 #endif
 #if P87A_ENABLE
@@ -25061,12 +25061,12 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     p98_on_access(addr_raw & 0x00FFFFFFu, 0);
 #endif
 #if P99_ENABLE
-    /* P99-STACKWRITE: ReadW per-access A7 sampler + in-window READ latch (H2 discriminator).
+    /* P99-STACKWRITE: ReadW のアクセス毎 A7 サンプラ + 窓内 READ latch (H2 の判別用)。
      * P99-own crossing/read latch (P98 state は read-only)。O(1) cheap、観測専用。 */
     p99_on_access(addr_raw & 0x00FFFFFFu, 0);
 #endif
 #if P100_ENABLE
-    /* P100-STACK1FF8: ReadW per-access A7 sampler + prior-access (capture-then-update) +
+    /* P100-STACK1FF8: ReadW のアクセス毎 A7 サンプラ + 直前アクセス (capture-then-update) +
      * crossing latch (P100-own state; P98/P99 state は read-only)。O(1) cheap、観測専用。 */
     p100_on_access(addr_raw & 0x00FFFFFFu, 0);
 #endif
@@ -25111,7 +25111,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     uint8_t p82xg_w_intstat_before = p82xg_w_observe
                                          ? (uint8_t)IOC_IntStat : 0u;
 #endif
-    // P10-TRACE: detect odd-address word read — log addr_raw to preserve original value
+    // P10-TRACE: 奇数アドレスへのワード read を検出 — 元の値を残すため addr_raw をログ出力
     if (addr_raw & 1) {
         if (g_p10_addr_err_count < P10_ADDR_ERR_LOG_MAX) {
             uint32_t pc  = MX68KQ_GUEST_PC();
@@ -25140,7 +25140,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         }
     } else if (addr >= 0xf00000 && addr <= 0xfbfffe) {
         uint32_t offset = addr & 0xfffff;
-        /* XOR-1 swapped bytes: use LE native read */
+        /* XOR-1 でスワップされたバイト: LE ネイティブの read を使う */
         val = *(const uint16_t *)&FONT[offset & 0xffffe];
     } else {
         /* P657: byte 側と対称の GPIP ICount 一時差し替え。$E88000 への word
@@ -25198,7 +25198,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             uint32_t a413 = addr & 0x00FFFFFFu;
             int in_range =
                    (a413 >= 0xEC0000u && a413 <= 0xEC8001u)   /* AWESOME-X */
-                || (a413 >= 0xEE0000u && a413 <= 0xEEFFFFu)   /* G-RAM bank */
+                || (a413 >= 0xEE0000u && a413 <= 0xEEFFFFu)   /* G-RAM バンク */
                 || (a413 >= 0xEFF800u && a413 <= 0xEFF83Fu)   /* POLYPHON #0 */
                 || (a413 >= 0xEFF880u && a413 <= 0xEFF8BFu)   /* POLYPHON #1 */
                 || (a413 >= 0xEAFC00u && a413 <= 0xEAFC3Fu);  /* RS-232C #0-3 */
@@ -25256,12 +25256,12 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     }
 #endif
 #if P221_PROBE
-    /* P221 (c): trap #$A vector fetch. c68k reads the exception vector via
-     * READ_LONG_F = two Read_Word calls, so the vec-table longword at 0xA8
-     * (= vec #$2A × 4, trap #$A) passes here as its high word (0xA8) and low
-     * word (0xAA). A read of either during the self-test window means FF11FC
-     * took the trap. Log the value too, to separate an incidental data read of
-     * $A8 from a genuine vector fetch. addr is already 24-bit masked. */
+    /* P221 (c): trap #$A のベクタフェッチ。c68k は例外ベクタを
+     * READ_LONG_F = Read_Word 2 回で読むため、0xA8 のベクタテーブルのロングワード
+     * (= vec #$2A × 4、trap #$A) は上位ワード (0xA8) と下位ワード (0xAA) として
+     * ここを通る。自己テスト窓の間にどちらかが read されれば、FF11FC が
+     * trap を実行したことを意味する。$A8 への偶発的なデータ read と本物のベクタフェッチを
+     * 区別するため値もログに残す。addr は既に 24 ビットでマスク済み。 */
     {
         if ((addr == 0x0000A8u || addr == 0x0000AAu) && s_p221_trap_lines < 4u) {
             s_p221_trap_lines++;
@@ -25358,9 +25358,9 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     }
 #endif
 #if P82B_ENABLE
-    /* P82-B-2: Timer-C vector slot read observer (ReadW to 0x114/0x116).
-     * Fires when CPU reads the Timer-C interrupt handler address (vec#0x45)
-     * during an interrupt dispatch. Shows what address the CPU actually uses. */
+    /* P82-B-2: Timer-C ベクタスロットの read 観測 (0x114/0x116 への ReadW)。
+     * 割込みディスパッチ中に CPU が Timer-C 割込みハンドラのアドレス (vec#0x45) を
+     * 読んだときに発火する。CPU が実際に使うアドレスを示す。 */
     if (addr == 0x114u || addr == 0x116u) {
         static int s_p82b2_count = 0;
         if (s_p82b2_count < 16) {
@@ -25380,15 +25380,15 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     if (addr == 0x114u) p82o_observe_vec_fetch();
 #endif
 #if P82P_ENABLE
-    /* P82-P §5.D: H-D1 / H-D2 partition probe. Record any WORD read of the
-     * Timer-C vector longword halves ($114 HI / $116 LO). Read-only sibling
-     * of the P82-O hook above; non-dedup ring (P82P_VFETCH_RING_SIZE=16). */
+    /* P82-P §5.D: H-D1 / H-D2 の切り分けプローブ。Timer-C ベクタロングワードの
+     * 各半分 ($114 HI / $116 LO) へのワード read をすべて記録する。上の P82-O フックの
+     * read-only な兄弟。重複除去なしの ring (P82P_VFETCH_RING_SIZE=16)。 */
     if (addr == 0x114u || addr == 0x116u) p82p_observe_vec_fetch(addr, val);
 #endif
-    /* P19-DIAG: detect corrupted vector table reads.
-     * Any vector table high-word read (addr in 0x0008-0x03FE, even) returning
-     * 0x2700 indicates the vector slot was overwritten (0x2700 = supervisor SR value).
-     * Log PC, A7, and the slot address to identify the write source. */
+    /* P19-DIAG: 異常なベクタテーブル read を検出する。
+     * ベクタテーブルの上位ワード read (addr が 0x0008-0x03FE の偶数) が
+     * 0x2700 を返したら、ベクタスロットが上書きされたことを示す (0x2700 = スーパバイザの SR 値)。
+     * 書込元を特定するため PC、A7、スロットアドレスをログに出す。 */
     if ((addr >= 0x0008) && (addr <= 0x03FE) && !(addr & 1)) {
         uint16_t hw = (uint16_t)(val & 0xFFFF);
         if (hw == 0x2700 && g_p19_vec_corrupt_count < P19_VEC_CORRUPT_LOG_MAX) {
@@ -25403,41 +25403,41 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         if (g_p19_vec_corrupt_count == P19_VEC_CORRUPT_LOG_MAX) {
             debug_log("[P19-VECBAD] further corrupt vector reads suppressed (>%d)\n",
                       P19_VEC_CORRUPT_LOG_MAX);
-            g_p19_vec_corrupt_count++;  /* prevent re-logging the suppress message */
+            g_p19_vec_corrupt_count++;  /* 抑制メッセージの再出力を防ぐ */
         }
     }
 #if P55_ENABLE && P55_A3_VECREAD_HOOK
-    /* P55-A3: vector-fetch seed hook. /tmp/mx68k_P55_plan.md §2.1 H7.
+    /* P55-A3: ベクタフェッチの発端フック。 /tmp/mx68k_P55_plan.md §2.1 H7.
      *
-     * Suspected seed of the c68k SET_PC BasePC mask leak (c68kmac.inc:70-73):
-     * an even-aligned read from the vector area [0x0000, 0x0400) that returns
-     * a word whose HI byte is non-zero. When such a value flows into a
-     * READ_LONG_F(vect*4, PC) followed by SET_PC(PC), BasePC is shifted by a
-     * 16 MiB multiple, and subsequent (u32)(PC - BasePC) carries the dirty
-     * hi-byte forward.
+     * c68k の SET_PC で BasePC マスクの上位バイトが除去されない問題の発端候補 (c68kmac.inc:70-73):
+     * ベクタ領域 [0x0000, 0x0400) からの偶数境界 read のうち、HI バイトが非ゼロの
+     * ワードを返すもの。そのような値が READ_LONG_F(vect*4, PC) とそれに続く
+     * SET_PC(PC) に流れ込むと、BasePC は 16 MiB の倍数だけずれ、
+     * 以降の (u32)(PC - BasePC) は不正な hi バイトを
+     * 引き継ぐ。
      *
-     * Note: vector slots are 32-bit; the c68k READ_LONG_F idiom reads them as
-     * two Read_Word calls (hi-word at addr, lo-word at addr+2). The dirty
-     * hi-byte we care about is in the HI word, i.e. (val >> 8) & 0xFF
-     * non-zero. We log both words (hi+lo could be 32-bit reconstructed
-     * post-hoc by the analyst from adjacent ring entries).
+     * 注: ベクタスロットは 32 ビット。c68k の READ_LONG_F の書き方ではこれを
+     * Read_Word 2 回 (addr で上位ワード、addr+2 で下位ワード) で読む。問題となる
+     * 不正な hi バイトは HI ワード側にあり、つまり (val >> 8) & 0xFF が
+     * 非ゼロとなる。両ワードをログに出す (hi+lo は隣接する ring エントリから
+     * 解析者が事後に 32 ビットへ再構成できる)。
      *
-     * Predicate (v2, per Code Review R-4, 2026-05-15):
+     * 判定条件 (v2、Code Review R-4 による、2026-05-15):
      *   (addr in [0x0008, 0x0400))
      *   AND addr even
-     *   AND (val hi byte != 0x00)              ; truly empty word
-     *   AND (val hi byte != 0xFF)              ; clean IPL handler hi-byte
+     *   AND (val hi byte != 0x00)              ; 完全に空のワード
+     *   AND (val hi byte != 0xFF)              ; 正常な IPL ハンドラの hi バイト
      *
-     * v1 predicate `(val & 0xFF00u) != 0u` would have admitted clean IPL
-     * handler reads whose hi-byte is `0xFF` (the address bus's natural top byte
-     * for `$00FFxxxx` IPL handlers). With ring cap=16 the ring would have
-     * filled with benign clean reads, masking actual `[P55-A3-VECREAD-CLEAN]`
-     * negative-result emission for Path B. Tightening the predicate excludes
-     * the dominant clean-IPL noise; any remaining hit is genuinely suspicious.
+     * v1 の判定条件 `(val & 0xFF00u) != 0u` では、hi バイトが `0xFF` (`$00FFxxxx` の
+     * IPL ハンドラにとってアドレスバスの自然な最上位バイト) である正常な IPL
+     * ハンドラの read まで通してしまう。ring の上限が 16 なので、ring は
+     * 無害な正常 read で埋まり、Path B 用の実際の `[P55-A3-VECREAD-CLEAN]`
+     * 否定結果の出力を覆い隠していたはずである。判定条件を厳しくすることで支配的な
+     * 正常 IPL のノイズを除外し、残る該当は本当に疑わしいものとなる。
      *
-     * Vector #0/#1 (initial SSP/PC at $0000..$0007) are excluded by addr >= 0x0008
-     * to avoid noise during reset vector fetch — those slots are clean by
-     * construction and irrelevant to runtime seeds.
+     * ベクタ #0/#1 ($0000..$0007 の初期 SSP/PC) は、リセットベクタフェッチ中のノイズを
+     * 避けるため addr >= 0x0008 で除外する — これらのスロットは構造上
+     * 正常であり、実行時の発端とは無関係。
      */
     {
         uint32_t hi_byte = (val >> 8) & 0xFFu;
@@ -25467,16 +25467,16 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     }
 #endif /* P55_ENABLE && P55_A3_VECREAD_HOOK */
 #if P56_ENABLE && P56_DIAG_DRIFT
-    /* P56-VECDRIFT: post-snapshot verify-on-fetch drift detect.
+    /* P56-VECDRIFT: スナップショット取得後、フェッチ時照合による drift 検出。
      * /tmp/mx68k_P56_plan.md §3.3 / §5.3.
      *
-     * For each of the 4 word addresses 0x00BC/0x00BE/0x0114/0x0116, compare
-     * the just-read val against the cached snapshot (taken at frame ==
-     * P56_SNAPSHOT_TRIGGER_FRAME). Mismatches indicate post-boot vector
-     * slot mutation (cf. c68kmac.inc:70-73 cascade).
+     * 4 つのワードアドレス 0x00BC/0x00BE/0x0114/0x0116 それぞれについて、
+     * 今読んだ val をキャッシュ済みスナップショット (frame ==
+     * P56_SNAPSHOT_TRIGGER_FRAME で取得) と比較する。不一致は起動後のベクタ
+     * スロット変化を示す (c68kmac.inc:70-73 の連鎖を参照)。
      *
-     * Pre-snapshot: skip entirely (snapshot fields are still 0).
-     * cumulative cap = P56_LOG_CAP. */
+     * スナップショット前: 完全にスキップ (スナップショットの各フィールドはまだ 0)。
+     * 累積上限 = P56_LOG_CAP。 */
     if (s_p56_snapshot_taken) {
         int    p56_drift_match = -1;
         int    p56_drift_is_hi = 0;
@@ -25524,7 +25524,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     }
 #endif /* P56_ENABLE && P56_DIAG_DRIFT */
 #if P57A_ENABLE && P57A_DIAG_BPCDRIFT
-    /* P57-A — BasePC drift sampling (Plan §3 H1/H4; v2).
+    /* P57-A — BasePC drift のサンプリング (Plan §3 H1/H4; v2)。
      * 観測 grain: 各 Memory_ReadW 入口で C68K.BasePC を読み、前回値との差分を log。
      * cap=P57A_LOG_CAP, predicate = delta!=0。
      * Code Minor-5 反映: bit32-63 までフル 64-bit delta を log し H4 (上位 32-bit
@@ -25532,7 +25532,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     {
         uintptr_t p57a_cur_bpc = C68K.BasePC;
 #if P59G3_ENABLE && P57A_ENABLE && P57A_DIAG_SETPC && P57A_DIAG_BPCDRIFT
-        /* P59-γ7 — record this ReadW into the trail ring (O(1), every call). */
+        /* P59-γ7 — この ReadW を軌跡 ring に記録 (O(1)、毎回)。 */
         {
             p59g7_readw_rec_t *t = &s_p59g7_trail[s_p59g7_trail_pos];
             t->addr    = addr;
@@ -25560,27 +25560,27 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                           (unsigned)delta_hi,
                           (unsigned)pc_log);
 #if P59G3_ENABLE && P57A_ENABLE && P57A_DIAG_SETPC && P57A_DIAG_BPCDRIFT
-                /* P59-γ5 — ring dump RELOCATED here from the dead chunk-EXIT
-                 * drift trigger (former lines ~2325). The chunk-EXIT compare
-                 * (p59g2_exit_bpc vs C68K.Fetch[page]) never fired because the
-                 * BasePC drift is transient WITHIN a chunk and re-bases back
-                 * before chunk exit. [P57A-BPCDRIFT] fires while the drift is
-                 * live (~4x/run), so the ring is dumped from here instead.
+                /* P59-γ5 — ring ダンプを、発火しない chunk-EXIT の
+                 * drift トリガ (旧 ~2325 行目) からここへ移設。chunk-EXIT での比較
+                 * (p59g2_exit_bpc vs C68K.Fetch[page]) は一度も発火しなかった。
+                 * BasePC drift は chunk 内で一過性に発生し、chunk 終了前に
+                 * 元のベースへ戻るためである。[P57A-BPCDRIFT] は drift が生きている間に
+                 * 発火する (~4 回/実行) ため、代わりにここから ring をダンプする。
                  *
-                 * One-shot via the EXISTING s_p59g3_dumped flag (reused, no new
-                 * flag, no reset-block edit). The ring (s_p59g3_ring[], filled
-                 * by the per-chunk recording at ~2287-2300) is the BEFORE trail.
-                 * Passive: host-memory reads only, no PC/BasePC/SSP/SR write,
-                 * no masking, no extra C68k_Exec. C68k_Get_SR / C68k_Get_MSP /
-                 * C68k_Get_AReg are pure read accessors (Core/c68k/c68k.h:196-200).
+                 * 既存の s_p59g3_dumped フラグによる one-shot (流用、新規
+                 * フラグもリセットブロックの編集も無し)。ring (s_p59g3_ring[]、
+                 * ~2287-2300 の per-chunk 記録で埋まる) が BEFORE 軌跡である。
+                 * 受動的: ホストメモリの read のみで、PC/BasePC/SSP/SR への書込なし、
+                 * マスク処理なし、追加の C68k_Exec なし。C68k_Get_SR / C68k_Get_MSP /
+                 * C68k_Get_AReg は純粋な読み取りアクセサ (Core/c68k/c68k.h:196-200)。
                  *
-                 * CAVEAT (Spec report §1/§4): trace_Memory_ReadW samples BasePC
-                 * at the entry of each Read_Word, so `addr` here is the read
-                 * that FOLLOWS the SET_PC fold, NOT the faulting vector slot.
-                 * The capture LOCATES the landing zone of the bad transfer; it
-                 * does not by itself name the faulting instruction. */
+                 * 注意 (Spec report §1/§4): trace_Memory_ReadW は各 Read_Word の入口で
+                 * BasePC をサンプルするため、ここでの `addr` は SET_PC の畳み込みの
+                 * 後に続く read であり、問題のベクタスロットではない。
+                 * この捕捉は誤った遷移の着地点を特定するものであり、
+                 * それ自体で問題の命令を特定するものではない。 */
                 if (!s_p59g3_dumped) {
-                    static uint32_t s_p59g5_seq = 0;   /* monotonic event seq */
+                    static uint32_t s_p59g5_seq = 0;   /* 単調増加のイベント通し番号 */
                     uint32_t p59g5_seq      = s_p59g5_seq++;
                     uint32_t p59g5_raw_pc   = (uint32_t)(uintptr_t)C68K.PC;
                     uint32_t p59g5_sr       = (uint32_t)C68k_Get_SR(&C68K);
@@ -25590,10 +25590,10 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                     uint32_t p59g5_vect     = (addr < 0x400u)
                                               ? (addr >> 2) : 0xFFFFFFFFu;
 
-                    /* --- dump the BEFORE trail: existing 64-entry ring,
-                     *     oldest -> newest. Same walk idiom as the former
-                     *     [P59G3-BEFORE] dump (mirrors the P47-D ring at
-                     *     m68000_bridge.c:1945-1953). */
+                    /* --- BEFORE 軌跡をダンプ: 既存の 64 エントリ ring を
+                     *     古い順 -> 新しい順に。旧 [P59G3-BEFORE] ダンプと
+                     *     同じ走査の書き方 (m68000_bridge.c:1945-1953 の
+                     *     P47-D ring と同じ)。 */
                     int p59g5_n = s_p59g3_ring_count;
                     debug_log("[P59G3-DUMP-BEGIN] site=P57A-BPCDRIFT "
                               "ring_depth=%d valid=%d seq=%u\n",
@@ -25619,8 +25619,8 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                                   (unsigned long long)r->exit_pc_raw);
                     }
 
-                    /* --- the P57A-point capture line: the drift sampled
-                     *     LIVE inside trace_Memory_ReadW (§2). */
+                    /* --- P57A 地点の捕捉行: trace_Memory_ReadW 内で
+                     *     リアルタイムにサンプルした drift (§2)。 */
                     debug_log("[P59G3-TRIGGER] site=P57A-BPCDRIFT seq=%u "
                               "chunk_id=%d frame=%d "
                               "prev_bpc=0x%016llx cur_bpc=0x%016llx "
@@ -25643,15 +25643,15 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                               (unsigned)addr,
                               (unsigned)p59g5_vect);
 
-                    /* P59-γ6 — passive memory snapshot at the drift moment.
-                     * Resolves the puzzle: P47-G's write-pin already covers
-                     * the vec#$4e RAM slot (0x138 in [0x08,0x400)), yet a
-                     * delta_hi=0x4e drift still occurs. (A) records the actual
-                     * MFP vector block contents, (B) the supervisor stack
-                     * around SSP. Host-memory reads only — no CPU/MEM write. */
-                    /* (A) [P59G3-VECBLK] — vec#$40..$4F handler longwords.
-                     * MEM[] holds each 16-bit word host-LE (same idiom as the
-                     * RTE-stub check at m68000_bridge.c:1649). */
+                    /* P59-γ6 — drift 発生時点の受動的なメモリスナップショット。
+                     * 謎の解明用: P47-G の書込監視は既に vec#$4e の RAM スロット
+                     * (0x138 in [0x08,0x400)) を対象にしているのに、
+                     * delta_hi=0x4e の drift がまだ起きる。(A) は実際の
+                     * MFP ベクタブロックの内容を、(B) は SSP 周辺の
+                     * スーパバイザスタックを記録する。ホストメモリの read のみ — CPU/MEM への書込なし。 */
+                    /* (A) [P59G3-VECBLK] — vec#$40..$4F のハンドラロングワード。
+                     * MEM[] は各 16 ビットワードをホスト LE で保持する (m68000_bridge.c:1649 の
+                     * RTE スタブ確認と同じ書き方)。 */
                     if (MEM) {
                         for (int p59g6_i = 0; p59g6_i < 16; p59g6_i += 4) {
                             uint32_t p59g6_h[4];
@@ -25669,8 +25669,8 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                                       (unsigned)p59g6_h[2], (unsigned)p59g6_h[3]);
                         }
                     }
-                    /* (B) [P59G3-SSTACK] — supervisor stack bytes around SSP.
-                     * Raw byte dump (same idiom as P35-DIAG-PCGUARD,
+                    /* (B) [P59G3-SSTACK] — SSP 周辺のスーパバイザスタックのバイト。
+                     * 生のバイトダンプ (P35-DIAG-PCGUARD と同じ書き方、
                      * m68000_bridge.c:2737-2744). */
                     if (MEM && p59g5_ssp >= 0x10u
                             && (p59g5_ssp + 0x30u) < 0x00C00000u) {
@@ -25687,7 +25687,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                                       p59g6_p[12], p59g6_p[13], p59g6_p[14], p59g6_p[15]);
                         }
                     }
-                    /* P59-γ7 — output the ReadW event trail, oldest to newest */
+                    /* P59-γ7 — ReadW イベント軌跡を古い順に出力 */
                     {
                         int p59g7_n = s_p59g7_trail_count;
                         debug_log("[P59G7-RDTRAIL-BEGIN] depth=%d valid=%d "
@@ -25713,7 +25713,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                     }
                     debug_log("[P59G3-DUMP-END] capture complete (one-shot) "
                               "seq=%u\n", (unsigned)p59g5_seq);
-                    s_p59g3_dumped = 1;   /* one-shot — reuse existing flag */
+                    s_p59g3_dumped = 1;   /* one-shot — 既存フラグを流用 */
                 }
 #endif /* P59G3_ENABLE && P57A_ENABLE && P57A_DIAG_SETPC && P57A_DIAG_BPCDRIFT */
                 s_p57a_bpcdrift_log_count++;
@@ -25728,14 +25728,14 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
 #endif /* P57A_ENABLE && P57A_DIAG_BPCDRIFT */
 
 #if P57A_ENABLE && P57A_DIAG_READW
-    /* P57-A — Memory_ReadW return-value upper-byte watch (Plan §3 H3; v2).
+    /* P57-A — Memory_ReadW 戻り値の上位バイト監視 (Plan §3 H3; v2)。
      * Type 確認 (Code Major-4 反映): Core/px68k/x68k/x68kmemory.h:32
      *   uint32_t Memory_ReadW(uint32_t adr);
      * → 戻り値は uint32_t。Bridge `val` (m68000_bridge.c:490) も uint32_t。
      *   従って (val >> 16) != 0 は意味のある predicate である。
      *
-     * Predicate:
-     *   (1) addr in vector-table range [0x0008, 0x0400) → 常時 log
+     * 判定条件:
+     *   (1) addr がベクタテーブル範囲 [0x0008, 0x0400) 内 → 常時 log
      *   (2) val >> 16 が non-zero (16-bit cast 漏れ証拠)  → 警告 log
      * cap=P57A_LOG_CAP_READW (256, vec-table 領域 read 高頻度のため拡張; Code Minor-2)
      * このブロックは val 改変なし、observation のみ。 */
@@ -25763,7 +25763,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         }
     }
 #endif /* P57A_ENABLE && P57A_DIAG_READW */
-    /* P33-DIAG: VSYNC vector slot read detection */
+    /* P33-DIAG: VSYNC ベクタスロットの read 検出 */
     {
         static int s_p33_vsync_read_count = 0;
         if ((addr == 0x118 || addr == 0x11A) && s_p33_vsync_read_count < 100) {
@@ -25793,24 +25793,24 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             s_p42_stuck_pc_count++;
         }
     }
-    /* P47-D Cleanup: P47-C-δ DIAG-C disabled (#if 0).
-     * Reason: c68k Fetch[] path bypasses trace_Memory_ReadW for opcode fetch,
-     * so this hook never fires (test#52: 0 hits confirmed; Codex inv §5.1).
-     * Replaced by P47-D-DIAG-F (Interrupt ACK hook, mx68k_diag_irqh_callback)
-     * which captures the actual dispatched vector via C68k_Init callback diversion.
-     * Old block preserved verbatim under #if 0 for rollback. */
+    /* P47-D 整理: P47-C-δ DIAG-C を無効化 (#if 0)。
+     * 理由: c68k の Fetch[] 経路はオペコードフェッチで trace_Memory_ReadW を経由しないため、
+     * このフックは発火しない (test#52: 該当 0 件を確認済み。Codex inv §5.1)。
+     * P47-D-DIAG-F (割込み ACK フック、mx68k_diag_irqh_callback) に置き換えた。
+     * これは C68k_Init のコールバック差し替えにより、実際にディスパッチされたベクタを捕捉する。
+     * 旧ブロックは切り戻し用に #if 0 の下にそのまま残している。 */
 #if 0
-    /* P47-C-δ DIAG-C: detect TRAP #14 (0x4e4e = IOCS call) and TRAP #15 (0x4e4f = DOS call) opcode fetches.
-     * Goal: identify which IOCS function the IPL_ROM is calling right before reaching the panic
-     * terminus 0xff063c. PC at fetch is the trap instruction address; D0 holds the IOCS function code,
-     * A0/A1 typically point to argument blocks.
-     * MINOR-2 augmentation: emit IPL=Y/N flag (PC upper byte 0xFF -> IPL ROM region) to aid correlation
-     * analysis with the suspected c68k 32-bit PC push issue. */
+    /* P47-C-δ DIAG-C: TRAP #14 (0x4e4e = IOCS コール) と TRAP #15 (0x4e4f = DOS コール) のオペコードフェッチを検出する。
+     * 目的: panic 終端 0xff063c に到達する直前に IPL_ROM がどの IOCS 機能を呼んでいるかを
+     * 特定する。フェッチ時の PC は trap 命令のアドレス、D0 は IOCS 機能コードを保持し、
+     * A0/A1 は通常引数ブロックを指す。
+     * MINOR-2 による追加: c68k の 32 ビット PC push 問題の疑いとの相関分析を助けるため、
+     * IPL=Y/N フラグ (PC の上位バイト 0xFF -> IPL ROM 領域) を出力する。 */
     {
         static int s_p47c_trap_count = 0;
         if (s_p47c_trap_count < 30) {
             uint32_t pc_now = MX68KQ_GUEST_PC();
-            /* Only log if this read is an instruction fetch at PC and value matches TRAP #14/#15 */
+            /* この read が PC での命令フェッチで、値が TRAP #14/#15 に一致する場合のみログ出力 */
             if ((addr & 0x00FFFFFE) == (pc_now & 0x00FFFFFE) &&
                 ((val & 0xFFFF) == 0x4e4e || (val & 0xFFFF) == 0x4e4f)) {
                 uint32_t d0 = C68k_Get_DReg(&C68K, 0);
@@ -25828,10 +25828,10 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         }
     }
 #endif
-    /* P47-C-ε DIAG-E: detect when A1 register lands on the IPL_ROM panic-string pointer
-     * 0xff09ab..0xff0a00 (per Codex inv: A1 = "エラーが発生しました…" pointer prepared at
-     * 0xff0632 just before the panic-terminus BRA $). Reaching this means boot has failed
-     * — log full register snapshot at the moment of pointer load. */
+    /* P47-C-ε DIAG-E: A1 レジスタが IPL_ROM の panic 文字列ポインタ
+     * 0xff09ab..0xff0a00 (Codex inv による: A1 = "エラーが発生しました…" のポインタで、
+     * panic 終端の BRA $ の直前に 0xff0632 で用意される) を指した時点を検出する。ここに到達したら起動失敗を意味する
+     * — ポインタがロードされた瞬間の全レジスタスナップショットをログに出す。 */
     {
         static int s_p47c_a1panic_count = 0;
         if (s_p47c_a1panic_count < 5) {
@@ -25874,20 +25874,20 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     }
 #endif /* P65_PROBE_ENABLE */
 #if P66_PROBE_ENABLE
-        /* P66 Probe E — IOCS handler-slot read for the unimplemented func#
-           range 0xE0-0xFF. The dispatcher reads the 32-bit handler pointer
-           at 0xff1e28 (movea.l (a0),a0) with a0 = 0x400 + func*4. c68k has
-           no 32-bit read callback, so a longword read arrives as TWO
-           trace_Memory_ReadW calls: hi-word at the slot base (addr&3==0),
-           lo-word at base+2 (addr&3==2). Slots for func 0xE0-0xFF occupy
-           RAM 0x0780-0x07FF. A hit here directly confirms Route A. */
+        /* P66 Probe E — 未実装の機能番号範囲 0xE0-0xFF に対する IOCS ハンドラスロットの
+           read。ディスパッチャは 0xff1e28 (movea.l (a0),a0) で、a0 = 0x400 + func*4 として
+           32 ビットのハンドラポインタを読む。c68k には
+           32 ビット read のコールバックが無いため、ロングワード read は
+           trace_Memory_ReadW 2 回として届く: スロット先頭 (addr&3==0) で上位ワード、
+           base+2 (addr&3==2) で下位ワード。機能 0xE0-0xFF のスロットは
+           RAM 0x0780-0x07FF を占める。ここでの該当は Route A を直接裏付ける。 */
         if (s_p66_ptr_read_count < P66_IOCSFN_LOG_MAX) {
             uint32_t p66e_addr = (uint32_t)(addr_raw & 0x00FFFFFFu);
             if (p66e_addr >= 0x00000780u && p66e_addr <= 0x000007FEu) {
                 uint32_t p66e_pc =
                     MX68KQ_GUEST_PC();
                 if ((p66e_addr & 3u) == 0u) {
-                    /* hi-word of a 0xE0-0xFF slot */
+                    /* 0xE0-0xFF スロットの上位ワード */
                     uint32_t func = (p66e_addr - 0x00000400u) / 4u;
                     s_p66_ptr_hi = (uint16_t)(val & 0xFFFFu);
                     debug_log("[P66-IOCS-SLOT-R] hi addr=0x%06X func=0x%02X "
@@ -25896,7 +25896,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                               p66e_addr, func, (uint32_t)s_p66_ptr_hi,
                               p66e_pc, (uint32_t)C68K.D[0], s_p59g2_frame_id);
                 } else {
-                    /* lo-word at base+2 — reassemble the full 32-bit ptr */
+                    /* base+2 の下位ワード — 32 ビットのポインタ全体を組み立て直す */
                     uint32_t func = (p66e_addr - 0x00000402u) / 4u;
                     uint32_t ptr  =
                         ((uint32_t)s_p66_ptr_hi << 16) | (val & 0xFFFFu);
@@ -25909,15 +25909,15 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         }
 #endif /* P66_PROBE_ENABLE */
 #if P67_PROBE_ENABLE
-    /* P67 — one-shot TRAP#14 vector-fetch probe.
-     * The MC68000 reads TRAP#14's vector (RAM 0x0B8) exactly once per TRAP#14.
-     * At that point SR+PC are already pushed onto the supervisor stack (A7),
-     * so p47_read_stack_frame() recovers the original exception frame.
-     * trap_source_pc = stacked_pc - 2 identifies the TRAP #14 opcode address
-     * (candidates: 0xff05dc / 0xff0628 / 0xff8548). D7 holds the error class.
-     * Note: the CPU-exception default handler TRAP#14 opcode is at 0xff05dc
-     * (NOT 0xff05e4 — earlier analysis was incorrect; 0xff05e4 is a different
-     * instruction in the same routine). */
+    /* P67 — one-shot の TRAP#14 ベクタフェッチプローブ。
+     * MC68000 は TRAP#14 1 回につき TRAP#14 のベクタ (RAM 0x0B8) をちょうど 1 回読む。
+     * その時点で SR+PC は既にスーパバイザスタック (A7) に push 済みなので、
+     * p47_read_stack_frame() で元の例外フレームを復元できる。
+     * trap_source_pc = stacked_pc - 2 で TRAP #14 オペコードのアドレスが分かる
+     * (候補: 0xff05dc / 0xff0628 / 0xff8548)。D7 はエラー種別を保持する。
+     * 注: CPU 例外のデフォルトハンドラの TRAP#14 オペコードは 0xff05dc にある
+     * (0xff05e4 ではない — 以前の解析は誤りだった。0xff05e4 は同じルーチン内の
+     * 別の命令)。 */
     if (!s_p67_trap14_fired) {
         uint32_t p67_addr = (uint32_t)(addr_raw & 0x00FFFFFFu);
         if (p67_addr == 0x000000B8u) {
@@ -25945,10 +25945,10 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                           (unsigned)(val & 0xFFFFu),
                           s_p59g2_frame_id);
 #if P74A_ENABLE
-                /* P74-G2: full 32-bit TRAP#14 dispatch address.
-                 * At the hi-word read (addr=0x0B8), both words of the vector are
-                 * already in MEM[0x0B8..0x0BB] so p47_read_long_le gives the real
-                 * target; p67_src is the address of the TRAP #14 instruction. */
+                /* P74-G2: TRAP#14 ディスパッチ先の完全な 32 ビットアドレス。
+                 * 上位ワードの read (addr=0x0B8) の時点で、ベクタの両ワードは
+                 * 既に MEM[0x0B8..0x0BB] にあるため、p47_read_long_le で本当の
+                 * 飛び先が得られる。p67_src は TRAP #14 命令のアドレス。 */
                 {
                     uint32_t p74_full_vec = MEM ? p47_read_long_le(0x0B8u) : 0xDEADBEEFu;
                     debug_log("[P74-G2-TRAP14] full_vec=0x%08x trap_src=0x%08x "
@@ -25961,25 +25961,25 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             }
             s_p67_trap14_fired = 1;
 #if P82XR_ENABLE
-            /* P82-X-R CP-R-6: 14-byte group-0 frame walk synchronised
-             * with the P67 latch. Read-only — dumps 24 raw bytes from
-             * the current A7 and decodes group-0 layout. */
+            /* P82-X-R CP-R-6: P67 の latch と同期した 14 バイトの group-0
+             * フレーム走査。read-only — 現在の A7 から 24 バイトを生でダンプし、
+             * group-0 の配置としてデコードする。 */
             p82xr_frame_walk(p67_sp);
 #endif
         }
     }
 #endif /* P67_PROBE_ENABLE */
 #if P82XY_ENABLE
-    /* P82-X-Y CP-Y-1 — TRAP#14 vec ($000000B8) full snap.
-     * Parallel 1-shot block placed immediately after P67 so the P67
-     * latch fires first (must-stay-green #5 byte-for-byte stability is
-     * preserved). Captures A7 64-byte window + all Dx/Ax + IOC/MFP/IRQH
-     * latch at the moment the vector is fetched. Independent static
-     * (s_p82xy_y1_done) — does not touch P67 state. */
-    /* P84-A T1 push: record IOCS calls via vec $BC (TRAP#15) word reads on the
-     * active P82XY path. Self-gated (addr==$BC, frame>=ARM, !y1_done). This is
-     * the P82XY-active sibling of the disabled #if P82XP_ENABLE trap15 ledger
-     * (vec $BC = $000000BC, distinct from CP-Y-1's vec $B8 = TRAP#14). */
+    /* P82-X-Y CP-Y-1 — TRAP#14 ベクタ ($000000B8) の完全スナップショット。
+     * P67 の直後に置いた並列の one-shot ブロックで、P67 の latch が先に
+     * 発火するようにしている (must-stay-green #5 のバイト単位の安定性を
+     * 保つ)。ベクタがフェッチされた瞬間の A7 64 バイト窓 + 全 Dx/Ax + IOC/MFP/IRQH の
+     * latch を捕捉する。独立した static
+     * (s_p82xy_y1_done) を使い、P67 の状態には触れない。 */
+    /* P84-A T1 push: 有効な P82XY 経路上で、vec $BC (TRAP#15) のワード read により
+     * IOCS コールを記録する。自己ゲート付き (addr==$BC, frame>=ARM, !y1_done)。これは
+     * 無効化された #if P82XP_ENABLE の trap15 台帳の、P82XY 有効時の兄弟であり
+     * (vec $BC = $000000BC、CP-Y-1 の vec $B8 = TRAP#14 とは別)。 */
     p84a_iocs_record((uint32_t)(addr_raw & 0x00FFFFFFu));
     if (!s_p82xy_y1_done) {
         uint32_t y1_addr = (uint32_t)(addr_raw & 0x00FFFFFFu);
