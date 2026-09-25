@@ -1,5 +1,5 @@
-// macOS stub for winui globals referenced by midi.c and midi_darwin.c
-// These were originally Win32/GTK menu globals. On macOS they are unused.
+// midi.c と midi_darwin.c が参照する winui グローバル変数の macOS 用スタブ。
+// 本来は Win32/GTK のメニュー用グローバル変数であり、macOS では使用しない。
 
 #include <stdint.h>
 

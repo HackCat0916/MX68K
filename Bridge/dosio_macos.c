@@ -1,6 +1,6 @@
 /*
- * macOS POSIX file I/O wrapper for px68k
- * Replaces Core/px68k/win32api/dosio.c on macOS builds.
+ * px68k 用の macOS POSIX ファイル I/O ラッパー
+ * macOS ビルドでは Core/px68k/win32api/dosio.c を置き換える。
  */
 
 #include <sys/param.h>
@@ -20,14 +20,14 @@ void
 dosio_init(void)
 {
 
-	/* Nothing to do. */
+	/* 何もしない。 */
 }
 
 void
 dosio_term(void)
 {
 
-	/* Nothing to do. */
+	/* 何もしない。 */
 }
 
 /* ファイル操作 */
@@ -414,12 +414,12 @@ fname_mix(char* str, char* mix, int32_t size)
 			break;
 
 		if (c == check) {
-			/* current dir */
+			/* カレントディレクトリ */
 			if (mix[0] == '/') {
 				mix++;
 				continue;
 			}
-			/* parent dir */
+			/* 親ディレクトリ */
 			if (mix[0] == '.' && mix[1] == '/') {
 				mix += 2;
 				cutyen(str);

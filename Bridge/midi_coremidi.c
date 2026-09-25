@@ -263,7 +263,7 @@ mid_In_callback(const MIDIPacketList *packetList,
 	for (uint32_t j = 0; j < count; j++) {
 		for (uint32_t i = 0; i < packet->length; i++) {
 			Rx_buff[RxW_point] = packet->data[i];
-			if (RxW_point < 250) { RxW_point++; }	/* buffer full */
+			if (RxW_point < 250) { RxW_point++; }	/* バッファ満杯 */
 		}
 
 		/* P693: 受信の計上。★Rx_buff / RxW_point / RxR_point は一切読まない
@@ -296,8 +296,8 @@ mid_In_callback(const MIDIPacketList *packetList,
 
 	if (MIDI_IntEnable & 0x20) {		/* 割り込み許可? */
 		MIDI_IntFlag |= 0x20;		/* Rx int 発生 */
-		MIDI_IntVect  = 0x0a;		/* set vector */
-		IRQH_Int(4, &MIDI_Int);		/* int 4 */
+		MIDI_IntVect  = 0x0a;		/* ベクタ設定 */
+		IRQH_Int(4, &MIDI_Int);		/* 割り込みレベル 4 */
 	}
 }
 
@@ -310,28 +310,28 @@ mid_outDevList(LPHMIDIOUT phmo)
 	uint32_t Device_num = 0;
 	OSStatus err_sts;
 
-	/* Create Client for CoreMIDI */
+	/* CoreMIDI 用のクライアントを作成 */
 	err_sts = MIDIClientCreate(CFSTR("px68k"), NULL, NULL, &mid_client);
 	if (err_sts != noErr) {
 		p6logd("MIDI:CoreMIDI: No out client created.\n");
 		return Device_num;
 	}
 
-	/* Create OutPort for client */
+	/* クライアント用の出力ポートを作成 */
 	err_sts = MIDIOutputPortCreate(mid_client, CFSTR("px68k MIDI out_Port"), &mid_out_port);
 	if (err_sts != noErr) {
 		p6logd("MIDI:CoreMIDI: No out port created.\n");
 		return Device_num;
 	}
 
-	/* Get the MIDIEndPoint */
+	/* MIDIEndPoint を取得 */
 	mid_endpoint = 0;
 	uint32_t core_mid_num = (uint32_t)MIDIGetNumberOfDestinations();	/* 仮想ポート含む */
 	if (core_mid_num == 0) {
-		return Device_num;	/* No found */
+		return Device_num;	/* 見つからない */
 	}
 
-	/* Store MIDI out port LIST */
+	/* MIDI 出力ポート一覧を格納 */
 	for (uint32_t i = 0; i < core_mid_num; i++) {
 		mid_endpoint = MIDIGetDestination(i);
 		if ((mid_endpoint) && (i < P633_MIDI_DEV_MAX)) {	/* MAX item check(8 個まで) */
@@ -342,7 +342,7 @@ mid_outDevList(LPHMIDIOUT phmo)
 			Device_num++;
 		}
 	}
-	menu_items[8][Device_num][0] = '\0';	/* Menu END */
+	menu_items[8][Device_num][0] = '\0';	/* メニュー終端 */
 
 	if (core_mid_num != 0) {
 		*phmo = (HANDLE)mid_name;	/* MIDI Active!(ダミーを代入しておく) */
@@ -363,20 +363,20 @@ mid_inDevList(LPHMIDIOUT phmo)
 	/* Client は mid_outDevList() が作ったものを共用する
 	 * (移設元 midi_darwin.c:143-149 でも同様にコメントアウト済み)。 */
 
-	/* Create input port */
+	/* 入力ポートを作成 */
 	err_sts = MIDIInputPortCreate(mid_client, CFSTR("px68k MIDI in_Port"),
 	                              mid_In_callback, NULL, &mid_in_port);
 	if (err_sts != noErr) {
 		p6logd("MIDI:CoreMIDI: No port in created.\n");
-		return Device_num;	/* No found */
+		return Device_num;	/* 見つからない */
 	}
 
 	uint32_t core_mid_num = (uint32_t)MIDIGetNumberOfSources();
 	if (core_mid_num == 0) {
-		return Device_num;	/* No found */
+		return Device_num;	/* 見つからない */
 	}
 
-	/* Store MIDI in port LIST */
+	/* MIDI 入力ポート一覧を格納 */
 	mid_source = 0;
 	for (uint32_t i = 0; i < core_mid_num; i++) {
 		mid_source = MIDIGetSource(i);
@@ -388,7 +388,7 @@ mid_inDevList(LPHMIDIOUT phmo)
 			Device_num++;
 		}
 	}
-	menu_items[9][Device_num][0] = '\0';	/* Menu END */
+	menu_items[9][Device_num][0] = '\0';	/* メニュー終端 */
 
 	if (core_mid_num != 0) {
 		*phmo = (HANDLE)mid_name;	/* MIDI Active!(ダミーを代入しておく) */
@@ -405,12 +405,12 @@ midOutChg(uint32_t port_no, uint32_t bank)
 {
 	(void)bank;	/* Bank select は移設元でもコメントアウト済み */
 
-	/* All note off */
+	/* 全ノートオフ */
 	for (uint32_t msg = 0x7bb0; msg < 0x7bc0; msg++) {
 		midiOutShortMsg((HMIDIOUT)0, msg);
 	}
 
-	/* CoreMIDI endpoint change */
+	/* CoreMIDI エンドポイント変更 */
 	mid_endpoint = MIDIGetDestination(port_no);
 	if (mid_endpoint == 0) {
 		p6logd("MIDI Change error.\n");
@@ -425,7 +425,7 @@ midInChg(uint32_t port_no)
 {
 	OSStatus err_sts;
 
-	/* CoreMIDI endpoint change */
+	/* CoreMIDI エンドポイント変更 */
 	mid_source = MIDIGetSource(port_no);
 	err_sts = MIDIPortConnectSource(mid_in_port, mid_source, NULL);
 	if (err_sts != noErr) {
@@ -443,15 +443,15 @@ midiOutClose(HMIDIOUT hmo)
 
 	OSStatus err_sts;
 
-	/* Disconnect in Port */
+	/* 入力ポートを切断 */
 	err_sts = MIDIPortDisconnectSource(mid_in_port, mid_source);
 	if (err_sts != noErr) p6logd("Disconnect MIDI-Source err\n");
 
-	/* Dispose Port */
+	/* ポートを破棄 */
 	err_sts = MIDIPortDispose(mid_out_port);
 	if (err_sts != noErr) p6logd("Dispose MIDI-out Port err\n");
 
-	/* Dispose Client */
+	/* クライアントを破棄 */
 	err_sts = MIDIClientDispose(mid_client);
 	if (err_sts != noErr) p6logd("Dispose MIDI-Client err\n");
 
@@ -484,22 +484,22 @@ midiOutShortMsg(HMIDIOUT hmo, uint32_t msg)
 	messg[2] = (uint8_t)(msg & 0xff);
 	messg[3] = 0;
 
-	/* length of msg
+	/* メッセージ長
 	 * P633 修正: 移設元は 0xf0 系を一律 1 バイトにしていたため
 	 * F1/F2/F3 のデータバイトが落ちていた。 */
 	uint32_t len;
 	uint8_t  status = messg[0];
 	if ((status & 0xf0) == 0xf0) {
 		switch (status) {
-		case 0xf1: len = 2; break;	/* MTC quarter frame        */
-		case 0xf2: len = 3; break;	/* song position pointer    */
-		case 0xf3: len = 2; break;	/* song select              */
+		case 0xf1: len = 2; break;	/* MTC クォーターフレーム   */
+		case 0xf2: len = 3; break;	/* ソングポジションポインタ */
+		case 0xf3: len = 2; break;	/* ソングセレクト           */
 		default:   len = 1; break;	/* F0/F4-FF: 1 バイト扱い   */
 		}
 	} else if (((status & 0xf0) == 0xc0) || ((status & 0xf0) == 0xd0)) {
-		len = 2;			/* prog. chg / channel press */
+		len = 2;			/* プログラムチェンジ / チャンネルプレッシャー */
 	} else {
-		len = 3;			/* note on/off, key press, cont.chg, pitch wheel */
+		len = 3;			/* ノートオン/オフ、キープレッシャー、コントロールチェンジ、ピッチホイール */
 	}
 
 	p633_midi_send_bytes(messg, len);
@@ -516,7 +516,7 @@ midiOutLongMsg(HMIDIOUT hmo, LPMIDIHDR pmh, uint32_t cbmh)
 	(void)hmo;
 	(void)cbmh;
 
-	if (pmh == NULL || pmh->dwBufferLength == 0) {	/* length check */
+	if (pmh == NULL || pmh->dwBufferLength == 0) {	/* 長さチェック */
 		return MMSYSERR_NOERROR;
 	}
 
@@ -525,7 +525,7 @@ midiOutLongMsg(HMIDIOUT hmo, LPMIDIHDR pmh, uint32_t cbmh)
 	return MMSYSERR_NOERROR;
 }
 
-/*---Dummy--*/
+/*---ダミー--*/
 
 uint32_t
 midiOutUnprepareHeader(HMIDIOUT hmo, LPMIDIHDR pmh, uint32_t cbmh)

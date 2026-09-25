@@ -86,9 +86,9 @@ void sasi_bridge_install(void)
  * ($E8E00D の 0x31/0x55 解錠・施錠イディオムは Core sram.c:39-40 と同一。) */
 static void sasi_memsw_write(uint32_t offset, uint8_t data)
 {
-    cpu_writemem24(0x00e8e00du, 0x31);           /* allow SRAM access */
+    cpu_writemem24(0x00e8e00du, 0x31);           /* SRAM アクセス許可 */
     SRAM_Write(0x00ed0000u + offset, data);
-    cpu_writemem24(0x00e8e00du, 0x55);           /* block SRAM access */
+    cpu_writemem24(0x00e8e00du, 0x55);           /* SRAM アクセス禁止 */
 }
 
 /* memsw_enabled: 「メモリスイッチ自動更新」設定値
@@ -243,12 +243,12 @@ void sasi_bridge_apply_sasi_count(int machine_type, bool memsw_enabled,
  * 見えるバイト順のまま渡せばよい。 */
 static void sasi_romboot_write(uint32_t handle)
 {
-    cpu_writemem24(0x00e8e00du, 0x31);           /* allow SRAM access */
+    cpu_writemem24(0x00e8e00du, 0x31);           /* SRAM アクセス許可 */
     SRAM_Write(0x00ed000cu, (uint8_t)((handle >> 24) & 0xffu));
     SRAM_Write(0x00ed000du, (uint8_t)((handle >> 16) & 0xffu));
     SRAM_Write(0x00ed000eu, (uint8_t)((handle >>  8) & 0xffu));
     SRAM_Write(0x00ed000fu, (uint8_t)( handle        & 0xffu));
-    cpu_writemem24(0x00e8e00du, 0x55);           /* block SRAM access */
+    cpu_writemem24(0x00e8e00du, 0x55);           /* SRAM アクセス禁止 */
 }
 
 /* 引数:
