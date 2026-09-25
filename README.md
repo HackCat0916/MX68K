@@ -38,13 +38,17 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **ネイティブmacOSアプリ** — SwiftUI + Metal で構築されたモダンなmacOSアプリ
 - **px68kコア** — 実績のあるpx68kエミュレーションコアをベースに実機ソフトの動作を目指す
 - **Apple Silicon ネイティブ** — arm64アーキテクチャに最適化（M1/M2/M3/M4シリーズ対応）
-- **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
+- **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
 - **ドラッグ&ドロップマウント** — ディスクイメージをウィンドウにドロップしてFDDマウント（**FD のみ** — HDD/SCSI/CD-ROM/MOイメージは各設定画面の該当行へD&D可）
+- **フロッピードライブ最大4台** — FD0/FD1に加え、設定画面「Hardware」タブの「外付けFDDユニット」を有効にするとFD2/FD3も使用可能（FD2/FD3の挿入・イジェクトはmacOS版のFileメニューのみ）
 - **キーボード入力** — X68000のJISキーボードレイアウトに対応、キーリマップ設定・ソフトウェアキーボード対応
+- **クロック設定** — 10〜25MHz（実機・改造機相当の8段階）と50/100/200MHz（実験的）の固定選択肢、または1〜64,000MHzの任意値（カスタム入力）。ハードリセット不要で反映
 - **ターボ / ノーウェイト** — 2x〜5x固定倍率、または上限無しの専用スレッド駆動ノーウェイトモード
 - **ゲームパッド対応** — 2ポート対応、複数ボタンプロファイル（Standard / CPSF-MD / マジカルパッド）
-- **ステートセーブ/ロード** — `*.mxstate`形式、個数無制限
+- **ステートセーブ/ロード** — `*.mxstate`形式、個数無制限。クイックセーブ（⌘⇧S、ファイル名を自動で付けて即保存）/クイックロード（⌘⇧O、直近の1件を即読込）にも対応
 - **スクリーンショット** — PNG保存（保存先変更可）
+- **動画録画** — H.264（映像）+AAC（音声）のmp4録画（保存先変更可、録画中はターボ/ノーウェイトを禁止）
+- **電源ボタン** — ステータスバーの電源ボタンで電源OFF（画面フェード+電源ランプ点滅）/ON。ゲストソフト側からのソフトウェア電源OFF要求も自動検出し、電源ボタンと同じ電源OFF処理を行う（macOS版のみ）
 - **SASI / SCSI HDD** — SASI 8台・外付けSCSI/内蔵SCSI対応
 - **MOドライブ** — SCSI ID5固定スロット、実行中のライブ媒体交換対応
 - **CD-ROM（ISO・Mode1）マウント** — SCSI ID6固定スロット（CD-DA・CDブートは非対応）
@@ -59,13 +63,17 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **Native macOS App** — a modern macOS app built with SwiftUI + Metal
 - **px68k Core** — based on the proven px68k emulation core, aiming for compatibility with real X68000 software
 - **Apple Silicon Native** — optimized for arm64 (M1/M2/M3/M4 series)
-- **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, ISO, **ZIP** (FD, single/multi-image archives)
+- **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP** (FD, single/multi-image archives)
 - **Drag & Drop Mounting** — drop a disk image onto the window to mount it as FDD (**FD only** — HDD/SCSI/CD-ROM/MO images can be dropped onto the corresponding row in each settings tab)
+- **Up to 4 Floppy Drives** — in addition to FD0/FD1, enabling "External FDD Unit" in the "Hardware" settings tab adds FD2/FD3 (inserting/ejecting FD2/FD3 is available only from the File menu on macOS)
 - **Keyboard Input** — X68000 JIS keyboard layout support, key remapping, on-screen software keyboard
+- **Clock Speed** — fixed choices of 10–25 MHz (8 steps matching real and modified machines) and 50/100/200 MHz (experimental), or any value from 1 to 64,000 MHz (custom input). Applies without a hard reset
 - **Turbo / No-Wait** — fixed 2x–5x multipliers, or an uncapped dedicated-thread no-wait mode
 - **Gamepad Support** — 2 ports, multiple button profiles (Standard / CPSF-MD / Magical Pad)
-- **State Save / Load** — `*.mxstate` format, unlimited slots
+- **State Save / Load** — `*.mxstate` format, unlimited slots. Also supports Quick Save (⌘⇧S, saves instantly with an auto-generated file name) and Quick Load (⌘⇧O, instantly loads the most recent save)
 - **Screenshot** — saved as PNG (destination configurable)
+- **Video Recording** — H.264 video + AAC audio, saved as mp4 (destination configurable; Turbo/No-Wait are disabled while recording)
+- **Power Button** — the status bar's power button powers the machine off (screen fade + blinking power lamp) and back on. A software power-off request from the guest is also detected automatically and handled the same way as the power button (macOS only)
 - **SASI / SCSI HDD** — up to 8 SASI drives, internal/external SCSI support
 - **MO Drive** — dedicated SCSI ID5 slot, live media swap while running
 - **CD-ROM (ISO / Mode1) Mount** — dedicated SCSI ID6 slot (CD-DA and CD-boot are not supported)
@@ -88,6 +96,66 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 |------|-------------|
 | macOS | 13.0 Ventura or later, Apple Silicon (arm64) |
 | iOS | 16.0 or later (build from source — see [USAGE.md](USAGE.md)) |
+
+---
+
+## iOS版について / About the iOS Version
+
+iOS版（iPhone/iPad）はmacOS版と同じエミュレーションコア・設定画面を共有しつつ、タッチ操作向けに構成しています。ビルド方法・操作方法は [USAGE.md](USAGE.md) を参照してください。
+
+**iOS版で使える主な機能:**
+
+- **仮想パッド** — 画面上のジョイスティック+トリガーボタン（A/Bのオートファイア、A/B入れ替え、ボタンサイズ・不透明度の調整に対応）
+- **タッチマウス** — 画面全体をトラックパッドとして使用（1本指ドラッグ=移動、1本指タップ=左クリック、2本指タップ=右クリック）
+- **ソフトウェアキーボード** — 画面下部に重ねて表示するX68000配列のキーボード（iPadおよびiPhone横向きなど、十分な画面幅がある場合）
+- **物理キーボード** — Bluetooth等で接続したハードウェアキーボードからの入力（キーリピート対応）
+- **ステートセーブ/ロード** — ワンタップでの即時保存と、保存済み一覧からの読込
+- **ZIP圧縮FDイメージ** — ZIP内のFDイメージを展開してマウント（複数イメージ格納時は選択シート表示）
+- **HDD/SCSI/MO/CD-ROMのマウント** — ファイルをアプリ内へコピーせず、選択した元の場所を参照してマウント
+- **一時停止・ターボ/ノーウェイト・FDアクセス高速化**
+- **設定タブ** — BIOS / Hardware / Audio / SASI / SCSI の5タブ
+
+**iOS版で現在使えない機能:**
+
+- 物理ゲームパッド
+- スクリーンショット・動画録画
+- モニタパネル全般
+- Windrv（共有フォルダ）
+- ドラッグ&ドロップによるマウント
+- General / Input / Windrv の各設定タブ（キーリマップ設定を含む）
+- FDDの書込み禁止切替
+- FD2/FD3の挿入・イジェクト
+- Mercury Unit・MIDIボード関連の設定
+- 電源ボタン・ゲストソフトからの電源OFF要求の検出（現状macOS版のみ）
+
+**English:**
+
+The iOS version (iPhone/iPad) shares the same emulation core and settings screens as the macOS version, arranged for touch operation. See [USAGE.md](USAGE.md) for build instructions and how to operate it.
+
+**Main features available on iOS:**
+
+- **Virtual Pad** — an on-screen joystick with trigger buttons (supports A/B auto-fire, A/B swap, and adjustable button size and opacity)
+- **Touch Mouse** — uses the whole screen as a trackpad (one-finger drag = move, one-finger tap = left click, two-finger tap = right click)
+- **Software Keyboard** — an X68000-layout keyboard overlaid at the bottom of the screen (when the screen is wide enough, e.g. on iPad or an iPhone in landscape)
+- **Physical Keyboard** — input from a hardware keyboard connected via Bluetooth etc. (with key repeat)
+- **State Save / Load** — one-tap instant save, and loading from a list of saved states
+- **ZIP-compressed FD Images** — extracts and mounts FD images inside a ZIP (a selection sheet appears for multi-image archives)
+- **HDD/SCSI/MO/CD-ROM Mounting** — mounts the selected file in place, without copying it into the app
+- **Pause, Turbo/No-Wait, and Fast FD Access**
+- **Settings Tabs** — five tabs: BIOS / Hardware / Audio / SASI / SCSI
+
+**Features not currently available on iOS:**
+
+- Physical gamepads
+- Screenshots and video recording
+- Monitor panels
+- Windrv (shared folder)
+- Drag & drop mounting
+- The General / Input / Windrv settings tabs (including key remapping)
+- FDD write-protect toggle
+- Inserting/ejecting FD2/FD3
+- Mercury Unit and MIDI board settings
+- The power button and detection of guest power-off requests (currently macOS only)
 
 ---
 
@@ -138,7 +206,7 @@ The emulator requires original X68000 BIOS ROM files, obtained from a real machi
 
 | File | Description | Size | Required |
 |------|-------------|------|----------|
-| `IPLROM.DAT` | IPL ROM (Original ~ XVI) | 131,072 bytes | Yes |
+| `IPLROM.DAT` | IPL ROM (Original–XVI) | 131,072 bytes | Yes |
 | `CGROM.DAT` | Character Generator ROM | 786,432 bytes | Yes |
 | `IPLROM30.DAT` | IPL ROM (X68030 mode) | 131,072 bytes | Optional |
 | `SCSIINROM.DAT` | Internal SCSI boot IPL ROM | 8,192 bytes | Optional (booting from internal SCSI) |
