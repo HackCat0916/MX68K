@@ -41,8 +41,8 @@
 #include <time.h>
 #include <dirent.h>
 #include <iconv.h>
-#include <unistd.h>      /* P647: unlink, rmdir, close, ftruncate, fileno */
-#include <fcntl.h>       /* P647: open, O_RDWR/O_CREAT/O_EXCL/O_TRUNC/O_NOFOLLOW */
+#include <unistd.h>      /* P647: unlink, rmdir, close, ftruncate, fileno 用 */
+#include <fcntl.h>       /* P647: open, O_RDWR/O_CREAT/O_EXCL/O_TRUNC/O_NOFOLLOW 用 */
 /* P647: renameatx_np / RENAME_EXCL(macOS 10.12+ の macOS 固有ヘッダ)。
  * MX は arm64 macOS 専用ビルドなので条件コンパイルはしない。
  * ★POSIX 標準の rename(2) を使わない理由は windrv_cmd_rename() のコメント参照
@@ -231,9 +231,9 @@ extern void     cpu_writemem24(uint32_t adr, uint32_t data);
 /* Human68k の 8+10+3 ファイル名表現。★P650 で「Human68k ファイル名表現」節から
  * ここへ前倒しした —— WindrvSearch が値メンバ `ent` として持つため。 */
 typedef struct {
-    uint8_t name[NAMESTS_NAME_LEN];   /* 0x20 padding */
-    uint8_t ext[NAMESTS_EXT_LEN];     /* 0x20 padding */
-    uint8_t add[NAMESTS_ADD_LEN];     /* 0x00 padding */
+    uint8_t name[NAMESTS_NAME_LEN];   /* 0x20 で埋める */
+    uint8_t ext[NAMESTS_EXT_LEN];     /* 0x20 で埋める */
+    uint8_t add[NAMESTS_ADD_LEN];     /* 0x00 で埋める */
     char    full[FILES_FULL_LEN];     /* "BASE.EXT" + NUL(Shift-JIS) */
 } WindrvH68Name;
 
@@ -2025,12 +2025,12 @@ static void windrv_cmd_disk_read(void) {
     memset(d, 0, sizeof(d));
     memcpy(d + 0,  s->ent.name, 8);      /* +0  name[8]  (0x20 詰め済み) */
     memcpy(d + 8,  s->ent.ext,  3);      /* +8  ext[3]   (0x20 詰め済み) */
-    d[11] = s->ent_attr;                 /* +11 attr */
+    d[11] = s->ent_attr;                 /* +11 属性 */
     memcpy(d + 12, s->ent.add, 10);      /* +12 add[10]  (0x00 詰め済み) */
-    d[22] = (uint8_t) (s->ent_time      ); d[23] = (uint8_t)(s->ent_time >>  8);  /* +22 time.W LE */
-    d[24] = (uint8_t) (s->ent_date      ); d[25] = (uint8_t)(s->ent_date >>  8);  /* +24 date.W LE */
+    d[22] = (uint8_t) (s->ent_time      ); d[23] = (uint8_t)(s->ent_time >>  8);  /* +22 時刻.W(リトルエンディアン) */
+    d[24] = (uint8_t) (s->ent_date      ); d[25] = (uint8_t)(s->ent_date >>  8);  /* +24 日付.W(リトルエンディアン) */
     d[26] = 0; d[27] = 0;                /* +26 cluster.W = 0(第2分岐未実装) */
-    d[28] = (uint8_t) (s->ent_size      ); d[29] = (uint8_t)(s->ent_size >>  8);  /* +28 size.L LE */
+    d[28] = (uint8_t) (s->ent_size      ); d[29] = (uint8_t)(s->ent_size >>  8);  /* +28 サイズ.L(リトルエンディアン) */
     d[30] = (uint8_t) (s->ent_size >> 16); d[31] = (uint8_t)(s->ent_size >> 24);
 
     for (i = 0; i < 0x20;  i++) wd_wb(naddr + (uint32_t)i, d[i]);        /* XM6fs:4466 */
@@ -2182,8 +2182,8 @@ static void windrv_cmd_timestamp(void) {
             return;
         }
 
-        ts[0].tv_sec = t; ts[0].tv_nsec = 0;   /* atime */
-        ts[1].tv_sec = t; ts[1].tv_nsec = 0;   /* mtime */
+        ts[0].tv_sec = t; ts[0].tv_nsec = 0;   /* atime(最終アクセス時刻) */
+        ts[1].tv_sec = t; ts[1].tv_nsec = 0;   /* mtime(最終更新時刻) */
         if (futimens(fileno(f->fp), ts) != 0) {
             windrv_wlog("timestamp", f->path, FS_CANTWRITE);
             windrv_set_result(FS_CANTWRITE);

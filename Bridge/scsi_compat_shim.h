@@ -1,19 +1,19 @@
 //---------------------------------------------------------------------------
 //
-//	MX68K — SCSI/SASI disk port compatibility shim
+//	MX68K — SCSI/SASI ディスク移植用互換シム
 //
-//	This header provides the minimal Win32 / XM6 environment types and
-//	macros required to compile the disk emulation classes ported from
-//	XM6 (vm/disk.cpp, vm/disk.h) into the MX68K Bridge layer.
+//	本ヘッダは、XM6 (vm/disk.cpp, vm/disk.h) から MX68K Bridge 層へ移植した
+//	ディスクエミュレーションクラスをコンパイルするのに必要な、最小限の
+//	Win32 / XM6 環境の型とマクロを提供する。
 //
-//	MX68K is a macOS port of the open-source Sharp X68000 emulator px68k.
-//	"SASI" / "SCSI" here are the 1980s disk-interface standard names used
-//	by the X68000 hardware — this is ordinary emulator development.
+//	MX68K はオープンソースのシャープ X68000 エミュレータ px68k の macOS 移植である。
+//	ここでの "SASI" / "SCSI" は X68000 ハードウェアが用いる 1980 年代の
+//	ディスクインタフェース規格名であり、通常のエミュレータ開発である。
 //
-//	The ported disk classes originate from:
+//	移植したディスククラスの出典:
 //	  X68000 EMULATOR "XM6"
 //	  Copyright (C) 2001-2006 PI.(Twitter: @xm6_original)
-//	See NOTICE-THIRD-PARTY.md at the repository root.
+//	リポジトリ直下の NOTICE-THIRD-PARTY.md を参照のこと。
 //
 //---------------------------------------------------------------------------
 
@@ -26,14 +26,13 @@
 
 //---------------------------------------------------------------------------
 //
-//	Basic Win32 integer types used by the XM6 disk code.
+//	XM6 ディスクコードが使用する Win32 の基本整数型。
 //
-//	px68k's win32api/windows.h leaves BYTE/WORD/DWORD commented out and
-//	provides only BOOL/FASTCALL/TRUE/FALSE. We therefore define the integer
-//	types here. Where px68k's headers ARE also included in the same
-//	translation unit (via dosio.h), the typedefs below are identical to
-//	px68k's (BOOL == int) so the redefinition is legal, and the macros are
-//	#ifndef-guarded so they never clash.
+//	px68k の win32api/windows.h は BYTE/WORD/DWORD をコメントアウトしたままで、
+//	BOOL/FASTCALL/TRUE/FALSE しか提供しない。そのため整数型はここで定義する。
+//	同一翻訳単位で px68k のヘッダも(dosio.h 経由で)インクルードされる場合でも、
+//	以下の typedef は px68k のもの(BOOL == int)と同一なので再定義は合法であり、
+//	マクロは #ifndef でガードしているため衝突しない。
 //
 //---------------------------------------------------------------------------
 typedef uint8_t  BYTE;
@@ -58,8 +57,8 @@ typedef int BOOL;
 
 //---------------------------------------------------------------------------
 //
-//	ASSERT / MAKEID — replicated verbatim from XM6 vm/xm6.h so the ported
-//	code behaves identically.
+//	ASSERT / MAKEID — 移植コードが同一に振る舞うよう、XM6 vm/xm6.h から
+//	そのまま複製したもの。
 //	  xm6.h: #define ASSERT(cond) assert(cond)
 //	  xm6.h: #define MAKEID(a, b, c, d) ((DWORD)((a<<24) | (b<<16) | (c<<8) | d))
 //
@@ -74,16 +73,15 @@ typedef int BOOL;
 
 //---------------------------------------------------------------------------
 //
-//	ASSERT_DIAG / LOG macros — replicated from XM6 vm/xm6.h + vm/log.h in
-//	their NO_LOG / NDEBUG (release) form.
+//	ASSERT_DIAG / LOG マクロ — XM6 vm/xm6.h + vm/log.h から、NO_LOG / NDEBUG
+//	(リリース)形で複製したもの。
 //
-//	Unlike vm/disk.cpp (which uses none of these), vm/scsi.cpp calls
-//	ASSERT_DIAG() at the entry of nearly every method and LOG0..LOG4 in many
-//	register setters / phase-transition routines outside any #if SCSI_LOG
-//	guard. In XM6 these expand to ((void)0) when NO_LOG / NDEBUG is defined;
-//	the macro arguments (Log::Warning, etc.) never appear in the replacement
-//	list, so the preprocessor simply discards them and no Log class is
-//	needed. This lets the ported code be compiled verbatim.
+//	これらを一切使わない vm/disk.cpp と異なり、vm/scsi.cpp はほぼ全メソッドの
+//	入口で ASSERT_DIAG() を呼び、多くのレジスタセッタ/フェーズ遷移ルーチンでは
+//	#if SCSI_LOG ガードの外で LOG0..LOG4 を呼ぶ。XM6 では NO_LOG / NDEBUG 定義時に
+//	これらは ((void)0) へ展開される。マクロ引数(Log::Warning 等)は置換リストに
+//	現れないため、プリプロセッサが単に捨て去り、Log クラスは不要となる。
+//	これにより移植コードを無改変のままコンパイルできる。
 //
 //---------------------------------------------------------------------------
 #if !defined(ASSERT_DIAG)
@@ -100,11 +98,11 @@ typedef int BOOL;
 
 //---------------------------------------------------------------------------
 //
-//	Forward declarations.
+//	前方宣言。
 //
-//	Device::Callback(Event*) and the MemDevice cpu/scheduler members refer to
-//	these types only through pointers, so a forward declaration is enough
-//	here; the full definitions follow further down.
+//	Device::Callback(Event*) および MemDevice の cpu/scheduler メンバは
+//	これらの型をポインタ経由でしか参照しないため、ここでは前方宣言で足りる。
+//	完全な定義は後方に続く。
 //
 //---------------------------------------------------------------------------
 class VM;
@@ -117,35 +115,35 @@ class Config;
 
 //---------------------------------------------------------------------------
 //
-//	Minimal Device / VM stubs.
+//	最小限の Device / VM スタブ。
 //
-//	XM6's Disk base class holds a "Device *ctrl" controller pointer, and
-//	SCSIHD::Inquiry reads the emulator version through
+//	XM6 の Disk 基底クラスはコントローラポインタ "Device *ctrl" を保持し、
+//	SCSIHD::Inquiry は SCSI INQUIRY のリビジョン欄を埋めるために
 //	  ctrl->GetVM()->GetVersion(major, minor)
-//	to fill the SCSI INQUIRY revision field.
+//	経由でエミュレータのバージョンを読む。
 //
-//	The SCSI (MB89352) port additionally needs a MemDevice base (address
-//	window + cpu/scheduler lookup) and lightweight CPU / Scheduler / Event /
-//	Memory / SRAM adapters that satisfy the ~12 external call kinds the SPC
-//	state machine makes (cpu->BusErr/IntCancel/Interrupt, scheduler->Wait/
-//	Has/Add/DelEvent, memory->GetMemType/GetSCSI, sram->Get/SetMemSw). These
-//	adapters implement NO real virtual-machine behaviour; they exist only so
-//	the ported protocol logic can compile. Nothing in this translation unit
-//	is wired into the runtime yet — the SCSI class is never instantiated.
+//	SCSI (MB89352) の移植ではさらに、MemDevice 基底(アドレス窓 + cpu/scheduler
+//	の参照解決)と、SPC ステートマシンが行う約 12 種の外部呼び出し
+//	(cpu->BusErr/IntCancel/Interrupt, scheduler->Wait/Has/Add/DelEvent,
+//	memory->GetMemType/GetSCSI, sram->Get/SetMemSw)を満たす軽量な
+//	CPU / Scheduler / Event / Memory / SRAM アダプタが必要となる。これらの
+//	アダプタは実際の仮想マシン動作を一切実装せず、移植したプロトコルロジックを
+//	コンパイル可能にするためだけに存在する。この翻訳単位のものはまだ何も
+//	ランタイムへ配線されていない — SCSI クラスは一度もインスタンス化されない。
 //
 //---------------------------------------------------------------------------
 class VM {
 public:
-	// Placeholder version (major.minor). Real value is wired in a later stage.
+	// 仮のバージョン (major.minor)。実際の値は後の段階で配線する。
 	void GetVersion(DWORD& major, DWORD& minor) { major = 1; minor = 0; }
-	// Returns the requested device stub (CPU/Scheduler/Memory/SRAM). Defined
-	// after those classes below.
+	// 要求されたデバイススタブ(CPU/Scheduler/Memory/SRAM)を返す。定義は
+	// 後方のそれらのクラスの後にある。
 	void* SearchDevice(DWORD id);
 };
 
 class Device {
 public:
-	// Device identity (XM6 device.h). Filled by the ported constructor.
+	// デバイス識別情報 (XM6 device.h)。移植したコンストラクタが設定する。
 	struct { DWORD id = 0; const char* desc = nullptr; } dev;
 
 	Device() {}
@@ -154,7 +152,7 @@ public:
 	void SetVM(VM* vm) { vm_ = vm; }
 	VM* GetVM() { static VM s_dummy; return vm_ ? vm_ : &s_dummy; }
 
-	// Event callback (overridden by the ported SCSI class).
+	// イベントコールバック(移植した SCSI クラスがオーバーライドする)。
 	virtual BOOL Callback(Event* ev) { (void)ev; return TRUE; }
 
 private:
@@ -163,9 +161,9 @@ private:
 
 //---------------------------------------------------------------------------
 //
-//	MemDevice — base for a memory-mapped device (XM6 device.h MemDevice).
-//	Holds the [first,last] guest-address window and resolves the CPU /
-//	Scheduler stubs from the VM at Init().
+//	MemDevice — メモリマップドデバイスの基底 (XM6 device.h MemDevice)。
+//	[first,last] のゲストアドレス窓を保持し、Init() で VM から
+//	CPU / Scheduler スタブを解決する。
 //
 //---------------------------------------------------------------------------
 class MemDevice : public Device {
@@ -190,14 +188,14 @@ public:
 
 //---------------------------------------------------------------------------
 //
-//	CPU stub — interrupt / bus-error surface (XM6 cpu.h).
+//	CPU スタブ — 割り込み/バスエラーの窓口 (XM6 cpu.h)。
 //
-//	P252 Stage 2c-2: Interrupt / IntCancel are now wired to the Bridge-level
-//	level-1 interrupt multiplexer (m68000_bridge.c). IntAck stays a no-op —
-//	the ACK is driven from the multiplexer side (mx68k_diag_irqh_callback),
-//	not from this stub. The whole path is inert by default: the SCSI class
-//	only calls Interrupt(1,...) once the guest sets the SPC enable bit, which
-//	cannot happen while the wiring toggle is off (P251).
+//	P252 Stage 2c-2: Interrupt / IntCancel は Bridge 層のレベル1割り込み
+//	マルチプレクサ (m68000_bridge.c) へ配線済み。IntAck は何もしないまま —
+//	ACK はこのスタブではなくマルチプレクサ側 (mx68k_diag_irqh_callback) から
+//	駆動される。経路全体は既定では不活性である: SCSI クラスが Interrupt(1,...) を
+//	呼ぶのはゲストが SPC の有効ビットを立てた後だけであり、配線トグルが
+//	オフの間はそれが起こり得ない (P251)。
 //
 //---------------------------------------------------------------------------
 extern "C" void mx68k_scsi_irq_raise(int level, int vector);
@@ -207,14 +205,14 @@ extern "C" void mx68k_scsi_defer_stale(void);   // P264: 未ドレイン pending
 class CPU {
 public:
 	BOOL Interrupt(int level, int vector) { mx68k_scsi_irq_raise(level, vector); return TRUE; }
-	void IntAck(int level) { (void)level; }   /* ACK driven from the multiplexer side; keep empty */
+	void IntAck(int level) { (void)level; }   /* ACK はマルチプレクサ側から駆動される。空のままにする */
 	void IntCancel(int level) { mx68k_scsi_irq_cancel(level); }
 	void BusErr(DWORD addr, BOOL read) { (void)addr; (void)read; }
 };
 
 //---------------------------------------------------------------------------
 //
-//	Event stub — scheduler event descriptor (XM6 event.h).
+//	Event スタブ — スケジューライベント記述子 (XM6 event.h)。
 //
 //---------------------------------------------------------------------------
 class Event {
@@ -232,7 +230,7 @@ public:
 			// 発火は次のレジスタ・リード時(DrainPending)まで遅延させる必要がある。
 			// それ以外の全経路(初回選択・成功選択・CD-DA・Reset)は arm されないので即時発火(従来通り)。
 			if (s_defer_next_fire) {
-				s_defer_next_fire = false;   // one-shot 消費
+				s_defer_next_fire = false;   // ワンショットを消費
 				// P264 レビュー4.1対策: 未ドレインの pending が残ったまま新たに arm される
 				// (＝より新しい再アームが古いものを追い越す)ケースを構造的に可視化する。
 				// 実 HW でも新しい SEL は古い選択タイマを取り消すので、古い pending は破棄が正。
@@ -288,12 +286,12 @@ private:
 
 //---------------------------------------------------------------------------
 //
-//	Scheduler stub — event queue (XM6 schedule.h).
+//	Scheduler スタブ — イベントキュー (XM6 schedule.h)。
 //
-//	AddEvent approximates the selection-phase delay by firing the callback
-//	synchronously (see P250 plan §2-5). This is a unit-test-only behaviour;
-//	it must be re-evaluated against real CPU-cycle progression when the SCSI
-//	class is actually wired in (Stage 2c).
+//	AddEvent はコールバックを同期的に発火させることで選択フェーズの遅延を
+//	近似する (P250 計画 §2-5 参照)。これは単体テスト専用の挙動であり、
+//	SCSI クラスを実際に配線する際 (Stage 2c) に実際の CPU サイクル進行と
+//	照らして再評価しなければならない。
 //
 //---------------------------------------------------------------------------
 class Scheduler {
@@ -310,12 +308,12 @@ public:
 
 //---------------------------------------------------------------------------
 //
-//	Memory stub — X68000 memory configuration (XM6 memory.h).
+//	Memory スタブ — X68000 のメモリ構成 (XM6 memory.h)。
 //
-//	P251 Stage 2c: GetMemType / GetSCSI are now backed by real Bridge data.
-//	Their definitions live in scsi_spc_bridge.cpp (machine type threaded in
-//	via scsi_real_set_scsi_mode (P510); SCSI IPL ROM = s_scsi_in_rom from
-//	EmulatorBridge.c, wired in P247).
+//	P251 Stage 2c: GetMemType / GetSCSI は実際の Bridge データに裏付けられている。
+//	定義は scsi_spc_bridge.cpp にある(機種は scsi_real_set_scsi_mode 経由で
+//	渡される (P510)。SCSI IPL ROM = EmulatorBridge.c の s_scsi_in_rom で、
+//	P247 で配線)。
 //
 //---------------------------------------------------------------------------
 class Memory {
@@ -327,26 +325,26 @@ public:
 
 //---------------------------------------------------------------------------
 //
-//	SRAM stub — battery-backed memory switches (XM6 sram.h).
+//	SRAM スタブ — バッテリバックアップされたメモリスイッチ (XM6 sram.h)。
 //
-//	P251 Stage 2c: GetMemSw / SetMemSw are now backed by the real px68k
-//	sram.c (definitions in scsi_spc_bridge.cpp). SetMemSw performs a real,
-//	bracketed single-byte write to the user's sram.dat memory-switch region
-//	($ED0000+offset). It is reached only when the internal-SCSI double gate
-//	(machine==SCSI AND SCSIINROM loaded) is satisfied AND a one-time sram.dat
-//	backup has been taken (Fable5 audit #2). It deliberately never routes through
-//	SRAM_SetSCSIMode(2), which would also rewrite the ROM boot handle $ED000C-0F.
+//	P251 Stage 2c: GetMemSw / SetMemSw は実際の px68k sram.c に裏付けられている
+//	(定義は scsi_spc_bridge.cpp)。SetMemSw はユーザーの sram.dat の
+//	メモリスイッチ領域 ($ED0000+offset) へ、前後を括った実際の 1 バイト書き込みを
+//	行う。到達するのは内蔵 SCSI の二重ゲート(機種==SCSI かつ SCSIINROM 読込済み)
+//	を満たし、かつ sram.dat の一回限りのバックアップを取得済みの場合のみ
+//	(Fable5 監査 #2)。ROM 起動ハンドル $ED000C-0F まで書き換えてしまう
+//	SRAM_SetSCSIMode(2) は意図的に一切経由しない。
 //
-//	P508 update: the blanket ban on rewriting $ED000C has lapsed — its premise
-//	(D-18, "an unmapped SCSI IPL behind the boot handle breaks boot") was
-//	resolved in P247-P267, and P508 now writes $ED000C-0F deliberately from
-//	sasi_bridge.c (sasi_bridge_apply_rom_boot_handle) to keep the ROM boot
-//	handle in sync with the wired SCSI configuration. What is retained is the
-//	*design* rule, not the ban: never route through SRAM_SetSCSIMode(), whose
-//	single mode argument makes an argument mix-up able to rewrite the boot
-//	handle by accident — use a dedicated function whose arguments cannot be
-//	confused (the same P450/P456 idiom). Reset() never asks us to write
-//	$ED000C, so by construction this path still cannot touch it.
+//	P508 更新: $ED000C 書き換えの全面禁止は失効した — その前提
+//	(D-18「起動ハンドルの先にマップされていない SCSI IPL があると起動が壊れる」)は
+//	P247-P267 で解決済みであり、P508 は配線済み SCSI 構成と ROM 起動ハンドルを
+//	同期させるため、sasi_bridge.c (sasi_bridge_apply_rom_boot_handle) から
+//	意図的に $ED000C-0F を書き込むようになった。残しているのは禁止ではなく
+//	*設計* 上のルールである: SRAM_SetSCSIMode() は経由しないこと。その単一の
+//	mode 引数では、引数の取り違えによって起動ハンドルを誤って書き換え得るため、
+//	引数を取り違えようのない専用関数を使う (P450/P456 と同じ作法)。Reset() が
+//	$ED000C への書き込みを求めることはないので、構造上この経路は依然として
+//	そこに触れ得ない。
 //
 //---------------------------------------------------------------------------
 class SRAM {
@@ -357,8 +355,8 @@ public:
 
 //---------------------------------------------------------------------------
 //
-//	VM::SearchDevice / MemDevice::Init — defined here now that the stub
-//	device classes above are complete.
+//	VM::SearchDevice / MemDevice::Init — 上のスタブデバイスクラス群が
+//	出そろったので、ここで定義する。
 //
 //---------------------------------------------------------------------------
 inline void* VM::SearchDevice(DWORD id) {

@@ -1,4 +1,4 @@
-/* Bridge/midi_shadow.h — internal only. MIDI 送受信の累積カウンタ
+/* Bridge/midi_shadow.h — 内部専用。MIDI 送受信の累積カウンタ
  * (P693 MIDI Viewer 用)。Swift 向けの契約そのものではなく、値は
  * EmulatorBridge.h 側の mx68k_midi_get_* getter 経由で公開する。
  *

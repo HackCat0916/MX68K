@@ -7,20 +7,19 @@
 //
 //---------------------------------------------------------------------------
 //
-//	Ported to MX68K (macOS port of px68k) — Bridge layer, SCSI (MB89352) SPC
-//	register machine + SCSI phase state machine, HDD path only. Ported from
-//	XM6 vm/scsi.h with only Win32/XM6 environment type/macro shims applied
-//	(scsi_compat_shim.h). The disk-layer classes (Disk / SASIHD / SCSIHD)
-//	are the ones already ported in P249 (scsi_disk.h) and are reused here —
-//	they are NOT redefined. The MO path is wired (P668/P674) and the CD-ROM
-//	path is wired (P676, READ TOC + data reads). Only the CD-DA path remains
-//	excluded; its declarations are retained as signatures.
+//	MX68K (px68k の macOS 移植) への移植 — Bridge 層。SCSI (MB89352) SPC の
+//	レジスタ機構 + SCSI フェーズステートマシン、HDD 経路のみ。XM6 vm/scsi.h から、
+//	Win32/XM6 環境の型/マクロのシム (scsi_compat_shim.h) だけを適用して移植した。
+//	ディスク層のクラス (Disk / SASIHD / SCSIHD) は P249 で移植済みのもの
+//	(scsi_disk.h) をここで再利用しており、再定義はしない。MO 経路は配線済み
+//	(P668/P674)、CD-ROM 経路も配線済み (P676、READ TOC + データ読み出し)。
+//	CD-DA 経路のみ除外したままで、その宣言はシグネチャとして残している。
 //
-//	NOTE: This translation unit is compiled but NOT yet wired into the
-//	runtime — nothing instantiates or calls the SCSI class yet. Runtime
-//	wiring (insc_read/insc_write, MemReadTable) happens in a later stage.
+//	注意: この翻訳単位はコンパイルされるが、まだランタイムへ配線されていない —
+//	SCSI クラスをインスタンス化・呼び出すものはまだ無い。ランタイムへの配線
+//	(insc_read/insc_write, MemReadTable) は後の段階で行う。
 //
-//	See NOTICE-THIRD-PARTY.md at the repository root.
+//	リポジトリ直下の NOTICE-THIRD-PARTY.md を参照のこと。
 //
 //---------------------------------------------------------------------------
 
@@ -371,7 +370,7 @@ private:
 #if 0
 	Event cdda;
 										// フレームイベント
-#endif	// 0 (CD-DA excluded)
+#endif	// 0 (CD-DA は除外)
 
 	// ドライブ・ファイルパス
 	void FASTCALL Construct();
