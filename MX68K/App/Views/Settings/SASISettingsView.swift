@@ -262,7 +262,7 @@ struct SASISettingsView: View {
 
     #if os(macOS)
 
-    // MARK: - Drag & drop (P442 / D-8)
+    // MARK: - ドラッグ&ドロップ(P442 / D-8)
 
     /// 落とされた行の unit へマウントする。受理条件は `Select…`(NSOpenPanel)と
     /// 同一 — 実在する通常ファイルで拡張子が `.hdf` のもののみ。

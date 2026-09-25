@@ -266,7 +266,7 @@ struct SCSISettingsView: View {
         #endif
     }
 
-    // MARK: - Mode radio
+    // MARK: - モード選択ラジオボタン
 
     // P581: `label` は `String` だと `Text(_ content: S)`(非ローカライズ)側の
     // オーバーロードへ解決され、xcstrings の ja 訳が引かれない。`LocalizedStringKey`
@@ -288,7 +288,7 @@ struct SCSISettingsView: View {
         .foregroundColor(enabled ? .primary : .secondary)
     }
 
-    // MARK: - Disk row
+    // MARK: - ディスク行
 
     private func scsiPath(_ id: Int) -> String {
         let ext = configManager.config.extensions
@@ -402,7 +402,7 @@ struct SCSISettingsView: View {
         #endif
     }
 
-    // MARK: - MO row (P668 / Docs/10 C-4)
+    // MARK: - MO行(P668 / Docs/10 C-4)
 
     #if os(macOS)
     /// MO 行の D&D 状態は SCSI 行と同じ辞書を使い回す。ID0-6 と衝突しない
@@ -522,7 +522,7 @@ struct SCSISettingsView: View {
     }
     #endif
 
-    // MARK: - CD-ROM row (P676 / Docs/10 C-5)
+    // MARK: - CD-ROM行(P676 / Docs/10 C-5)
 
     #if os(macOS)
     /// CD 行の D&D 状態は MO 行と同じ辞書を使い回す。ID0-6 とも MO(-1)とも
@@ -655,7 +655,7 @@ struct SCSISettingsView: View {
         return true
     }
 
-    // MARK: - Drag & drop (P442 / D-8)
+    // MARK: - ドラッグ&ドロップ(P442 / D-8)
 
     /// 落とされた行の ID へマウントする。
     /// 拡張子チェックは**行わない** — 既存の `browseDiskImage()` ピッカーは
@@ -719,7 +719,7 @@ struct SCSISettingsView: View {
         dropWarnings[id] = nil
     }
 
-    // MARK: - Helpers
+    // MARK: - 補助関数
 
     private func browseDiskImage() -> URL? {
         let panel = NSOpenPanel()

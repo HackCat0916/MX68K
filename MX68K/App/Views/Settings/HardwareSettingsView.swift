@@ -79,10 +79,10 @@ struct HardwareSettingsView: View {
     @AppStorage("virtualPadSwapAB") private var virtualPadSwapAB: Bool = false
     #endif
 
-    /// P221b §6-bis(A): armed only after the view is on screen, so a
-    /// normalize-on-load write to `machineType` (e.g. old "X68030" -> "SCSI")
-    /// cannot misfire the clock default and clobber a saved clock. The clock
-    /// default connection is intentionally a user-interaction-only proposal.
+    /// P221b §6-bis(A): ビューが画面に表示されてから初めて有効化する。これにより、
+    /// 読込時の正規化による`machineType`への書込み(例: 旧"X68030" -> "SCSI")が
+    /// クロック既定値の連動を誤発火させ、保存済みのクロックを上書きすることを防ぐ。
+    /// クロック既定値の連動は、意図的にユーザー操作時のみの提案としている。
     @State private var machineTypeReady = false
 
     /// P735 — Clock Picker の選択状態。`settingsViewModel.clockMHz` が固定選択肢に
@@ -127,9 +127,9 @@ struct HardwareSettingsView: View {
     var body: some View {
         Form {
             Section(header: Text("Machine Configuration")) {
-                // P221b: machine type is the real-hardware storage-bus axis
-                // (SASI: 初代〜EXPERT II / SCSI: SUPER〜XVI). Only the machine
-                // -> default-clock proposal is connected; memory is independent.
+                // P221b: 機種は実機のストレージバス軸
+                // (SASI: 初代〜EXPERT II / SCSI: SUPER〜XVI)。連動させるのは
+                // 機種 -> 既定クロックの提案のみで、メモリは独立している。
                 Picker("Machine Type", selection: $settingsViewModel.machineType) {
                     Text("SASI Model (Initial – EXPERT II)").tag("SASI")
                     Text("SCSI Model (SUPER – XVI)").tag("SCSI")
