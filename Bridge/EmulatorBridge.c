@@ -17,8 +17,8 @@
  * する)。Bridge/sasi_io_cache.c:40 の SASI_IO_CACHE_NO_MACROS と同じ約束事。 */
 #define FDD_TIMING_SHIM_NO_MACROS
 #include "fdd_timing_shim.h"
-#include "opm_shadow.h"   /* P479: OPM register shadow written by m68000_bridge.c */
-#include "mercury_opn_shadow.h"   /* P491: Mercury OPN register shadow written by m68000_bridge.c */
+#include "opm_shadow.h"   /* P479: m68000_bridge.c が書き込む OPM レジスタのシャドウ */
+#include "mercury_opn_shadow.h"   /* P491: m68000_bridge.c が書き込む Mercury OPN レジスタのシャドウ */
 
 /* P509 (D-48): m68000_bridge.c 定義の診断プローブ。本サイクルの変更を
  * Bridge の 2 ファイルに閉じるため、宣言をヘッダではなくここに置く。
@@ -35,67 +35,67 @@ extern volatile int g_p776_poweroff_req;
 
 #define P29_RTE_STUB_ADDR  0x0FFF00U  /* RTEスタブ配置アドレス（1MB RAM末端・IPLコピー範囲外） */
 
-/* P221b: Config.XVIMode is now DERIVED from the configured clock (see
- * p270_derive_xvimode below), replacing the P146 hard-coded XVIMode=3. The old
- * P221_FORCE_XVIMODE0 measurement toggle is retired — the 10MHz path is now
- * reachable through the normal clock=10 route, and the reachability check it
- * guarded is carried by the P221B_PROBE (EmulatorBridge.h). */
-/* P270: the P221b derivation is now a per-clock-value lookup table, not a
- * threshold — the threshold could not correctly express clock-up MOD kits
- * (RedZone 24MHz stays 16MHz-class 0xFE; EXPERT 17MHz stays 10MHz-class 0xFF)
- * whose modded speed is not monotonic with their machine ID class. See the
- * p270_derive_xvimode block below for the full rationale and references. */
+/* P221b: Config.XVIMode は現在、設定されたクロックから導出される(下記の
+ * p270_derive_xvimode を参照)。P146 のハードコード XVIMode=3 を置き換えた。旧来の
+ * P221_FORCE_XVIMODE0 計測用トグルは廃止済み——10MHz 経路は現在、通常の
+ * clock=10 経路で到達可能であり、そのトグルが守っていた到達性チェックは
+ * P221B_PROBE(EmulatorBridge.h)が引き継いでいる。 */
+/* P270: P221b の導出は現在、しきい値方式ではなくクロック値ごとのルックアップ表。
+ * しきい値方式ではクロックアップ改造キットを正しく表現できなかった
+ * (RedZone 24MHz は 16MHz 級 0xFE のまま、EXPERT 17MHz は 10MHz 級 0xFF のまま)
+ * ——改造後の速度が機種 ID の級と単調に対応しないため。完全な根拠と参照資料は
+ * 下記の p270_derive_xvimode ブロックを参照。 */
 
-/* P51-A — Shrink P16-FIX IPL→MEM byte-swap shadow to skip the vector-table
- * area $0008..$07BF. Set P51A_ENABLE=0 to ablate (restore legacy full-range
- * shadow). Set P51A_VEC23_SAFETY=0 to ablate the vec#2/#3 RTE-stub
- * pre-install (without changing the shrink behavior). The macros live here
- * (near P29_RTE_STUB_ADDR) so the single-edit flip is discoverable.
- * See /tmp/mx68k_P51A_plan.md §2 and §5.2 for rationale. */
+/* P51-A — P16-FIX の IPL→MEM バイトスワップ・シャドウを縮小し、ベクタテーブル
+ * 領域 $0008..$07BF をスキップする。P51A_ENABLE=0 で無効化(従来の全範囲
+ * シャドウへ戻す)。P51A_VEC23_SAFETY=0 で vec#2/#3 の RTE スタブ事前設置を
+ * 無効化(縮小の挙動は変えない)。1箇所の編集で切り替えられることが
+ * 分かるよう、マクロはここ(P29_RTE_STUB_ADDR の近く)に置く。
+ * 根拠は /tmp/mx68k_P51A_plan.md §2 および §5.2 を参照。 */
 #define P51A_ENABLE              1
 #define P51A_VEC23_SAFETY        1
 #define P51A_VECTOR_SKIP_BEGIN   0x0008
-#define P51A_VECTOR_SKIP_END     0x07C0  /* first re-shadowed word pair */
+#define P51A_VECTOR_SKIP_END     0x07C0  /* 最初に再シャドウされるワード対 */
 
-/* P49-B Track C (★) — Compile-time switch for the FDD-INT-PULSE stub.
+/* P49-B Track C (★) — FDD-INT-PULSE スタブのコンパイル時スイッチ。
  *
- * Default OFF (dormant). The stub at mx68k_fdd_insert() ORs bit6 (FDD INT,
- * Spec §3.1) of IOC_IntStat as a one-shot at disk-insert. Track A's tracer
- * results (see Bridge/m68000_bridge.c P49B_TRACE_PC_LO/HI block) will
- * indicate whether IPL is actually polling $E9C001 bit6. If so, this gate
- * is flipped to 1 in a follow-up patch.
+ * 既定 OFF(休眠)。mx68k_fdd_insert() 内のスタブは、ディスク挿入時に one-shot で
+ * IOC_IntStat の bit6(FDD INT、Spec §3.1)を OR する。Track A のトレーサ
+ * 結果(Bridge/m68000_bridge.c の P49B_TRACE_PC_LO/HI ブロックを参照)により、
+ * IPL が実際に $E9C001 bit6 をポーリングしているかが判明する。そうであれば、
+ * 後続パッチでこのゲートを 1 に切り替える。
  *
- * Requirements Review §6.1 / §6.2 / §6.3 / §4.3 reflected:
- *   §6.1 — DEFAULT OFF; flip ON only after Track A confirms bit6 polling.
- *   §6.2 — bit6 has NO auto-clear path in Core/px68k/x68k/ioc.c
- *          (only bit5 PRT auto-clears on read, per ioc.c:70-86). Therefore
- *          when this gate is enabled, a bit6-CLEAR path must ALSO be added
- *          in Bridge/ (NOT Core/) — otherwise the OR would cause repeated
- *          vec=$61 ACK loops (IRQ storm). This maintenance debt MUST be
- *          paired with the enable.
- *   §6.3 — Spec §5.4 hints IPL may poll bit7 (FDC INT) instead of bit6
- *          (FDD INT). The Decision Gate (Plan §8) adds a row C2 for the
- *          bit7 variant; this stub covers only bit6, so a sibling stub
- *          would be added for bit7 in the same follow-up patch if needed.
- *   §4.3 — `IOC_IntStat |= 0x40u;` is EMULATOR-INTERNAL state manipulation
- *          (writes directly to the static byte exported by ioc.c). It does
- *          NOT go through the CPU bus / IOC_Write(), so it does not
- *          contradict Spec §3.1's "bit6 is read-only on the CPU side"
- *          property — that property concerns CPU-bus writes only.
+ * Requirements Review §6.1 / §6.2 / §6.3 / §4.3 の反映:
+ *   §6.1 — 既定 OFF。Track A が bit6 ポーリングを確認した後にのみ ON にする。
+ *   §6.2 — Core/px68k/x68k/ioc.c には bit6 の自動クリア経路が無い
+ *          (読出しで自動クリアされるのは bit5 PRT のみ、ioc.c:70-86 による)。したがって
+ *          このゲートを有効にする際は、bit6 をクリアする経路も Bridge/ に
+ *          (Core/ ではなく)追加しなければならない——さもないと OR により
+ *          vec=$61 の ACK ループが繰り返される(IRQ ストーム)。この保守上の負債は
+ *          必ず有効化とセットで対処すること。
+ *   §6.3 — Spec §5.4 は IPL が bit6(FDD INT)ではなく bit7(FDC INT)を
+ *          ポーリングしている可能性を示唆する。Decision Gate(Plan §8)は bit7
+ *          版として行 C2 を追加する。このスタブは bit6 のみを扱うため、必要なら
+ *          同じ後続パッチで bit7 用の兄弟スタブを追加する。
+ *   §4.3 — `IOC_IntStat |= 0x40u;` はエミュレータ内部の状態操作である
+ *          (ioc.c がエクスポートする static バイトへ直接書き込む)。CPU バス /
+ *          IOC_Write() を経由しないため、Spec §3.1 の「bit6 は CPU 側からは
+ *          read-only」という性質とは矛盾しない——その性質は CPU バス
+ *          経由の書込みにのみ関わるものである。
  *
- * Code Review C-10 (advisory): macro lives at file scope (here) so the
- * future gate-flip is a one-edit operation at a discoverable location.
- * Code Review C-11: enable-side patch will be ≥2 lines (gate + bit6-
- * clear path), not "≤2" as Plan §4.1 originally claimed. */
+ * Code Review C-10(助言): 将来のゲート切替を分かりやすい場所での1箇所編集で
+ * 済ませられるよう、マクロはファイルスコープ(ここ)に置く。
+ * Code Review C-11: 有効化側のパッチは 2 行以上になる(ゲート + bit6
+ * クリア経路)——Plan §4.1 が当初主張した「2 行以下」ではない。 */
 #define P49B_FDD_INT_PULSE_ENABLE 0
 
-/* P68-FDC-FIX: hard-reset-time FDD SetDelay drain (drive-ready race fix).
- * 1 = enabled (default, bug fix). 0 = revert to pre-P68 behaviour.
- * See mx68k_reset_hard() end-of-function block and /tmp/mx68k_P68_plan.md. */
+/* P68-FDC-FIX: ハードリセット時の FDD SetDelay 消化(ドライブレディ競合の修正)。
+ * 1 = 有効(既定、バグ修正)。0 = P68 以前の挙動へ戻す。
+ * mx68k_reset_hard() 末尾のブロックおよび /tmp/mx68k_P68_plan.md を参照。 */
 #define P68_FDC_FIX_ENABLE 1
 
-/* P135 forward declarations — P135_ENABLE probes use these in mx68k_init() before
- * their full definitions at line ~1017+. */
+/* P135 前方宣言 — P135_ENABLE のプローブが、完全な定義(~1017 行目以降)より
+ * 前の mx68k_init() 内でこれらを使う。 */
 extern int g_mx68k_frame_num;
 extern uint32_t g_p169_tvram_wb, g_p169_tvram_ww;   /* P169 */
 #if P135_ENABLE
@@ -136,15 +136,15 @@ static void ensure_app_support_dir(void);
  * の双方から呼ばれるため前方宣言する)。 */
 static void sram_seed_defaults(void);
 
-/* P53 — file-static idempotency / one-shot flags.
- * - s_p53_shutdown_done: gates the body of mx68k_shutdown. Reset in
- *   mx68k_init so re-init scenarios work. Single-threaded read/write
- *   (all sites run on the main thread); debug_log mutex protects the
- *   surrounding log writes.
- * - s_p53_atexit_registered: ensures atexit(mx68k_atexit_summary) is
- *   registered exactly once per process. NOT reset on re-init because
- *   libc's atexit list already holds the entry.
- * See /tmp/mx68k_P53_plan.md §3.1 / §3.2 / Edit B1. */
+/* P53 — ファイル static の冪等性 / one-shot フラグ。
+ * - s_p53_shutdown_done: mx68k_shutdown の本体をゲートする。再 init の
+ *   シナリオが機能するよう mx68k_init でリセットする。読み書きは単一スレッド
+ *   (全箇所がメインスレッドで動く)。周囲のログ書込みは debug_log の
+ *   mutex が保護する。
+ * - s_p53_atexit_registered: atexit(mx68k_atexit_summary) がプロセスあたり
+ *   ちょうど1回だけ登録されることを保証する。libc の atexit リストが既に
+ *   そのエントリを保持しているため、再 init ではリセットしない。
+ * /tmp/mx68k_P53_plan.md §3.1 / §3.2 / Edit B1 を参照。 */
 static int s_p53_shutdown_done = 0;
 static int s_p53_atexit_registered = 0;
 
@@ -246,16 +246,16 @@ uint64_t mx68k_diag_get_and_reset_log_calls(void) {
  * 宣言・参照とも同一の #if P533_ENABLE ガード配下(P467/P468 ファミリと
  * 同じ規約)。全て既存グローバルの読み取り結果の保存のみ。 */
 static uint32_t s_p533_chsize_calls = 0;  /* 当該フレーム中の WinDraw_ChangeSize() 呼出し回数 */
-static int32_t  s_p533_tdx_b = 0;         /* TextDotX  (frame begin) */
-static int32_t  s_p533_tdx_e = 0;         /* TextDotX  (frame end)   */
-static int32_t  s_p533_tdy_b = 0;         /* TextDotY  (frame begin) */
-static int32_t  s_p533_tdy_e = 0;         /* TextDotY  (frame end)   */
-static uint32_t s_p533_palhash_b = 0;     /* Pal_Regs[1024] の FNV ハッシュ (frame begin) */
-static uint32_t s_p533_palhash_e = 0;     /* 同 (frame end) */
-static uint8_t  s_p533_sp1_b = 0;         /* SysPort[1] (frame begin) */
-static uint8_t  s_p533_sp1_e = 0;         /* SysPort[1] (frame end)   */
-static uint8_t  s_p533_cv_b  = 0;         /* Contrast_Value (frame begin) */
-static uint8_t  s_p533_cv_e  = 0;         /* Contrast_Value (frame end)   */
+static int32_t  s_p533_tdx_b = 0;         /* TextDotX  (フレーム頭) */
+static int32_t  s_p533_tdx_e = 0;         /* TextDotX  (フレーム末) */
+static int32_t  s_p533_tdy_b = 0;         /* TextDotY  (フレーム頭) */
+static int32_t  s_p533_tdy_e = 0;         /* TextDotY  (フレーム末) */
+static uint32_t s_p533_palhash_b = 0;     /* Pal_Regs[1024] の FNV ハッシュ (フレーム頭) */
+static uint32_t s_p533_palhash_e = 0;     /* 同 (フレーム末) */
+static uint8_t  s_p533_sp1_b = 0;         /* SysPort[1] (フレーム頭) */
+static uint8_t  s_p533_sp1_e = 0;         /* SysPort[1] (フレーム末) */
+static uint8_t  s_p533_cv_b  = 0;         /* Contrast_Value (フレーム頭) */
+static uint8_t  s_p533_cv_e  = 0;         /* Contrast_Value (フレーム末) */
 #endif
 
 #if P570_ENABLE
@@ -272,24 +272,24 @@ static uint8_t  s_p533_cv_e  = 0;         /* Contrast_Value (frame end)   */
  * より、新規 static は既存プローブ static 群(P533 直後)へまとめ、
  * s_compose_fb / s_row_drawn などの大配列の隣接位置を変えない。すべてスカラ
  * static であり、この位置に大配列は無い。 */
-static int32_t  s_p570_tdx_b  = 0;        /* TextDotX      (frame begin) */
-static int32_t  s_p570_tdy_b  = 0;        /* TextDotY      (frame begin) */
-static uint16_t s_p570_hs_b   = 0;        /* CRTC_HSTART   (frame begin) */
-static uint16_t s_p570_he_b   = 0;        /* CRTC_HEND     (frame begin) */
-static uint16_t s_p570_vs_b   = 0;        /* CRTC_VSTART   (frame begin) */
-static uint16_t s_p570_ve_b   = 0;        /* CRTC_VEND     (frame begin) */
+static int32_t  s_p570_tdx_b  = 0;        /* TextDotX      (フレーム頭) */
+static int32_t  s_p570_tdy_b  = 0;        /* TextDotY      (フレーム頭) */
+static uint16_t s_p570_hs_b   = 0;        /* CRTC_HSTART   (フレーム頭) */
+static uint16_t s_p570_he_b   = 0;        /* CRTC_HEND     (フレーム頭) */
+static uint16_t s_p570_vs_b   = 0;        /* CRTC_VSTART   (フレーム頭) */
+static uint16_t s_p570_ve_b   = 0;        /* CRTC_VEND     (フレーム頭) */
 /* P571: 上位/下位の取り違えを訂正。Core: crtc.c:342 が CRTC_Regs[0x28] &= 0x07
  * (=3ビット=メモリモード D10-D08)、:346 が CRTC_Regs[0x29] &= 0x1f(=D04-D00)、
  * :348 が VID_MODE = !!(CRTC_Regs[0x29] & 0x10)(=水平周波数 = テクニカルデータ
  * ブック 印刷p.28 の下位バイト D04)としているため、[0x28]=上位・[0x29]=下位が正。 */
-static uint8_t  s_p570_r28_b  = 0;        /* CRTC_Regs[0x28] = R20上位 (frame begin) */
-static uint8_t  s_p570_r29_b  = 0;        /* CRTC_Regs[0x29] = R20下位 (frame begin) */
-static uint8_t  s_p570_vstep_b = 0;       /* CRTC_VStep    (frame begin) */
+static uint8_t  s_p570_r28_b  = 0;        /* CRTC_Regs[0x28] = R20上位 (フレーム頭) */
+static uint8_t  s_p570_r29_b  = 0;        /* CRTC_Regs[0x29] = R20下位 (フレーム頭) */
+static uint8_t  s_p570_vstep_b = 0;       /* CRTC_VStep    (フレーム頭) */
 /* P595 (D-55): geo_mode の分岐条件そのもの(R00/R04 の実測値)をフレーム頭で
  * 採取して同一行へ併記する。派生値(hscale/vscale/offxf/offyf/geo_mode)を
  * 読者が手計算で再現・反証できるようにするための生値。 */
-static int32_t  s_p570_r00_b  = 0;        /* R00 = 水平トータル (frame begin) */
-static int32_t  s_p570_r04_b  = 0;        /* R04 = 垂直トータル (frame begin) */
+static int32_t  s_p570_r00_b  = 0;        /* R00 = 水平トータル (フレーム頭) */
+static int32_t  s_p570_r04_b  = 0;        /* R04 = 垂直トータル (フレーム頭) */
 #endif
 
 #if P534_ENABLE
@@ -330,15 +330,15 @@ void mx68k_diag_note_chsize_call(void) {
 #include "../Core/px68k/x68k/palette.h"
 #include "../Core/px68k/x68k/bg.h"
 #include "../Core/px68k/x68k/ioc.h"
-#include "../Core/px68k/x68k/sysport.h"   /* P198: SysPort[] for state save/load */
+#include "../Core/px68k/x68k/sysport.h"   /* P198: ステートセーブ/ロード用の SysPort[] */
 #include "../Core/px68k/x68k/scc.h"
 #include "../Core/px68k/x68k/mouse.h"  /* P195: Mouse_SetData() のプロトタイプ照合用 */
 #include "../Core/px68k/x68k/ppi.h"
 #include "../Core/px68k/x68k/sasi.h"
 #include "../Core/px68k/x68k/scsi.h"
 #include "../Core/px68k/x68k/dmac.h"
-extern void mx68k_fdd_note_rw(void);   /* P181: defined in status_bridge.c */
-extern void mx68k_set_membound(int mb); /* P220b: defined in m68000_bridge.c */
+extern void mx68k_fdd_note_rw(void);   /* P181: status_bridge.c で定義 */
+extern void mx68k_set_membound(int mb); /* P220b: m68000_bridge.c で定義 */
 #include "../Core/px68k/x68k/adpcm.h"
 #include "../Core/px68k/x68k/mercury.h"
 #include "../Core/px68k/x68k/midi.h"   /* P488: MIDI_Init/_Cleanup/_Timer/_DelayOut の宣言元 */
@@ -363,48 +363,48 @@ extern uint8_t MIDI_MODULE;
 #include "sram_ext_bridge.h"   /* P493: 内蔵 SRAM 64KB 化(上位 48KB を Bridge が提供) */
 #include "windrv_bridge.h"     /* P642: Windrv(Mac フォルダのホスト共有) */
 
-// Prototypes from m68000_bridge.c (Core/px68k/m68000/m68000.h)
+// m68000_bridge.c 由来のプロトタイプ(Core/px68k/m68000/m68000.h)
 extern void m68000_init(void);
 extern void m68000_reset(void);
 extern int32_t m68000_execute(int32_t cycles);
 extern void m68000_set_irq_line(int32_t irqline);
 extern void m68000_reset_addr_err_count(void);
 extern void m68000_reset_pcguard_count(void);  // P14-FIX
-extern void m68000_reset_p47bb_counters(void); /* P47-B-β counters reset */
-extern void m68000_reset_p47d_counters(void);  /* P47-D session-scope DIAG-F/G/H/I reset */
-extern void mx68k_scsi_irq_reset(void);        /* P252: clear internal-SCSI level-1 pending on hard reset */
-extern void mx68k_probe_pc_cache_invalidate(void); /* P82-X-Q frame-entry cache invalidate */
-extern void p82xq_emit_verdict(void);              /* P82-X-Q probe verdict one-shot */
-extern void p82xr_emit_verdict(uint32_t frame);    /* P82-X-R probe verdict one-shot */
-extern void p82xr_tick(void);                      /* P82-X-R per-frame CP-R-4/CP-R-5 driver */
-extern void p82xt_tick(void);                      /* P82-X-T per-frame CP-T-2/T-3/T-5/T-6 driver */
-extern void p82xu_tick(void);                      /* P82-X-U per-frame CP-U-1/U-3/U-5 driver */
-extern void mx68k_diag_mfp_int(int32_t irq, const char* src); /* P47-D-DIAG-G wrapper */
+extern void m68000_reset_p47bb_counters(void); /* P47-B-β カウンタのリセット */
+extern void m68000_reset_p47d_counters(void);  /* P47-D のセッション単位 DIAG-F/G/H/I リセット */
+extern void mx68k_scsi_irq_reset(void);        /* P252: ハードリセット時に内蔵 SCSI のレベル1保留をクリア */
+extern void mx68k_probe_pc_cache_invalidate(void); /* P82-X-Q フレーム突入時のキャッシュ無効化 */
+extern void p82xq_emit_verdict(void);              /* P82-X-Q プローブの verdict one-shot */
+extern void p82xr_emit_verdict(uint32_t frame);    /* P82-X-R プローブの verdict one-shot */
+extern void p82xr_tick(void);                      /* P82-X-R 毎フレームの CP-R-4/CP-R-5 ドライバ */
+extern void p82xt_tick(void);                      /* P82-X-T 毎フレームの CP-T-2/T-3/T-5/T-6 ドライバ */
+extern void p82xu_tick(void);                      /* P82-X-U 毎フレームの CP-U-1/U-3/U-5 ドライバ */
+extern void mx68k_diag_mfp_int(int32_t irq, const char* src); /* P47-D-DIAG-G ラッパ */
 extern uint32_t m68000_get_reg(int32_t regnum);   // P28-FIX
 extern void m68000_set_reg(int32_t regnum, uint32_t val); // P28-FIX
 
-/* P82-X-G: FDC/IOC register-access trace probe — VERDICT one-shot dump.
- * Defined in m68000_bridge.c (file-scope static rings); called once from the
- * mx68k_run_frame() per-frame route when frame>=95 is first reached. The
- * cross-file declaration is kept internal to Bridge/ (NOT in EmulatorBridge.h,
- * which is the clean Swift<->C public API contract — diagnostic-only internals
- * must not be exposed there). P82XG_ENABLE here must mirror the authoritative
- * definition in m68000_bridge.c; if that probe is disabled, set this to 0. */
+/* P82-X-G: FDC/IOC レジスタアクセスのトレースプローブ — VERDICT の one-shot ダンプ。
+ * m68000_bridge.c で定義(ファイルスコープの static ring)。frame>=95 に初めて
+ * 到達した時点で mx68k_run_frame() の毎フレーム経路から1回だけ呼ばれる。
+ * ファイル間の宣言は Bridge/ 内部に留める(EmulatorBridge.h には置かない。
+ * あれは Swift<->C のクリーンな公開 API 契約であり、診断専用の内部定義を
+ * 公開してはならない)。ここの P82XG_ENABLE は m68000_bridge.c 内の正規の
+ * 定義と一致させること。そちらのプローブを無効にする場合は、これを 0 にする。 */
 #define P82XG_ENABLE 0
 #if P82XG_ENABLE
 extern void p82xg_emit_verdict(void);
 #endif
-/* P82-X-H: FDC ISR (vec 0x60) execution-path trace probe — VERDICT one-shot
- * dump. Defined in m68000_bridge.c (file-scope static rings); called once from
- * the mx68k_run_frame() per-frame route when frame>=96 is first reached. The
- * cross-file declaration is kept internal to Bridge/ (NOT in EmulatorBridge.h,
- * which is the clean Swift<->C public API contract — diagnostic-only internals
- * must not be exposed there). P82XH_ENABLE is the single authoritative define
- * in EmulatorBridge.h (this TU includes it); no mirror define is needed. */
+/* P82-X-H: FDC ISR(vec 0x60)の実行経路トレースプローブ — VERDICT の one-shot
+ * ダンプ。m68000_bridge.c で定義(ファイルスコープの static ring)。frame>=96 に
+ * 初めて到達した時点で mx68k_run_frame() の毎フレーム経路から1回だけ呼ばれる。
+ * ファイル間の宣言は Bridge/ 内部に留める(EmulatorBridge.h には置かない。
+ * あれは Swift<->C のクリーンな公開 API 契約であり、診断専用の内部定義を
+ * 公開してはならない)。P82XH_ENABLE は EmulatorBridge.h 内の単一の正規定義
+ * (この翻訳単位はそれを include する)であり、ミラー定義は不要。 */
 #if P82XH_ENABLE
 extern void p82xh_emit_verdict(void);
 #endif
-/* P45-DIAG: irqh.c defines IRQH_IRQ[] but no header exposes it */
+/* P45-DIAG: irqh.c は IRQH_IRQ[] を定義しているが、それを公開するヘッダが無い */
 extern uint8_t IRQH_IRQ[8];
 
 /* P460 (D-6診断): ADPCM 出力バッファのゼロ→非ゼロ遷移(段差)を実測する
@@ -438,64 +438,64 @@ extern uint8_t IRQH_IRQ[8];
 #define P464_RINGFILL_WINDOW_FRAMES 64
 
 /* ===========================================================================
- * P48 — FDC ready / DMA0 stall fix block (test#56 stall at PC=0x001fcc)
+ * P48 — FDC レディ / DMA0 ストール修正ブロック(test#56 の PC=0x001fcc でのストール)
  * ---------------------------------------------------------------------------
- * Root cause: fdd.SetDelay[0] is drained 3->0 over 3 frames by the every-
- * frame FDD_SetFDInt() call (line ~1049), but the IRQ1 (FDD insert) dispatch
- * is gated by (IOC_IntStat & 2). If IPL2 has not yet enabled bit1 the moment
- * SetDelay hits 0, the IRQ is lost forever; upstream px68k has no re-trigger.
+ * 根本原因: fdd.SetDelay[0] は毎フレームの FDD_SetFDInt() 呼出し(~1049 行目)に
+ * より 3 フレームかけて 3->0 と消化されるが、IRQ1(FDD 挿入)のディスパッチは
+ * (IOC_IntStat & 2) でゲートされている。SetDelay が 0 になった瞬間に IPL2 が
+ * まだ bit1 を有効にしていなければ IRQ は永久に失われる。上流 px68k には再トリガが無い。
  *
- * Adopted strategy (★ user-approved 案1):
- *   P48-A : Drain SetDelay 3->1 synchronously inside mx68k_fdd_insert() via
- *           TWO successive FDD_SetFDInt() calls; the third 1->0 transition
- *           is then completed naturally at the existing run_frame call site
- *           (line ~1049) on frame=1, which fires IRQH_Int(1,&FDD_Int) via the
- *           regular code path while IOC_IntStat=0x0E (P23-FIX preset) is
- *           still in effect.
- *   P48-C : Hook $E9C001 byte writes; on IOC_IntStat bit1 0->1 rising-edge
- *           with any FDD ready, re-fire IRQH_Int(1, &FDD_Int) as a workaround
- *           for IPL2 toggling FDDI EN after the original IRQ moment.
- *           (Implementation lives in m68000_bridge.c.)
- *   P48-D : One-shot dump of MEM[0x1FC0..0x1FFF] + SSP stack top at frame=50
- *           for forensic visibility if the fix is incomplete.
+ * 採用した方針(★ ユーザー承認済み 案1):
+ *   P48-A : mx68k_fdd_insert() 内で FDD_SetFDInt() を 2 回続けて呼び、SetDelay を
+ *           同期的に 3->1 まで消化する。3 回目の 1->0 遷移は
+ *           frame=1 で既存の run_frame 呼出し箇所(~1049 行目)にて自然に完了し、
+ *           IOC_IntStat=0x0E(P23-FIX のプリセット)がまだ有効なうちに、
+ *           通常のコード経路で IRQH_Int(1,&FDD_Int) を
+ *           発火させる。
+ *   P48-C : $E9C001 へのバイト書込みをフックし、いずれかの FDD がレディの状態で
+ *           IOC_IntStat bit1 の 0->1 立ち上がりエッジを検出したら IRQH_Int(1, &FDD_Int) を
+ *           再発火する——元の IRQ の瞬間より後に IPL2 が FDDI EN を切り替える件の回避策。
+ *           (実装は m68000_bridge.c にある。)
+ *   P48-D : 修正が不完全だった場合の事後解析用に、frame=50 で MEM[0x1FC0..0x1FFF] と
+ *           SSP スタックトップを one-shot ダンプする。
  *
- * Reset-order dependency:
- *   m68000_reset_p47d_counters() (line ~570) MUST be called AFTER the
- *   IOC_IntStat=0x0E preset (line ~369) inside mx68k_reset_hard() so that
- *   s_p48c_ioc_intstat_prev auto-syncs to the post-preset value (0x0E),
- *   preventing a spurious first-write rising-edge detection.
- *   (See m68000_bridge.c::m68000_reset_p47d_counters() body and C-2 note.)
+ * リセット順序の依存関係:
+ *   mx68k_reset_hard() 内で、m68000_reset_p47d_counters()(~570 行目)は必ず
+ *   IOC_IntStat=0x0E のプリセット(~369 行目)より後に呼ぶこと。これにより
+ *   s_p48c_ioc_intstat_prev がプリセット後の値(0x0E)へ自動同期され、
+ *   最初の書込みでの誤った立ち上がりエッジ検出を防ぐ。
+ *   (m68000_bridge.c::m68000_reset_p47d_counters() の本体と C-2 注記を参照。)
  * =========================================================================== */
-/* P48-A diagnostic counter: number of mx68k_fdd_insert drain events (session
- * scope; not reset on hard reset — it counts per-mount, not per-reset). */
+/* P48-A 診断カウンタ: mx68k_fdd_insert による消化イベントの回数(セッション
+ * 単位。ハードリセットではリセットしない——リセット単位ではなくマウント単位で数える)。 */
 static int s_p48a_drain_count = 0;
 
-// Prototype from sasi_bridge.c
+// sasi_bridge.c 由来のプロトタイプ
 extern void sasi_bridge_install(void);
 
-/* P674: prototypes from scsi_spc_bridge.cpp (extern "C"). Declared locally here
- * rather than in EmulatorBridge.h — that header is read from C and Swift and must
- * stay free of the ported SPC's internals; same pattern as scsi_real_set_disk_path,
- * which scsi_in_bridge.c / scsi_ext_bridge.c declare locally (P510). */
+/* P674: scsi_spc_bridge.cpp 由来のプロトタイプ(extern "C")。EmulatorBridge.h では
+ * なくここでローカルに宣言する——あのヘッダは C と Swift の両方から読まれるため、
+ * 移植した SPC の内部を含めてはならない。scsi_real_set_disk_path と同じ方式
+ * (scsi_in_bridge.c / scsi_ext_bridge.c がローカルに宣言している、P510)。 */
 extern int  scsi_real_mo_open(const char* path);
 extern int  scsi_real_mo_eject(int force);
 extern int  scsi_real_cd_open(const char* path);   /* P676 */
 extern int  scsi_real_cd_eject(int force);         /* P676 */
 
-/* P502 (D-9): prototype from sasi_io_cache.c. Declared here (rather than by
- * including Bridge/sasi_io_cache.h) because that header also redefines
- * File_Open/Seek/Read/Write/Close as macros for its sasi.c force-include role;
- * this follows the existing sasi_bridge_install() pattern above. */
+/* P502 (D-9): sasi_io_cache.c 由来のプロトタイプ。Bridge/sasi_io_cache.h を
+ * include せずここで宣言するのは、そのヘッダが sasi.c への強制 include 用として
+ * File_Open/Seek/Read/Write/Close をマクロで再定義してもいるため。
+ * 上の既存 sasi_bridge_install() と同じ方式に従う。 */
 extern void sasi_io_cache_invalidate_all(void);
 
-/* P47-C: Missing px68k Init/Timer prototypes (rtc.h/ppi.h are not included via current header chain) */
+/* P47-C: 不足している px68k の Init/Timer プロトタイプ(rtc.h/ppi.h は現在のヘッダ連鎖では include されない) */
 extern void RTC_Init(void);
 extern int  RTC_Timer(int32_t clock);
 extern uint8_t RTC_Regs[2][16];   /* Core/px68k/x68k/rtc.c: BANK0/1 各16レジスタ。
                                    * P653: RTC_Regs[1][0] = CLKOUTセレクト(下位3bit)。 */
 extern void PPI_Init(void);
 
-// ---- Bridge-side runtime state (px68k Config_t lacks these fields) ----
+// ---- Bridge 側の実行時状態(px68k の Config_t にはこれらのフィールドが無い) ----
 static volatile int g_pending_hard_reset = 0;
 static volatile int g_pending_soft_reset = 0;   /* P186: soft reset をフレーム境界で消費(run_frame とのレース回避) */
 static volatile int g_pending_sram_clear = 0;   /* P454: SRAM ゼロクリアをフレーム境界で消費(run_frame とのレース回避) */
@@ -505,21 +505,21 @@ static volatile int g_pending_sram_clear = 0;   /* P454: SRAM ゼロクリアを
  * 必ずエミュレーションスレッド側で走らせる。型は既存の同型フラグ
  * (g_pending_hard_reset / g_pending_sram_clear)と揃えて volatile int。 */
 static volatile int g_pending_sasi_cache_invalidate = 0;
-/* P198: state save/load scheduled at the run_frame boundary (mirrors the
- * g_pending_hard_reset precedent). The public mx68k_save_state/mx68k_load_state
- * copy the path + set the flag + return 0 (queued); do_save_state/do_load_state
- * run on the emulation thread when the flag is consumed. */
+/* P198: ステートのセーブ/ロードを run_frame 境界で予約実行する(g_pending_hard_reset
+ * の前例に倣う)。公開関数 mx68k_save_state/mx68k_load_state はパスをコピーし、
+ * フラグを立てて 0(キュー投入済み)を返す。do_save_state/do_load_state は
+ * フラグが消費された時点でエミュレーションスレッド上で実行される。 */
 static _Atomic int  g_pending_save = 0;
 static _Atomic int  g_pending_load = 0;
-/* P481 (D-42): completion notification for the queued save/load. mx68k_save_state/
- * mx68k_load_state only report "queued" (rc=0); the real result used to reach
- * debug_log only, so Swift showed a success toast for an operation that had not
- * run yet — and a rejected (e.g. older-version) state file failed silently.
- * The emulation thread stores the result here and bumps g_state_op_seq; Swift
- * polls the seq and reads rc/kind once it changes. */
-static _Atomic int          g_state_op_rc   = 0;   /* rc of the most recent completed save/load */
-static _Atomic int          g_state_op_kind = 0;   /* 0=none, 1=save, 2=load */
-static _Atomic unsigned int g_state_op_seq  = 0;   /* monotonically increasing, one per completion */
+/* P481 (D-42): キュー投入されたセーブ/ロードの完了通知。mx68k_save_state/
+ * mx68k_load_state は「キュー投入済み」(rc=0)しか報告しない。実際の結果は以前は
+ * debug_log にしか届かなかったため、Swift はまだ実行されていない操作に対して成功の
+ * トーストを表示し、拒否されたステートファイル(旧バージョン等)は無言で失敗していた。
+ * エミュレーションスレッドがここへ結果を格納して g_state_op_seq を進める。Swift は
+ * seq をポーリングし、変化したら rc/kind を読む。 */
+static _Atomic int          g_state_op_rc   = 0;   /* 直近に完了したセーブ/ロードの rc */
+static _Atomic int          g_state_op_kind = 0;   /* 0=なし, 1=セーブ, 2=ロード */
+static _Atomic unsigned int g_state_op_seq  = 0;   /* 単調増加、完了ごとに 1 つ進む */
 static char         g_pending_state_path[1024] = {0};
 static int          do_save_state(const char* path);
 static int          do_load_state(const char* path);
@@ -913,29 +913,29 @@ static int32_t g_p408_cum_zero_snapshot      = 0; /* 起動来の n==0 累積(�
  * GameScene 側がそれを読むのと同じ設計。0 = 未計測(最初のフレーム前)。 */
 static int32_t g_p641_frame_clocks_10m       = 0;
 
-/* P47-A: Diagnostic counters / last-known values (file-scope so mx68k_reset_hard() can reset them) */
-static int      s_p47_panic_logged   = 0;     /* DIAG-2: PC=0xff063? hits dumped */
-static int      s_p47_rte_log_cnt    = 0;     /* DIAG-5: P31 RTE stub hit log count */
-static uint32_t s_p47_vec46_last     = 0xFFFFFFFFu; /* DIAG-3: last observed vec#0x46 value */
+/* P47-A: 診断カウンタ / 最終観測値(mx68k_reset_hard() からリセットできるようファイルスコープ) */
+static int      s_p47_panic_logged   = 0;     /* DIAG-2: PC=0xff063? ヒットをダンプ済み */
+static int      s_p47_rte_log_cnt    = 0;     /* DIAG-5: P31 RTE スタブのヒットログ回数 */
+static uint32_t s_p47_vec46_last     = 0xFFFFFFFFu; /* DIAG-3: 最後に観測した vec#0x46 の値 */
 static int      s_p47_vec46_log_cnt  = 0;
-static uint32_t s_p47_abort_ptr_last = 0xFFFFFFFFu; /* DIAG-4: last observed $07FC value */
+static uint32_t s_p47_abort_ptr_last = 0xFFFFFFFFu; /* DIAG-4: 最後に観測した $07FC の値 */
 static int      s_p47_abort_log_cnt  = 0;
 
-/* P47-B-α: TimerD vec#0x44 panic placeholder pin & MFP DIAG state (file-scope so
- * mx68k_reset_hard() can reset them across reruns; same convention as P47-A above). */
-static int      s_p47b_pin_cnt       = 0;          /* P47-B-α-FIX: pin invocation count */
-static int      s_p47b_diag_cnt      = 0;          /* P47-B-α-DIAG-1: log line count (cap 200) */
-static int      s_p47b_panic_logged  = 0;          /* P47-B-α-DIAG-2: panic chain entry one-shot */
-static uint32_t s_p47b_v44_last      = 0xFFFFFFFFu;/* P47-B-α-DIAG-1: last observed vec#0x44 */
-static uint8_t  s_p47b_iprb_last     = 0xFFu;      /* P47-B-α-DIAG-1: last observed IPRB */
-static uint8_t  s_p47b_imrb_last     = 0xFFu;      /* P47-B-α-DIAG-1: last observed IMRB */
-static uint8_t  s_p47b_isrb_last     = 0xFFu;      /* P47-B-α-DIAG-1: last observed ISRB */
+/* P47-B-α: TimerD vec#0x44 のパニック用プレースホルダ固定 & MFP DIAG 状態(再実行を
+ * またいで mx68k_reset_hard() からリセットできるようファイルスコープ。上の P47-A と同じ規約)。 */
+static int      s_p47b_pin_cnt       = 0;          /* P47-B-α-FIX: 固定処理の呼出し回数 */
+static int      s_p47b_diag_cnt      = 0;          /* P47-B-α-DIAG-1: ログ行数(上限 200) */
+static int      s_p47b_panic_logged  = 0;          /* P47-B-α-DIAG-2: パニック連鎖突入の one-shot */
+static uint32_t s_p47b_v44_last      = 0xFFFFFFFFu;/* P47-B-α-DIAG-1: 最後に観測した vec#0x44 */
+static uint8_t  s_p47b_iprb_last     = 0xFFu;      /* P47-B-α-DIAG-1: 最後に観測した IPRB */
+static uint8_t  s_p47b_imrb_last     = 0xFFu;      /* P47-B-α-DIAG-1: 最後に観測した IMRB */
+static uint8_t  s_p47b_isrb_last     = 0xFFu;      /* P47-B-α-DIAG-1: 最後に観測した ISRB */
 
-/* P47-A-DIAG-1: 68000 short stack frame (6 bytes: SR + PC) reader.
- * RAM is stored in host-native LE16 by px68k mem_wrap (see Codex inv §D), so
- * uint16_t* casts read the proper 16-bit values directly.
- * Caller must ensure (ssp & 1) == 0 and ssp+5 within RAM bounds.
- * P47-D S-1: Non-static (was static inline) so m68000_bridge.c can call via extern. */
+/* P47-A-DIAG-1: 68000 の短形式スタックフレーム(6 バイト: SR + PC)の読出し。
+ * RAM は px68k の mem_wrap によりホストネイティブの LE16 で格納されている(Codex inv §D 参照)ため、
+ * uint16_t* へのキャストで正しい 16 ビット値を直接読める。
+ * 呼出し側は (ssp & 1) == 0 かつ ssp+5 が RAM 範囲内であることを保証すること。
+ * P47-D S-1: m68000_bridge.c から extern で呼べるよう非 static とした(以前は static inline)。 */
 void p47_read_stack_frame(uint32_t ssp, uint16_t *out_sr, uint32_t *out_pc) {
     uint32_t ram_limit = (uint32_t)(12*1024*1024 - 6); /* 0xBFFFF9 */
     if (!MEM || (ssp & 1) || ssp < 0x400 || ssp + 5 >= ram_limit) {
@@ -949,8 +949,8 @@ void p47_read_stack_frame(uint32_t ssp, uint16_t *out_sr, uint32_t *out_pc) {
     *out_pc = ((uint32_t)pc_hi << 16) | pc_lo;
 }
 
-/* P47-A: Read RAM long word in host-native LE16 order (returns 0xFFFFFFFF on bounds error).
- * P47-D S-1: Non-static (was static inline) so m68000_bridge.c can call via extern. */
+/* P47-A: RAM のロングワードをホストネイティブの LE16 順で読む(範囲外なら 0xFFFFFFFF を返す)。
+ * P47-D S-1: m68000_bridge.c から extern で呼べるよう非 static とした(以前は static inline)。 */
 uint32_t p47_read_long_le(uint32_t addr) {
     uint32_t ram_limit = (uint32_t)(12*1024*1024 - 4);
     if (!MEM || addr + 3 >= ram_limit) return 0xFFFFFFFFu;
@@ -962,7 +962,7 @@ uint32_t p47_read_long_le(uint32_t addr) {
 /* P684: FDD 2 台 → 4 台(Core fdd.c は元から drive 0-3 対応)。 */
 static char g_fdd_path[4][4096];
 
-static uint8_t s_framebuffer[2][1024 * 1024 * 4];   /* P179: double buffer */
+static uint8_t s_framebuffer[2][1024 * 1024 * 4];   /* P179: ダブルバッファ */
 
 /* P535: 永続合成バッファ。参照実装の ScrBuf(MPX68K x11/windraw.c:44,195 /
  * px68k本家 x11/windraw.c:60,308)に対応する。ストライドは disp_w ではなく固定値。
@@ -996,7 +996,7 @@ static int s_p521_bgsp_composite_visible = 0;
 void mx68k_set_bgsp_composite_visible(int visible) {
     s_p521_bgsp_composite_visible = visible ? 1 : 0;
 }
-static int s_fb_w[2] = {768, 768};                  /* P179: per-buffer published size */
+static int s_fb_w[2] = {768, 768};                  /* P179: バッファごとの公開サイズ */
 static int s_fb_h[2] = {512, 512};
 /* P595 (D-55): 公開フレームと同一スナップショットの表示ジオメトリ。s_fb_w/s_fb_h と
  * 全く同じ [2] 配列パターン(P179)で持ち、同じ front インデックスで読ませることで、
@@ -1007,13 +1007,13 @@ static float s_fb_vscale[2] = {1.0f, 1.0f};
 static float s_fb_offx[2]   = {0.0f, 0.0f};
 static float s_fb_offy[2]   = {0.0f, 0.0f};
 static int   s_fb_geomode[2] = {0, 0};
-static _Atomic(int) s_fb_front = 0;                 /* P179: index of latest COMPLETE frame */
+static _Atomic(int) s_fb_front = 0;                 /* P179: 最新の完成済みフレームのインデックス */
 #if P303_ENABLE
 static _Atomic(int) s_fb_front_frame_num = 0;   /* P303: s_fb_frontと対になるフレーム番号 */
 #endif
 uint8_t s_ipl_fetch[0x20000];  /* P17-FIX-B: FETCHテーブル用LE16スワップ済みIPLコピー */
 
-// ---- audio ring buffer (lock-free SPSC for CoreAudio real-time safety) ----
+// ---- オーディオ・リングバッファ(CoreAudio のリアルタイム安全性のためのロックフリー SPSC) ----
 #define AUDIO_SAMPLE_RATE    44100
 /* P626 (D-62): Core 側音声チップ(ADPCM / OPM / Mercury)の実初期化レート、および
  * 音声生成量計算のレート基準。AUDIO_SAMPLE_RATE(44100)を既定値として持ち、
@@ -1028,9 +1028,9 @@ uint8_t s_ipl_fetch[0x20000];  /* P17-FIX-B: FETCHテーブル用LE16スワッ�
  * — Swift メインスレッドからのみ書かれ、init / ハードリセット / ステートロードも
  * 同じくメインスレッド由来でのみ起動されるという既存の規約に従う。 */
 static int g_audio_sample_rate_hz = AUDIO_SAMPLE_RATE;
-/* P211b: max audio samples per emulated frame. audio_frames =
- * round(g_audio_sample_rate_hz/vsync_hz) couples generation to the P211 VSYNC pacing
- * (44100Hz: 55.46Hz->795, 61.46Hz->718).
+/* P211b: エミュレートする1フレームあたりの最大オーディオサンプル数。audio_frames =
+ * round(g_audio_sample_rate_hz/vsync_hz) により生成量を P211 の VSYNC ペーシングへ連動させる
+ * (44100Hz: 55.46Hz->795、61.46Hz->718)。
  * P627: 896 -> 2048 へ拡張。サンプルレート選択肢を 96000Hz まで上方拡張したため、
  * 最大生成量は 96000/55.46 ≒ 1731 フレーム/エミュフレームとなり 896 では 1.9 倍超過し
  * 毎フレームクランプ = 常時アンダーランになる。2048 は 1731 に対して約 18% の余裕。
@@ -1138,7 +1138,7 @@ static int audio_ring_write(const int16_t* data, int samples) {
     int written = 0;
     for (int i = 0; i < samples; i++) {
         int next = (write_pos + 1) % AUDIO_RING_SAMPLES;
-        if (next == read_pos) break; // full: drop remaining
+        if (next == read_pos) break; // 満杯: 残りを破棄
         audio_ring[write_pos] = data[i];
         write_pos = next;
         written++;
@@ -1152,7 +1152,7 @@ static int audio_ring_read(int16_t* data, int samples) {
     int write_pos = atomic_load_explicit(&audio_ring_write_pos, memory_order_acquire);
     int count = 0;
     for (int i = 0; i < samples; i++) {
-        if (read_pos == write_pos) break; // empty
+        if (read_pos == write_pos) break; // 空
         data[i] = audio_ring[read_pos];
         read_pos = (read_pos + 1) % AUDIO_RING_SAMPLES;
         count++;
@@ -1319,7 +1319,7 @@ void mx68k_rec_audio_set_enabled(bool enabled) {
     atomic_store_explicit(&rec_audio_enabled, enabled, memory_order_release);
 }
 
-// ---- Helper: ensure app-support directory exists ----
+// ---- ヘルパ: app-support ディレクトリの存在を保証する ----
 /* P703: 中間ディレクトリも含めて再帰的に作成する。
  *
  * 従来は組み立てた完全パスに対して mkdir() を 1 回呼ぶだけだった。macOS では
@@ -1352,30 +1352,30 @@ static void ensure_app_support_dir(void) {
     (void)mkdir(dir, 0755);
 }
 
-/* P221b: derive Config.XVIMode (the SysPort $E8E00B CPU/clock nibble) from the
- * configured clock. SASI/SCSI machine type is orthogonal (SUPER = SCSI + 10MHz
- * reads 0xFF, proving XVIMode does not encode the storage bus; code inv §1).
- * 10MHz->0 (0xFF), 16MHz->1 (0xFE), else->3 (0xDC/25MHz). This replaces the
- * P146 hard-coded XVIMode=3, which made si misreport 030/25MHz at every clock
- * (D-15). Config.XVIMode is read in the Core at exactly one place (sysport.c:86)
- * and feeds no clock/cycle timing — it only changes the $E8E00B byte. */
-/* P270: the P221b threshold approach above could not correctly express the
- * clock-generation class of clock-up MOD kits. XVIMode is NOT "the raw clock
- * value" nor "the storage bus" — it is the clock-generation class of the real
- * machine each option is historically tied to (10MHz-class = 0xFF machines /
- * 16MHz-class = 0xFE machines). A clock-up MOD swaps only the crystal
- * oscillator, so it changes the *measured* speed but not the machine's ID
- * class. A real-machine XM6 reference (si output): XVI+RedZone(24MHz)
- * reports "clock switch: 16MHz mode" (unchanged from stock XVI) while only
- * "micro processing unit: 68000 (24.0MHz)" reflects the modded speed — i.e. the
- * modded clock does not change the machine ID class. EXPERT mod (17.4MHz,
- * rounded to 17) exceeds 16 numerically but its real machine generation is
- * 10MHz-class, so a simple threshold misclassifies it as 030/0xDC. Hence a
- * per-value table, not a threshold. Upstream Core/px68k/x68k/sysport.c:88
- * independently corroborates this with its existing "case 1: // XVI or RedZone"
- * comment — RedZone was always meant to map to the same XVIMode value as stock
- * XVI. The P220/P221 code-inv fact (SASI/SCSI storage type is orthogonal to
- * XVIMode) is preserved. */
+/* P221b: Config.XVIMode(SysPort $E8E00B の CPU/クロック・ニブル)を、設定された
+ * クロックから導出する。SASI/SCSI の機種種別とは直交する(SUPER = SCSI + 10MHz は
+ * 0xFF を読み、XVIMode がストレージバスを表していないことを示す。code inv §1)。
+ * 10MHz->0 (0xFF)、16MHz->1 (0xFE)、それ以外->3 (0xDC/25MHz)。これは P146 の
+ * ハードコード XVIMode=3 を置き換える。あれは si がどのクロックでも 030/25MHz と
+ * 誤報告する原因だった(D-15)。Config.XVIMode は Core 内でちょうど1箇所(sysport.c:86)
+ * でしか読まれず、クロック/サイクルのタイミングには関与しない——$E8E00B のバイトを変えるだけ。 */
+/* P270: 上の P221b のしきい値方式では、クロックアップ改造キットのクロック世代級を
+ * 正しく表現できなかった。XVIMode は「生のクロック値」でも
+ * 「ストレージバス」でもない——各選択肢が歴史的に対応する実機のクロック世代級
+ * (10MHz 級 = 0xFF 機 / 16MHz 級 = 0xFE 機)である。クロックアップ改造は水晶
+ * 発振子だけを交換するので、*実測*速度は変わるが機種の ID 級は
+ * 変わらない。実機相当の XM6 リファレンス(si 出力): XVI+RedZone(24MHz)は
+ * "clock switch: 16MHz mode" と報告し(素の XVI と同じ)、改造後の速度を反映するのは
+ * "micro processing unit: 68000 (24.0MHz)" のみ——つまり
+ * 改造後のクロックは機種 ID 級を変えない。EXPERT 改(17.4MHz、
+ * 17 に丸め)は数値上 16 を超えるが、実機の世代は
+ * 10MHz 級なので、単純なしきい値では 030/0xDC と誤分類してしまう。よって
+ * しきい値ではなく値ごとの表とする。上流の Core/px68k/x68k/sysport.c:88 も、
+ * 既存の "case 1: // XVI or RedZone" というコメントで独立にこれを裏付けている
+ * ——RedZone は元から素の XVI と同じ XVIMode 値へ対応づける意図だった。
+ * P220/P221 の code-inv の事実(SASI/SCSI のストレージ種別は
+ * XVIMode と直交する)は
+ * 保持している。 */
 static int p270_derive_xvimode(int clock_mhz) {
     switch (clock_mhz) {
         case 16:   /* 定格 SUPER/XVI/Compact */
@@ -1389,10 +1389,10 @@ static int p270_derive_xvimode(int clock_mhz) {
     }
 }
 
-/* P472: physical guest RAM size actually allocated for MEM. The memory-size
- * setting (g_memory_size_mb) never reaches the core memory map — it is a
- * display-only value — so MEM is always this fixed size and every consumer
- * (allocation, state save, state load) must derive its size from here. */
+/* P472: MEM のために実際に確保される物理ゲスト RAM サイズ。メモリサイズ
+ * 設定(g_memory_size_mb)はコアのメモリマップへ一切届かない——表示専用の
+ * 値である——ため MEM は常にこの固定サイズであり、すべての利用側
+ * (確保・ステートセーブ・ステートロード)はサイズをここから導出しなければならない。 */
 #define MX68K_RAM_BYTES (12 * 1024 * 1024)
 
 /* P565 変更3: MEM 確保末尾に置くホスト側ガード領域のサイズ。
@@ -1410,7 +1410,7 @@ static int p270_derive_xvimode(int clock_mhz) {
  * (実装とエンディアン根拠は Bridge/m68000_bridge.c を参照)。 */
 extern void mx68k_p565_fill_illegal(void *dst, size_t bytes);
 
-// ---- init / shutdown ----
+// ---- init / shutdown(初期化 / 終了) ----
 int mx68k_init(void) {
     /* P753: ここにあった debug_log_init() の単独呼出しは削除した。次行の
      * debug_log() が実行時フラグを見た上で内部で同じ初期化を行うため冗長で
@@ -1421,31 +1421,31 @@ int mx68k_init(void) {
      * 連携層を Bridge/midi_coremidi.c へ移設し、新実装が自前の書込可能バッファを
      * 静的に所有する設計にしたため不要になり削除した。 */
 
-    /* P221b: derive XVIMode from the configured clock (init default 16 -> 1);
-     * reset_hard re-derives from the actual clock. Belt-and-suspenders so the
-     * SysPort byte is sane even before the first hard reset. See
-     * p270_derive_xvimode / mx68k_reset_hard for the full rationale. */
+    /* P221b: 設定されたクロックから XVIMode を導出する(init 既定は 16 -> 1)。
+     * reset_hard は実際のクロックから再導出する。最初のハードリセットより前でも
+     * SysPort のバイトが妥当であるようにする念のための措置。完全な根拠は
+     * p270_derive_xvimode / mx68k_reset_hard を参照。 */
     Config.XVIMode = p270_derive_xvimode(g_clock_mhz);
 
 #if P53_ENABLE
-    /* P53 — reset idempotency flag on each init so re-init scenarios work.
-     * Atexit registration is one-shot per process (handled below near the
-     * end of mx68k_init). See /tmp/mx68k_P53_plan.md §3.1 / Edit B4(i). */
+    /* P53 — 再 init のシナリオが機能するよう、init のたびに冪等性フラグをリセットする。
+     * atexit の登録はプロセスあたり one-shot(mx68k_init の末尾付近、下で
+     * 扱う)。/tmp/mx68k_P53_plan.md §3.1 / Edit B4(i) を参照。 */
     s_p53_shutdown_done = 0;
 #endif
 
     memset(s_compose_fb, 0, sizeof(s_compose_fb));   /* P535: 永続合成バッファの初期化 */
 
-    // Allocate core memory buffers if not already present.
-    // MEM is up to 12 MB; IPL 256 KB; FONT 768 KB.
+    // コアのメモリバッファがまだ無ければ確保する。
+    // MEM は最大 12 MB、IPL は 256 KB、FONT は 768 KB。
     if (!MEM) {
-        /* P22-FIX: +4 bytes so FETCH_WORD at MEM boundary (0xBFFFFF) does not
-         * read MEM[0xC00000] past the 12 MB allocation, causing SIGSEGV ~frame 49. */
-        /* P472: MX68K_RAM_BYTES is the single source of truth for the guest RAM
-         * size — MEM is always physically 12 MB regardless of the cosmetic
-         * g_memory_size_mb setting, so state save/load must size their RAM block
-         * from this constant, not from that setting (see do_save_state /
-         * do_load_state). The +4 guard bytes stay out of the state block. */
+        /* P22-FIX: +4 バイト。MEM 境界(0xBFFFFF)での FETCH_WORD が 12 MB の確保範囲を
+         * 越えて MEM[0xC00000] を読み、~frame 49 で SIGSEGV を起こすのを防ぐ。 */
+        /* P472: MX68K_RAM_BYTES はゲスト RAM サイズの唯一の真実源
+         * ——見かけ上の g_memory_size_mb 設定にかかわらず MEM は物理的に常に 12 MB
+         * なので、ステートのセーブ/ロードは RAM ブロックのサイズをその設定ではなく
+         * この定数から決めなければならない(do_save_state / do_load_state を参照)。
+         * +4 のガードバイトはステートのブロックに含めない。 */
         /* P565 変更3: 末尾に P565_MEM_GUARD_BYTES(64KB)のホスト側ガードを
          * 追加確保する。ゲストから見えるメモリマップは不変(Fetch 範囲も
          * $000000-$BFFFFF のまま)で、確保サイズだけが増える。 */
@@ -1475,19 +1475,19 @@ int mx68k_init(void) {
         memset(FONT, 0, 0xC0000);
     }
 
-    // Set pixel-format masks before Pal_Init so 32-bit palettes are generated
-    // with the px68k native layout (R@bits24-31, G@16-23, B@8-15).
-    // We swizzle to RGBA8888 in mx68k_get_framebuffer().
+    // Pal_Init の前にピクセルフォーマットのマスクを設定し、32 ビットパレットが
+    // px68k ネイティブの配置(R@bits24-31, G@16-23, B@8-15)で生成されるようにする。
+    // RGBA8888 への並べ替えは mx68k_get_framebuffer() で行う。
     WinDraw_Pal32R = 0xFF000000;
     WinDraw_Pal32G = 0x00FF0000;
     WinDraw_Pal32B = 0x0000FF00;
 
     Memory_Init();
     MFP_Init();
-    /* P143b: P81-A timer-stop REMOVED. MFP_Init sets warm-start TCDCR=0x77 (Timer C
-     * running), matching the fully-working reference MPX68K. Zeroing TACR/TBCR/TCDCR
-     * here stopped MFP Timer C, so the IPLROM's level-6 timer wait never fired -> the
-     * icount-299949 interrupt-level divergence and downstream boot stall. */
+    /* P143b: P81-A のタイマ停止は撤去済み。MFP_Init はウォームスタートの TCDCR=0x77(Timer C
+     * 動作中)を設定し、完全に動作する参照実装 MPX68K と一致する。ここで TACR/TBCR/TCDCR を
+     * ゼロにすると MFP Timer C が止まり、IPLROM のレベル6タイマ待ちが永久に発火しなくなる ->
+     * icount-299949 での割込みレベルの分岐と、その下流のブートストールの原因だった。 */
     Keyboard_Init();
     Keymap_Init();
     FDD_Init();
@@ -1506,9 +1506,9 @@ int mx68k_init(void) {
      * mx68k_init() を通るため、ここで巻き戻さないと「一度ゲスト起点で
      * 電源を切ると 2 回目以降が効かない」(step が 3 のまま)になる。 */
     p776_poweroff_state_reset();
-    TVRAM_Init();       /* P171: init TextDrawPattern (text bit-expand table). Missing in
-                         * the port -> TextDrawWork stayed 0 -> blank text layer. MPX calls
-                         * this in its reset sequence (winx68k.cpp:293). */
+    TVRAM_Init();       /* P171: TextDrawPattern(テキストのビット展開表)を初期化する。移植時に
+                         * 欠落していた -> TextDrawWork が 0 のまま -> テキスト層が空白。MPX は
+                         * これをリセット手順内で呼んでいる(winx68k.cpp:293)。 */
     GVRAM_Init();
     CRTC_Init();        /* P641: 内部で CrtcFieldClock_Init() = 分数状態のゼロクリア */
     g_p641_frame_clocks_10m = 0;  /* P641: 次フレームまでは旧式2値へ退避させる */
@@ -1527,13 +1527,13 @@ int mx68k_init(void) {
                             g_wired_machine_type);
     DMA_Init();
     ADPCM_Init(g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
-    ADPCM_SetVolume(15);   /* P210: port omitted this call. ADPCM_VolumeShift stays at its
-                            * init value 65536 (~4096x the normal 13-16) -> saturation clip
-                            * (ADPCM far louder than FM, distortion). Reference MPX68K
-                            * winx68k.cpp:698 / px68k-libretro winx68k.cpp:653 call
-                            * ADPCM_SetVolume(Config.PCM_VOL), default PCM_VOL=15. Core unchanged. */
+    ADPCM_SetVolume(15);   /* P210: 移植時にこの呼出しが漏れていた。ADPCM_VolumeShift が
+                            * 初期値 65536(通常の 13-16 の ~4096 倍)のまま -> 飽和クリップ
+                            * (ADPCM が FM よりはるかに大きく、歪む)。参照実装 MPX68K
+                            * winx68k.cpp:698 / px68k-libretro winx68k.cpp:653 は
+                            * ADPCM_SetVolume(Config.PCM_VOL) を呼ぶ(既定 PCM_VOL=15)。Core は無変更。 */
     OPM_Init(4000000, g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
-    p479_opm_shadow_reset();   /* P479: keep the Bridge-side OPM shadow in sync with the chip */
+    p479_opm_shadow_reset();   /* P479: Bridge 側の OPM シャドウをチップと同期させておく */
     /* P483: Mercury Unit(MK-MU1 / $ECC000)PCM 部の配線。
      * 設定値 g_mercury_enabled を配線確定値 g_mercury_installed へラッチする
      * (Swift の pushConfig は mx68k_init() の前に呼ばれるので、この時点で
@@ -1551,7 +1551,7 @@ int mx68k_init(void) {
         Mcry_Cleanup();
         Mcry_Init(g_audio_sample_rate_hz, mx68k_mercury_dir());   /* P626: 設定サンプルレート */
         Mcry_SetVolume(MCRY_VOL);
-        p491_mercury_opn_shadow_reset();   /* P491: keep the Bridge-side OPN shadow in sync with the chip */
+        p491_mercury_opn_shadow_reset();   /* P491: Bridge 側の OPN シャドウをチップと同期させておく */
         p634_lrck_reset();                 /* P634 (D-43): Mcry_Init が Mcry_LRTiming=0 に
                                             * するのと同じ箇所で自走 LR 位相も 0 クリアし、
                                             * 状態の非同期を作らない。 */
@@ -1616,25 +1616,25 @@ int mx68k_init(void) {
     IRQH_Init();
     m68000_init();
 
-    // Load SRAM if present
+    // SRAM があれば読み込む
     SRAM_Init();
 #if P142D_SRAM_INIT
-    /* P142d(原型): align SRAM init with the fully-working reference MPX68K.
-       MX68K Core SRAM_Init leaves SRAM=0xFF (its File_OpenCurDir load fails).
-       MPX68K zeroes SRAM and presets a few fields, leaving $ED0000 = 0x00
-       (invalid signature) so the IPLROM self-heals SRAM from ROM and boots.
+    /* P142d(原型): SRAM の初期化を、完全に動作する参照実装 MPX68K に揃える。
+       MX68K Core の SRAM_Init は SRAM=0xFF のまま残す(File_OpenCurDir での読込みが失敗する)。
+       MPX68K は SRAM をゼロにしていくつかのフィールドをプリセットし、$ED0000 = 0x00
+       (無効な署名)のまま残すので、IPLROM が ROM から SRAM を自己修復して起動する。
        P505 (D-46): その「署名を無効のまま残して IPL-ROM に自己修復させる」
        設計が、Hard Reset 直後に Bridge が書いた HD_MAX 等を自己修復が 0 で
        上書きしてしまう競合を生んでいた。シードを sram_seed_defaults() に
        集約し、署名を含む 91 バイトを IPL-ROM 内蔵デフォルトテーブルから
        直接複写することで自己修復自体が発火しないようにした(詳細は
        sram_seed_defaults() のコメントと .mx68k_cycles/P504_verify_inv.md)。
-       P202: after this seed, sram.dat is loaded with a signature check (below):
-       a valid saved SRAM overrides the seed to restore the user's switch
-       settings; an invalid signature / missing file keeps the seed. The former
-       pre-P200 stall came from correctly matching the signature and then
-       adopting settings (SASI/SCSI boot) the emulator could not yet honor; P200
-       added SASI HDD support, so a valid saved SRAM now boots correctly. */
+       P202: このシードの後、sram.dat を署名チェック付きで読み込む(下記)。
+       有効な保存済み SRAM はシードを上書きし、ユーザーのスイッチ設定を
+       復元する。署名が無効 / ファイルが無い場合はシードのまま。かつての
+       P200 以前のストールは、署名に正しく一致した上で、エミュレータがまだ
+       対応できない設定(SASI/SCSI ブート)を採用したことが原因だった。P200 で
+       SASI HDD 対応が入ったので、有効な保存済み SRAM は現在正しく起動する。 */
     sram_seed_defaults();
 
     /* P202: MPX68K 同型の SRAM 永続化ロード。シード後に保存 SRAM があり署名が
@@ -1689,8 +1689,8 @@ int mx68k_init(void) {
 
 #if P220_PROBE
     {
-        /* P220 (a): value after the seed + sram.dat load, before our reset_hard
-         * write — the pre-write baseline. */
+        /* P220 (a): シード + sram.dat 読込み後、こちらの reset_hard による書込み前の値
+         * ——書込み前のベースライン。 */
         uint32_t v = ((uint32_t)SRAM[0x08^1] << 24) |
                      ((uint32_t)SRAM[0x09^1] << 16) |
                      ((uint32_t)SRAM[0x0A^1] << 8)  |
@@ -1703,10 +1703,10 @@ int mx68k_init(void) {
     mx68k_reset_hard();
 
 #if P53_ENABLE && P53_ATEXIT_ENABLE
-    /* P53 — register atexit summary helper exactly once per process.
-     * mx68k_atexit_summary emits [P52-SUMMARY] etc. without freeing memory,
-     * so it is safe regardless of whether mx68k_shutdown has already run.
-     * See /tmp/mx68k_P53_plan.md §3.2 / Edit B4(ii). */
+    /* P53 — atexit のサマリ用ヘルパをプロセスあたりちょうど1回だけ登録する。
+     * mx68k_atexit_summary はメモリを解放せずに [P52-SUMMARY] 等を出力するので、
+     * mx68k_shutdown が既に走ったかどうかにかかわらず安全である。
+     * /tmp/mx68k_P53_plan.md §3.2 / Edit B4(ii) を参照。 */
     if (!s_p53_atexit_registered) {
         if (atexit(mx68k_atexit_summary) == 0) {
             s_p53_atexit_registered = 1;
@@ -1721,13 +1721,13 @@ int mx68k_init(void) {
     return 0;
 }
 
-/* P53 — atexit-safe summary helper. Emits SUMMARY tags only; does NOT free
- * memory or close files. Belt-and-braces safety net for any future codepath
- * that reaches libc exit(3) without going through mx68k_shutdown.
- * See /tmp/mx68k_P53_plan.md §3.2 / Edit B2. */
+/* P53 — atexit から呼んでも安全なサマリ用ヘルパ。SUMMARY タグを出力するだけで、
+ * メモリの解放やファイルのクローズは行わない。mx68k_shutdown を経由せずに libc の
+ * exit(3) へ到達する将来のコード経路に備えた、二重の安全網。
+ * /tmp/mx68k_P53_plan.md §3.2 / Edit B2 を参照。 */
 void mx68k_atexit_summary(void) {
 #if P53_ENABLE && P53_ATEXIT_ENABLE
-    /* debug_log auto-reopens the file via debug_log_init if it was closed. */
+    /* debug_log はファイルが閉じられていれば debug_log_init 経由で自動的に開き直す。 */
     debug_log("[P53-ATEXIT-FIRE] enter\n");
   #if P51B_ENABLE
     m68000_p51b_dump_summary();
@@ -1764,11 +1764,11 @@ int mx68k_p53_sigsrc_enabled(void) {
 #endif
 }
 
-/* P53 — Swift→debug.log marker bridge (Code Review C-2).
- * NSLog only writes to Apple Unified Logging, never to debug.log, so any
- * Swift-side marker that needs to appear in debug.log MUST route through
- * these helpers. All three internally call debug_log, which holds
- * debug_log_mutex and is safe from any thread. */
+/* P53 — Swift→debug.log マーカーブリッジ(Code Review C-2)。
+ * NSLog は Apple Unified Logging にしか書かず debug.log には決して書かないため、
+ * debug.log に出す必要がある Swift 側マーカーはすべて必ずこれらのヘルパーを
+ * 経由すること。3 つとも内部で debug_log を呼び、debug_log は
+ * debug_log_mutex を保持するのでどのスレッドからでも安全。 */
 void mx68k_log_delegate_fire(void) {
     debug_log("[P53-DELEGATE-FIRE] applicationWillTerminate entered\n");
 }
@@ -1785,11 +1785,11 @@ void mx68k_log_marker(const char* msg) {
 
 void mx68k_shutdown(void) {
 #if P53_ENABLE
-    /* P53 idempotency guard — absorbs duplicate calls from .onDisappear,
-     * applicationWillTerminate, atexit (atexit calls mx68k_atexit_summary,
-     * not this, but defense-in-depth). File-static flag, reset in
-     * mx68k_init for forward compat with re-init.
-     * See /tmp/mx68k_P53_plan.md §3.1 / Edit B3. */
+    /* P53 冪等ガード — .onDisappear・applicationWillTerminate・atexit からの
+     * 重複呼出しを吸収する(atexit が呼ぶのは本関数ではなく mx68k_atexit_summary
+     * だが、多重防御として)。ファイル static フラグで、再 init への前方互換の
+     * ため mx68k_init でリセットする。
+     * /tmp/mx68k_P53_plan.md §3.1 / Edit B3 参照。 */
     if (s_p53_shutdown_done) {
         debug_log("[P53-SHUTDOWN-IDEMPOTENT] skip (already done)\n");
         return;
@@ -1798,16 +1798,16 @@ void mx68k_shutdown(void) {
 #endif
 
 #if P51B_ENABLE
-    /* P51-B Edit E (I-3 adopted, Plan §5.5 / §9.6): emit session-end summary
-     * before freeing buffers and closing the log file. */
+    /* P51-B Edit E(I-3 採用、Plan §5.5 / §9.6): バッファ解放とログファイルの
+     * クローズより前にセッション終了サマリを出力する。 */
     m68000_p51b_dump_summary();
 #endif
 #if P52_ENABLE
-    /* P52 summary at session end. /tmp/mx68k_P52_plan.md §7.7. */
+    /* P52 のセッション終了時サマリ。/tmp/mx68k_P52_plan.md §7.7。 */
     m68000_p52_dump_summary();
 #endif
 #if P57A_ENABLE
-    /* P57-A summary at session end (Plan §7 Edit F-2, P52 非依存; Code Major-4). */
+    /* P57-A のセッション終了時サマリ(Plan §7 Edit F-2, P52 非依存; Code Major-4)。 */
     m68000_p57a_dump_summary();
 #endif
     /* P483: Mercury 窓アクセスの分母(モニタ B のサマリ)をセッション終了時にも吐く。
@@ -1825,9 +1825,9 @@ void mx68k_shutdown(void) {
         p637_ch3_dump_summary("shutdown");
     }
     ensure_app_support_dir();
-    /* P202: save SRAM on shutdown. Paired with the signature-checked load in
-       mx68k_init (P202), this persists the user's switch settings (HDD count,
-       boot device, memory) across app restarts. */
+    /* P202: シャットダウン時に SRAM を保存する。mx68k_init のシグネチャ検査付き
+       ロード(P202)と対になり、ユーザーのスイッチ設定(HDD 台数・起動デバイス・
+       メモリ)をアプリ再起動をまたいで保持する。 */
     const char* home = getenv("HOME");
     if (home) {
         char path[1024];
@@ -1913,52 +1913,52 @@ void mx68k_reset_hard(void) {
     g_mx68k_dbg_stop_reason  = MX68K_DEBUG_STOP_NONE;
     dbg_recalc_active();
 
-    /* P146/P221b: Config.XVIMode is never initialized in the MX Bridge
-     * (Config={0} in winx68k_compat.c), so it must be set explicitly. The IPLROM
-     * at guest FF009C does btst #0,$E8E00B; SysPort_Read returns 0xFF (bit0=1)
-     * only for XVIMode==0, else 0xDC/0xFE (bit0=0). P146 pinned this to 3 to
-     * match MPX68K and clear the frame~90 panic, but 3 made si misreport
-     * 030/25MHz at every clock (D-15). P221b derives it from the configured
-     * clock instead (10->0/0xFF, 16->1/0xFE, else 3/0xDC). In the MX Core,
-     * Config.XVIMode is read ONLY at sysport.c:86 — it feeds no clock/cycle
-     * timing, so this changes only the SYSPORT $E8E00B byte. The IPL clock
-     * self-detect branch is byte-identical for 0xDC and 0xFE (both bit0=0). */
-    /* P270: the P221b threshold was replaced by a per-clock-value lookup
-     * (p270_derive_xvimode) because clock-up MOD kits break the assumption that
-     * a higher raw clock means a higher machine ID class: RedZone(24MHz) is an
-     * XVI mod that must stay 16MHz-class (0xFE), and EXPERT(17MHz) is a
-     * 10MHz-class mod that must stay 0xFF. See that function's comment for the
-     * XM6 si reference and the upstream sysport.c:88 "XVI or RedZone" note. */
+    /* P146/P221b: Config.XVIMode は MX Bridge では一切初期化されない
+     * (winx68k_compat.c の Config={0})ため、明示的に設定する必要がある。ゲストの
+     * FF009C で IPLROM は btst #0,$E8E00B を行い、SysPort_Read は XVIMode==0 の
+     * ときのみ 0xFF(bit0=1)を返し、それ以外は 0xDC/0xFE(bit0=0)を返す。P146 は
+     * MPX68K に合わせて frame~90 の panic を解消するためこれを 3 に固定したが、3 では
+     * どのクロックでも si が 030/25MHz と誤報告した(D-15)。P221b は代わりに設定
+     * クロックから導出する(10->0/0xFF, 16->1/0xFE, それ以外は 3/0xDC)。MX Core では
+     * Config.XVIMode は sysport.c:86 でしか読まれず、クロック/サイクルのタイミングには
+     * 一切関与しないため、変わるのは SYSPORT $E8E00B のバイトだけ。IPL のクロック
+     * 自己判定分岐は 0xDC と 0xFE とで byte-identical(どちらも bit0=0)。 */
+    /* P270: P221b の閾値判定をクロック値ごとのルックアップ(p270_derive_xvimode)へ
+     * 置き換えた。クロックアップ MOD キットは「生クロックが高いほど機種 ID クラスも
+     * 高い」という前提を崩すため: RedZone(24MHz)は 16MHz クラス(0xFE)のままで
+     * なければならない XVI 改造であり、EXPERT(17MHz)は 0xFF のままでなければ
+     * ならない 10MHz クラス改造である。XM6 si の参照と上流 sysport.c:88 の
+     * "XVI or RedZone" 注記については同関数のコメントを参照。 */
     Config.XVIMode = p270_derive_xvimode(g_clock_mhz);
 
 #if P221B_PROBE
     debug_log("[P221B-MACHINE] machine=%d clock=%d -> XVIMode=%d $E8E00B=0x%02x\n",
               g_machine_type, g_clock_mhz, Config.XVIMode,
-              (unsigned)SysPort_Read(0xe8e00b));   /* guest-visible byte, read back */
+              (unsigned)SysPort_Read(0xe8e00b));   /* ゲストから見えるバイトを読み戻す */
 #endif
 
     debug_log("[MX68K] Step 0: IPL=%p MEM=%p\n", (void*)IPL, (void*)MEM);
     debug_log("[MX68K] Step 1: P16-FIX byte-swap IPLROM -> MEM before C68k_Reset()\n");
-    /* P16-FIX: copy IPLROM to MEM with 16-bit byte-swap so that rm16_main
-     * (LE16 reads via *(uint16_t*)&MEM[addr]) yields the correct BE values
-     * when C68k_Reset() reads the reset vectors from MEM[0..7].
-     * The FETCH path (0xFC0000-0xFFFFFF) accesses IPL[] directly via FETCH_WORD
-     * (big-endian byte read), so IPL[] itself must remain in BE order -- we only
-     * swap the MEM copy.  wm_main/rm_main XOR-1 byte access and wm16_main/rm16_main
-     * 16-bit access are both consistent with LE16 storage in MEM, so this swap is
-     * safe for all subsequent RAM access in the 0x000000-0x01FFFF range. */
+    /* P16-FIX: IPLROM を 16bit バイトスワップしながら MEM へコピーし、C68k_Reset()
+     * が MEM[0..7] からリセットベクタを読むとき、rm16_main(*(uint16_t*)&MEM[addr]
+     * による LE16 読み)が正しい BE 値を返すようにする。
+     * FETCH 経路(0xFC0000-0xFFFFFF)は FETCH_WORD(ビッグエンディアンのバイト読み)
+     * で IPL[] を直接参照するため、IPL[] 自体は BE 順のままでなければならない —
+     * スワップするのは MEM 側のコピーだけ。wm_main/rm_main の XOR-1 バイトアクセスと
+     * wm16_main/rm16_main の 16bit アクセスはどちらも MEM の LE16 格納と整合するので、
+     * このスワップは 0x000000-0x01FFFF 範囲の以後の全 RAM アクセスに対して安全。 */
 #if P51A_ENABLE
     if (IPL && MEM) {
-        /* P51-A: Reset vector ($0..$7) MUST be byte-swapped for C68k_Reset().
-         * Verified: Core/c68k/c68k.c:95-96 reads MEM[0]/MEM[4] via
-         * C68k_Read_Long inside C68k_Reset(). Keep this explicit 4-pair swap. */
+        /* P51-A: リセットベクタ($0..$7)は C68k_Reset() のため必ずバイトスワップする。
+         * 確認済み: Core/c68k/c68k.c:95-96 は C68k_Reset() 内で C68k_Read_Long により
+         * MEM[0]/MEM[4] を読む。この明示的な 4 ペアのスワップは残すこと。 */
         MEM[0] = IPL[1]; MEM[1] = IPL[0];
         MEM[2] = IPL[3]; MEM[3] = IPL[2];
         MEM[4] = IPL[5]; MEM[5] = IPL[4];
         MEM[6] = IPL[7]; MEM[7] = IPL[6];
-        /* P51-A: Clean the skipped vector-table area to zero. Required on the
-         * manual hard-reset path (line 669) so stale BIOS writes from the
-         * previous session don't leak through; harmless on cold boot. */
+        /* P51-A: スキップしたベクタテーブル領域をゼロクリアする。手動ハードリセット
+         * 経路(line 669)で前セッションの BIOS 書込みの古い値が残らないようにするために
+         * 必要。コールドブート時は無害。 */
 #if P135_ENABLE
         /* P135 Part1-B-memset: vector-skip 0 clear 実行を latch。範囲は [0x0008,0x07C0) で
          *   0x1FF6 を含まないが、reset_hard がこの frame に走ったことの記録として捕捉。 */
@@ -1972,9 +1972,9 @@ void mx68k_reset_hard(void) {
         memset(MEM + P51A_VECTOR_SKIP_BEGIN, 0,
                P51A_VECTOR_SKIP_END - P51A_VECTOR_SKIP_BEGIN);
 #endif
-        /* P51-A: skip $0008..$07BF (68k exception vectors + X68k IRQ area);
-         * BIOS installs real handlers there. Aligns with MPX68K/upstream
-         * px68k/px68k-libretro reset behavior (no IPL→MEM shadow). */
+        /* P51-A: $0008..$07BF(68k 例外ベクタ + X68k IRQ 領域)をスキップする。
+         * 実ハンドラは BIOS がそこへ設置する。MPX68K/上流 px68k/px68k-libretro の
+         * リセット時挙動(IPL→MEM シャドウなし)と揃える。 */
 #if P135_ENABLE
         /* P135 Part1-B-shadow: IPL→MEM byte-swap loop 実行を latch。範囲は
          *   [P51A_VECTOR_SKIP_END,0x20000) で 0x1FF6 を含む (IPLROM の非0値を書く)。 */
@@ -1997,7 +1997,7 @@ void mx68k_reset_hard(void) {
                   (unsigned)(P51A_VECTOR_SKIP_END - P51A_VECTOR_SKIP_BEGIN));
     }
 #else
-    /* Original P16-FIX, kept for ablation testing (P51A_ENABLE=0). */
+    /* 元の P16-FIX。アブレーション試験用に残している(P51A_ENABLE=0)。 */
     if (IPL && MEM) {
         for (int i = 0; i < 0x20000; i += 2) {
             MEM[i]   = IPL[i + 1];
@@ -2012,10 +2012,10 @@ void mx68k_reset_hard(void) {
     Memory_Init();
     debug_log("[MX68K] Step 4: MFP_Init()\n");
     MFP_Init();
-    /* P143b: P81-A timer-stop REMOVED. MFP_Init sets warm-start TCDCR=0x77 (Timer C
-     * running), matching the fully-working reference MPX68K. Zeroing TACR/TBCR/TCDCR
-     * here stopped MFP Timer C, so the IPLROM's level-6 timer wait never fired -> the
-     * icount-299949 interrupt-level divergence and downstream boot stall. */
+    /* P143b: P81-A のタイマー停止を削除。MFP_Init はウォームスタート時の TCDCR=0x77
+     * (Timer C 動作中)を設定し、完全動作する参照実装 MPX68K と一致する。ここで
+     * TACR/TBCR/TCDCR をゼロにすると MFP Timer C が止まり、IPLROM のレベル 6 タイマー
+     * 待ちが発火しなくなる → icount-299949 の割込みレベル乖離と後続の起動停止を招いた。 */
     /* P27-FIX: VSYNC割り込みを事前有効化（IERB bit6）
      * MFP_Int(9)はirq=9→IERB bit6を使用（IERAのbit6はTimer A、IERBのbit6がGPIP7/VSYNC）。
      * IPL frame=0〜1でF-line例外ループし MFP初期化ルーチンに到達できないため、
@@ -2056,7 +2056,7 @@ void mx68k_reset_hard(void) {
      * あり、リセット時は OFF が正しい(XM6/XEiJ/px68k 本家/px68k-libretro の
      * 4 参照実装すべて一致)。 */
     debug_log("[MX68K] Step 7.5: TVRAM_Init()\n");
-    TVRAM_Init();       /* P171: see mx68k_init — text pattern table init, was omitted. */
+    TVRAM_Init();       /* P171: mx68k_init 参照 — テキストパターンテーブル初期化、以前は欠落していた。 */
     debug_log("[MX68K] Step 8: GVRAM_Init()\n");
     GVRAM_Init();
     debug_log("[MX68K] Step 9: CRTC_Init()\n");
@@ -2067,24 +2067,24 @@ void mx68k_reset_hard(void) {
     BG_Init();
     debug_log("[MX68K] Step 12: IOC_Init()\n");
     IOC_Init();
-    /* P144: P23/P24-FIX IOC preset REMOVED. IOC_Init() leaves IOC_IntStat=0
-     * (interrupt-enable mask off) exactly like the fully-working reference
-     * MPX68K; the guest IPLROM enables the IOC via IOC_Write($E9C001/$E9C003)
-     * at the correct moment. The old preset predated the Timer-C fix (P143b):
-     * when boot stalled before the IPLROM reached its own IOC-init, MX force-
-     * enabled the mask so an FDD-insert would be visible. Post-Timer-C the
-     * preset instead makes FDD_SetFDInt raise a spurious level-1 (IPL1)
-     * interrupt (the fdd.c guard "IOC_IntStat & 2" becomes true with no real
-     * device source pending), taken right after the MFP level-6 handler's RTE
-     * (differential-trace icount 299989) -> guest jumps to uninitialized RAM
-     * 0x0FFF20. Removing the preset matches MPX68K and eliminates that spurious
-     * interrupt. See .mx68k_cycles/P144_{code,spec,plan}_inv.md. */
+    /* P144: P23/P24-FIX の IOC プリセットを削除。IOC_Init() は完全動作する参照
+     * 実装 MPX68K と全く同じく IOC_IntStat=0(割込み許可マスク OFF)のままにし、
+     * ゲスト IPLROM が適切なタイミングで IOC_Write($E9C001/$E9C003) により IOC を
+     * 有効化する。旧プリセットは Timer-C 修正(P143b)以前のもので、IPLROM が自前の
+     * IOC 初期化に到達する前に起動が止まっていた当時、FDD 挿入が見えるよう MX が
+     * マスクを強制有効化していた。Timer-C 修正後は、このプリセットが逆に
+     * FDD_SetFDInt に偽のレベル 1(IPL1)割込みを上げさせ(実デバイス要因が保留
+     * されていないのに fdd.c のガード "IOC_IntStat & 2" が真になる)、それが MFP
+     * レベル 6 ハンドラの RTE 直後に受理され(差分トレース icount 299989)→ ゲストが
+     * 未初期化 RAM 0x0FFF20 へ飛ぶ。プリセットを削除すると MPX68K と一致し、その
+     * 偽の割込みも消える。
+     * .mx68k_cycles/P144_{code,spec,plan}_inv.md 参照。 */
 
-    /* P47-C-1/2: RTC_Init / PPI_Init are missing from this bridge but are
-     * called by MPX68K (winx68k.cpp:291-292). Without RTC_Init the RTC regs
-     * remain zero, causing IPL_ROM RTC reads to return undefined values
-     * (potentially boot-magic mismatch -> panic terminus 0xff063c). PPI (8255)
-     * drives joystick/printer ports that IPL probes during boot. */
+    /* P47-C-1/2: RTC_Init / PPI_Init は本ブリッジに欠落しているが、MPX68K では
+     * 呼ばれている(winx68k.cpp:291-292)。RTC_Init が無いと RTC レジスタがゼロの
+     * ままとなり、IPL_ROM の RTC 読み出しが未定義値を返す(起動マジック不一致 →
+     * panic 終端 0xff063c の可能性)。PPI(8255)は IPL が起動中に調べる
+     * ジョイスティック/プリンタポートを駆動する。 */
     RTC_Init();
     debug_log("[MX68K] P47-C-1: RTC_Init() called\n");
     PPI_Init();
@@ -2306,8 +2306,8 @@ void mx68k_reset_hard(void) {
     DMA_Init();
     debug_log("[MX68K] Step 17: ADPCM_Init(%d)\n", g_audio_sample_rate_hz);
     ADPCM_Init(g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
-    ADPCM_SetVolume((uint8_t)g_adpcm_volume);   /* P210: reset-path self-containment (ADPCM_Init does not
-                            * touch ADPCM_VolumeShift; harmless re-apply).
+    ADPCM_SetVolume((uint8_t)g_adpcm_volume);   /* P210: リセット経路の自己完結性(ADPCM_Init は
+                            * ADPCM_VolumeShift に触れない。再適用は無害)。
                             * P512: 固定値 15 ではなくユーザー設定値を再適用する
                             * — 固定値のままだとハードリセット(⌘R・機種/メモリ変更)の
                             * たびに ADPCM 音量スライダの設定が黙って既定値へ戻る。 */
@@ -2332,7 +2332,7 @@ void mx68k_reset_hard(void) {
                             * OPM::Reset() が fmvolume に触れない(SetVolume(0) は OPM::Init()
                             * 側のみ)ため実質 no-op だが、その Init/Reset 実装分離という
                             * 偶然への依存を無くす。 */
-    p479_opm_shadow_reset();   /* P479: keep the Bridge-side OPM shadow in sync with the chip */
+    p479_opm_shadow_reset();   /* P479: Bridge 側 OPM シャドウをチップと同期させる */
     debug_log("[MX68K] Step 19: Mcry_Init()\n");
     /* P483: init 経路と同一(装着ラッチ + Cleanup/Init(path)/SetVolume)。
      * 装着設定はここで初めて配線に反映される(設定「適用」だけでは変わらない)。
@@ -2344,7 +2344,7 @@ void mx68k_reset_hard(void) {
         Mcry_Cleanup();
         Mcry_Init(g_audio_sample_rate_hz, mx68k_mercury_dir());   /* P626: 設定サンプルレート */
         Mcry_SetVolume(MCRY_VOL);
-        p491_mercury_opn_shadow_reset();   /* P491: keep the Bridge-side OPN shadow in sync with the chip */
+        p491_mercury_opn_shadow_reset();   /* P491: Bridge 側 OPN シャドウをチップと同期させる */
         p634_lrck_reset();                 /* P634 (D-43): init 経路と同一 — Mcry_Init が
                                             * Mcry_LRTiming=0 にするのと同じ箇所で
                                             * 自走 LR 位相も 0 クリアする。 */
@@ -2398,21 +2398,21 @@ void mx68k_reset_hard(void) {
      * (mx68k_init() は末尾で必ず mx68k_reset_hard() を呼ぶ)。 */
     sram_ext_install_fetch(g_sram_64k_enabled);
 
-    /* P20-FIX: FALLBACK_VEC block removed.
+    /* P20-FIX: FALLBACK_VEC ブロックを削除。
      *
-     * Root cause analysis showed that memset(MEM+8, 0, 0x3F8) + FALLBACK_VEC was
-     * overwriting BIOS startup code at MEM[0x0008..0x03FF].  The X68000 BIOS ROM is
-     * overlaid at address 0x000000 during cold boot, so P16-FIX correctly copies the
-     * byte-swapped ROM into MEM[0x0000..0x1FFFF].  The region 0x0008..0x03FF holds
-     * actual M68K instruction bytes that the CPU fetches and executes as part of the
-     * BIOS initialisation sequence.  Replacing them with FALLBACK_VEC stubs caused the
-     * CPU to spin through ORI.B #0,D0 loops instead of running real BIOS code, and
-     * eventually caused SR=0x2700 to be pushed onto a stack that had grown into the
-     * vector table area (0x00BC), corrupting the TRAP #15 vector and producing the
-     * 0x27004C98 bad-PC values reported by P14-PCGUARD.
+     * 根本原因分析により、memset(MEM+8, 0, 0x3F8) + FALLBACK_VEC が MEM[0x0008..0x03FF]
+     * の BIOS 起動コードを上書きしていたことが判明した。X68000 の BIOS ROM はコールド
+     * ブート中はアドレス 0x000000 にオーバーレイされるため、P16-FIX がバイトスワップ
+     * 済み ROM を MEM[0x0000..0x1FFFF] へコピーするのは正しい。0x0008..0x03FF 領域には
+     * BIOS 初期化シーケンスの一部として CPU がフェッチ・実行する実際の M68K 命令
+     * バイトが入っている。それらを FALLBACK_VEC スタブで置き換えたことで、CPU は
+     * 本物の BIOS コードを実行する代わりに ORI.B #0,D0 ループを空回りし、最終的に
+     * ベクタテーブル領域(0x00BC)まで伸びたスタックへ SR=0x2700 が積まれて
+     * TRAP #15 ベクタが不正な値になり、P14-PCGUARD が報告した 0x27004C98 という
+     * 不正 PC 値を生んでいた。
      *
-     * The BIOS itself installs all exception vectors during its boot sequence; no
-     * bridge-level patching of the vector table is needed or correct here. */
+     * 例外ベクタはすべて BIOS 自身が起動シーケンス中に設置する。ここでブリッジ
+     * レベルでベクタテーブルを書き換える必要はなく、正しくもない。 */
 
     /* P38-FIX-A: Timer D (vec#0x44, addr=0x110-0x113) / Timer C (vec#0x45, addr=0x114-0x117) に
      * RTEスタブを設置。MFP initregsにより両タイマーは初期状態で有効かつマスクなし
@@ -2463,19 +2463,19 @@ void mx68k_reset_hard(void) {
     debug_log("[MX68K] P32-FIX (P29-FIX moved): VSYNC vector#0x46 -> RTE stub at 0x%06x\n",
               P29_RTE_STUB_ADDR);
 #if P51A_ENABLE && P51A_VEC23_SAFETY
-    /* P51-A safety: pre-install RTE-stub pointer for bus error (vec#2) and
-     * address error (vec#3). After the P51-A shrink, MEM[$8..$F] starts at
-     * zero (instead of garbage IPL bytes). If either exception fires before
-     * BIOS installs them, the CPU would otherwise jump to PC=0. Pointing
-     * them at the P29 RTE stub ($0FFF00 = RTE) lets execution return safely
-     * the few times this could happen in early boot. BIOS overwrites these
-     * later -- no effect on the real boot path.
-     * See /tmp/mx68k_P51A_plan.md §5.2. */
+    /* P51-A 安全策: バスエラー(vec#2)とアドレスエラー(vec#3)に RTE スタブへの
+     * ポインタを事前設置する。P51-A の縮小後、MEM[$8..$F] は(IPL のゴミバイト
+     * ではなく)ゼロから始まる。BIOS が設置する前にどちらかの例外が発生すると、
+     * そのままでは CPU は PC=0 へ飛んでしまう。これらを P29 RTE スタブ
+     * ($0FFF00 = RTE)へ向けておけば、起動初期にこれが起きうる数回の場面でも
+     * 実行は安全に復帰できる。BIOS が後でこれらを上書きするので、実際の
+     * 起動経路には影響しない。
+     * /tmp/mx68k_P51A_plan.md §5.2 参照。 */
     if (MEM) {
-        /* vec#2 (Bus Error) at $0008..$000B -> RTE stub (LE16 x2) */
+        /* $0008..$000B の vec#2(バスエラー) -> RTE スタブ(LE16 x2) */
         *(uint16_t*)&MEM[0x008] = (uint16_t)((P29_RTE_STUB_ADDR >> 16) & 0xFFFFU);
         *(uint16_t*)&MEM[0x00A] = (uint16_t)( P29_RTE_STUB_ADDR        & 0xFFFFU);
-        /* vec#3 (Address Error) at $000C..$000F -> RTE stub (LE16 x2) */
+        /* $000C..$000F の vec#3(アドレスエラー) -> RTE スタブ(LE16 x2) */
         *(uint16_t*)&MEM[0x00C] = (uint16_t)((P29_RTE_STUB_ADDR >> 16) & 0xFFFFU);
         *(uint16_t*)&MEM[0x00E] = (uint16_t)( P29_RTE_STUB_ADDR        & 0xFFFFU);
         debug_log("[P51-A-VEC23] vec#2/#3 pre-installed at RTE stub 0x%06x\n",
@@ -2563,7 +2563,7 @@ void mx68k_reset_hard(void) {
     s_p34_stack_dump_count = 0;
     s_p35_oob_dump_count = 0;
 
-    /* P47-A: Reset diagnostic counters and last-known sentinel values on hard reset */
+    /* P47-A: ハードリセット時に診断カウンタと最終既知 sentinel 値をリセットする */
     s_p47_panic_logged   = 0;
     s_p47_rte_log_cnt    = 0;
     s_p47_vec46_last     = 0xFFFFFFFFu;
@@ -2571,8 +2571,8 @@ void mx68k_reset_hard(void) {
     s_p47_abort_ptr_last = 0xFFFFFFFFu;
     s_p47_abort_log_cnt  = 0;
 
-    /* P47-B-α: Reset diagnostic counters and last-known sentinel values on hard reset
-     * (same convention as P47-A above; ensures correct behaviour across hot resets) */
+    /* P47-B-α: ハードリセット時に診断カウンタと最終既知 sentinel 値をリセットする
+     * (上の P47-A と同じ規約。ホットリセットをまたいでも正しく動作させるため) */
     s_p47b_pin_cnt       = 0;
     s_p47b_diag_cnt      = 0;
     s_p47b_panic_logged  = 0;
@@ -2581,19 +2581,19 @@ void mx68k_reset_hard(void) {
     s_p47b_imrb_last     = 0xFFu;
     s_p47b_isrb_last     = 0xFFu;
 
-    /* P47-B-β: Reset write-intercept counters (defined in m68000_bridge.c) */
+    /* P47-B-β: 書込みインターセプトのカウンタをリセットする(m68000_bridge.c で定義) */
     m68000_reset_p47bb_counters();
 
-    /* P47-D: Reset DIAG-F/G/H/I session-scope counters & ring/histogram.
+    /* P47-D: DIAG-F/G/H/I のセッション単位カウンタと ring/ヒストグラムをリセットする。
      *
-     * P48-C reset-order dependency (C-2): this call also re-initialises
-     * s_p48c_ioc_intstat_prev from the CURRENT IOC_IntStat value. It must
-     * therefore run AFTER the P23-FIX IOC_IntStat=0x0E preset above (line
-     * ~369). Both conditions hold here (we are well past line 369). */
+     * P48-C のリセット順序依存(C-2): この呼出しは s_p48c_ioc_intstat_prev を
+     * 現在の IOC_IntStat 値から再初期化もする。したがって上の P23-FIX による
+     * IOC_IntStat=0x0E プリセット(line ~369)より後に実行しなければならない。
+     * ここでは両条件とも満たされている(line 369 よりずっと後である)。 */
     m68000_reset_p47d_counters();
 
-    /* P252 Stage 2c-2: clear the internal-SCSI level-1 pending state so a hard
-     * reset starts with a clean multiplexer (symmetric with the counters above). */
+    /* P252 Stage 2c-2: 内蔵 SCSI のレベル 1 保留状態をクリアし、ハードリセットが
+     * クリーンなマルチプレクサから始まるようにする(上のカウンタ群と対称)。 */
     mx68k_scsi_irq_reset();
 
 #if P73A_ENABLE
@@ -2609,7 +2609,7 @@ void mx68k_reset_hard(void) {
         /* vec#0x60 (0x180-0x183) */
         *(uint16_t*)&MEM[0x180] = (uint16_t)((0x000FFF20u >> 16) & 0xFFFFU); /* 0x000F */
         *(uint16_t*)&MEM[0x182] = (uint16_t)( 0x000FFF20u        & 0xFFFFU); /* 0xFF20 */
-        /* vec#0x61 (0x184-0x187) — FDD IRQ1 primary target */
+        /* vec#0x61 (0x184-0x187) — FDD IRQ1 の主対象 */
         *(uint16_t*)&MEM[0x184] = (uint16_t)((0x000FFF20u >> 16) & 0xFFFFU); /* 0x000F */
         *(uint16_t*)&MEM[0x186] = (uint16_t)( 0x000FFF20u        & 0xFFFFU); /* 0xFF20 */
         /* vec#0x62 (0x188-0x18B) */
@@ -2630,7 +2630,7 @@ void mx68k_reset_hard(void) {
     }
 #endif /* P73A_ENABLE */
 
-    /* P47-A-DIAG-7: Vector #2 (Bus Error) / #3 (Address Error) dump after init */
+    /* P47-A-DIAG-7: 初期化後の Vector #2 (Bus Error) / #3 (Address Error) ダンプ */
     if (MEM) {
         uint32_t v2 = p47_read_long_le(0x08);
         uint32_t v3 = p47_read_long_le(0x0C);
@@ -2638,48 +2638,48 @@ void mx68k_reset_hard(void) {
                   v2, v3);
     }
 
-    /* P68-FDC-FIX: Drain fdd.SetDelay[] to 0 for all mounted drives at the
-     * end of every hard reset, so FDD_IsReady() returns TRUE before the
-     * post-reset IPLROM executes its drive-ready check at PC≈0xFF0628.
+    /* P68-FDC-FIX: 毎回のハードリセットの最後に、マウント済み全ドライブの
+     * fdd.SetDelay[] を 0 まで drain し、リセット後の IPLROM が PC≈0xFF0628 で
+     * ドライブレディ検査を実行する前に FDD_IsReady() が TRUE を返すようにする。
      *
-     * Root cause (P68 investigation): mx68k_fdd_insert() leaves
-     * fdd.SetDelay[drv] != 0 (upstream 3-frame insert-settle counter).
-     * FDD_Reset() does not touch SetDelay[], and the pending-reset frame
-     * returns before reaching the per-frame FDD_SetFDInt() drain. The CPU
-     * also runs one frame BEFORE that per-frame call, so the IPLROM reads
-     * 0xE94005 while FDD_IsReady(0)==FALSE -> FDC_RDY=0 -> panic.
+     * 根本原因(P68 調査): mx68k_fdd_insert() は fdd.SetDelay[drv] != 0
+     * (上流の 3 フレーム挿入安定カウンタ)のまま残す。FDD_Reset() は SetDelay[]
+     * に触れず、保留リセットのフレームはフレーム毎の FDD_SetFDInt() drain に
+     * 到達する前に return する。さらに CPU はそのフレーム毎呼出しより前に 1 フレーム
+     * 分走るため、IPLROM は FDD_IsReady(0)==FALSE のまま 0xE94005 を読み
+     * -> FDC_RDY=0 -> panic となる。
      *
-     * FDD_SetFDInt() (no args) decrements every drive's SetDelay by one and
-     * is a no-op on drives already at 0; three calls guarantee SetDelay
-     * 3->0 for both drive 0 and drive 1. The 1->0 transition still
-     * dispatches IRQH_Int(1,&FDD_Int) (IOC_IntStat bit1 is set by the
-     * P23-FIX preset earlier in this function), so the FDD-insert IRQ1 is
-     * preserved -- it now fires during reset rather than at end of frame
-     * N+1. The existing P48-A drain in mx68k_fdd_insert() is left
-     * unchanged. */
+     * FDD_SetFDInt()(引数なし)は全ドライブの SetDelay を 1 ずつ減らし、既に 0 の
+     * ドライブでは no-op。3 回呼べばドライブ 0・1 とも SetDelay 3->0 が保証される。
+     * 1->0 の遷移では従来どおり IRQH_Int(1,&FDD_Int) が発行される
+     * (IOC_IntStat bit1 は本関数の前方で P23-FIX プリセットにより立っている)
+     * ため、FDD 挿入の IRQ1 は保たれる -- 発火タイミングがフレーム N+1 の
+     * 終わりからリセット中へ移るだけである。mx68k_fdd_insert() 内の既存の
+     * P48-A drain には
+     * 手を加えていない。 */
 #if P68_FDC_FIX_ENABLE
-    /* P68-g2: Pre-select drive 0 in fdc.ctrl so the drive-ready port 0xE94005
-     * returns bit7=1 before the IPLROM writes its own drive-select command.
-     * FDC_Init() zeros fdc.ctrl; 0xE94005 read = (fdc.ctrl&1)&&FDD_IsReady(0).
-     * FDC_Write(addr, data) switches on addr&0x07; 0xE94005&0x07=5 -> ctrl. */
-    FDC_Write(0xE94005u, 0x01u);  /* fdc.ctrl = 0x01 (drive 0 selected) */
-    FDD_SetFDInt();   /* SetDelay 3 -> 2 (no-op on drives already at 0) */
+    /* P68-g2: fdc.ctrl でドライブ 0 を事前選択し、IPLROM が自前のドライブ選択
+     * コマンドを書く前でもドライブレディポート 0xE94005 が bit7=1 を返すようにする。
+     * FDC_Init() は fdc.ctrl をゼロにする。0xE94005 の読み値 = (fdc.ctrl&1)&&FDD_IsReady(0)。
+     * FDC_Write(addr, data) は addr&0x07 で分岐する。0xE94005&0x07=5 -> ctrl。 */
+    FDC_Write(0xE94005u, 0x01u);  /* fdc.ctrl = 0x01(ドライブ 0 選択) */
+    FDD_SetFDInt();   /* SetDelay 3 -> 2(既に 0 のドライブでは no-op) */
     FDD_SetFDInt();   /* SetDelay 2 -> 1 */
-    FDD_SetFDInt();   /* SetDelay 1 -> 0  + IRQH_Int(1,&FDD_Int) on settle */
+    FDD_SetFDInt();   /* SetDelay 1 -> 0  + 安定時に IRQH_Int(1,&FDD_Int) */
     debug_log("[P68-FDC-FIX] reset-time drain+preselect: "
               "FDD_IsReady(0)=%d FDD_IsReady(1)=%d IOC_IntStat=0x%02x\n",
               FDD_IsReady(0), FDD_IsReady(1), (unsigned)IOC_IntStat);
 #endif
 
-    /* P220: write the configured RAM size to guest SRAM $ED0008 (raw byte-count
-     * longword, big-endian; SRAM[] is adr^1 byte-swapped, same convention as the
-     * seed at :472). guest $ED0008-B = 0x00 (mb<<4) 0x00 0x00 = (mb<<4)<<16
-     * = mb<<20 = mb*0x100000. 12MB->0x00C00000, 8MB->0x00800000, 2MB->0x00200000.
-     * Matches Core sram.c:47 SRAM_SetRamSize (Memory_WriteB(0xed0009, size&0xf0)
-     * with size=mb<<4). reset_hard is the only correct insertion point: init-time
-     * seed/sram.dat load is not re-applied after a settings-change hard reset, and
-     * this is the last place the process touches $ED0008 before the guest runs.
-     * Physical MEM allocation stays 12MB — this is declarative size reporting only. */
+    /* P220: 設定された RAM 容量をゲスト SRAM $ED0008 へ書く(生のバイト数を表す
+     * ロングワード、ビッグエンディアン。SRAM[] は adr^1 のバイトスワップ表現で、:472 の
+     * シードと同じ規約)。guest $ED0008-B = 0x00 (mb<<4) 0x00 0x00 = (mb<<4)<<16
+     * = mb<<20 = mb*0x100000。12MB->0x00C00000, 8MB->0x00800000, 2MB->0x00200000。
+     * Core sram.c:47 の SRAM_SetRamSize(size=mb<<4 で Memory_WriteB(0xed0009, size&0xf0))
+     * と一致する。挿入箇所として正しいのは reset_hard だけ: init 時のシード/sram.dat
+     * ロードは設定変更によるハードリセット後に再適用されず、ここはゲスト実行前に
+     * プロセスが $ED0008 に触れる最後の場所である。
+     * 物理的な MEM 確保は 12MB のまま — これは容量を宣言的に報告するだけ。 */
     {
         int p220_mb = (g_memory_size_mb > 0 && g_memory_size_mb <= 12)
                         ? g_memory_size_mb : 12;
@@ -2697,7 +2697,7 @@ void mx68k_reset_hard(void) {
                       p220_mb, v);
         }
 #endif
-        mx68k_set_membound(p220_mb);   /* P220b: burn the same clamped value into the RAM boundary */
+        mx68k_set_membound(p220_mb);   /* P220b: 同じクランプ値を RAM 境界にも焼き込む */
     }
 
     /* P504 (D-46 検証プローブ): 既存の全 SRAM 書込みが完了した直後、かつ CPU 実行
@@ -2741,14 +2741,14 @@ void mx68k_pause(bool pause) {
 }
 
 // ---- frame ----
-/* P82-G: current frame index, published each frame from mx68k_run_frame()
- * so the m68000_bridge.c chunk-loop sampler (Part B) can frame-gate.
- * Diagnostic-only; written here, read only by the P82-G probe. */
+/* P82-G: 現在のフレーム番号。mx68k_run_frame() から毎フレーム公開され、
+ * m68000_bridge.c の chunk ループのサンプラ(Part B)がフレームでゲートできるようにする。
+ * 診断専用。ここで書き込み、読むのは P82-G プローブのみ。 */
 int g_mx68k_frame_num = 0;
 
 #if P135_ENABLE
 /* =====================================================================
- * P135 Part 1: host-path runtime latch (cross-TU)。
+ * P135 Part 1: host-path の実行時 latch(TU 横断)。
  * init clear / IPL→MEM shadow が boot 後 (frame>=80・特に 88-89) に走るかを
  * 動的確認する。非evict accumulator (boot-lifetime・p135_reset では触れない)。
  * m68000_bridge.c の p135_dump が extern 参照する。READ-ONLY: MEM[0x1FF6] を
@@ -2781,46 +2781,46 @@ static inline unsigned short p135_mem1ff6(void) {
 #endif /* P135_ENABLE */
 
 /* =====================================================================
- * P82-X-V CP-V-2 + CP-V-5 per-frame driver
- * (Plan: /tmp/mx68k_P82-X-V_plan.md §3.2 / §3.5).
+ * P82-X-V CP-V-2 + CP-V-5 のフレーム毎ドライバ
+ * (Plan: /tmp/mx68k_P82-X-V_plan.md §3.2 / §3.5)。
  *
- * Codex Q2 verdict adopted: HD63450 DMAC delivers vectored IRQs via
- * programmed NIV/EIV (per-channel), NOT the level-3 autovector slot at
- * byte $6C. CP-V-2 therefore observes:
- *   1. DMA[0..3].NIV / .EIV (8 values, register snapshot).
- *   2. Vector table entries at (4 * NIV) and (4 * EIV) per channel
- *      (8 long-word reads through p47_read_long_le).
- *   3. The reset SSP slot at $00000000 — px68k boots with NIV=$00 by
- *      default, so a stray IRQ would jump to mem_read_long($00000000)
- *      (= reset SSP, garbage PC fetch → bus/addr error → $ff062a panic).
- *   4. Legacy autovector level-3 slot at $0000006C — recorded for
- *      completeness so the original H5-C variant remains observable.
+ * Codex Q2 の判定を採用: HD63450 DMAC はベクタ付き IRQ を、プログラムされた
+ * NIV/EIV(チャネル毎)経由で届けるのであって、バイト $6C のレベル 3 オートベクタ
+ * スロットではない。したがって CP-V-2 は以下を観測する:
+ *   1. DMA[0..3].NIV / .EIV(8 値、レジスタのスナップショット)。
+ *   2. チャネル毎の (4 * NIV) と (4 * EIV) にあるベクタテーブルエントリ
+ *      (p47_read_long_le によるロングワード読み 8 回)。
+ *   3. $00000000 のリセット SSP スロット — px68k は既定で NIV=$00 のまま起動する
+ *      ため、迷い IRQ は mem_read_long($00000000) へ飛ぶ
+ *      (= リセット SSP、ゴミ PC のフェッチ → バス/アドレスエラー → $ff062a panic)。
+ *   4. $0000006C の旧来のオートベクタ レベル 3 スロット — 元の H5-C 版も観測可能に
+ *      しておくため、網羅性のために記録する。
  *
- * CP-V-5 emits a 1-line per-frame snapshot of IRQH[1..7] + IRQLine +
- * IPL mask + MFP IPRA/IPRB + DMA0 CSR/CCR during window [80, 95].
- * All reads are side-effect-free.
+ * CP-V-5 はウィンドウ [80, 95] の間、IRQH[1..7] + IRQLine + IPL マスク + MFP
+ * IPRA/IPRB + DMA0 CSR/CCR のフレーム毎スナップショットを 1 行で出力する。
+ * 読み出しはすべて副作用なし。
  * ===================================================================== */
 #if P82XV_ENABLE
 static uint8_t s_p82xv_v2_armed_postinit = 0;
 static uint8_t s_p82xv_v2_armed_panic    = 0;
 
-/* hard-reset hook — called from m68000_reset_p47d_counters via extern decl */
+/* hard-reset フック — extern 宣言経由で m68000_reset_p47d_counters から呼ばれる */
 void p82xv_reset_tick_state(void) {
     s_p82xv_v2_armed_postinit = 0;
     s_p82xv_v2_armed_panic    = 0;
 }
 
-/* CP-V-2 emit body — read DMAC NIV/EIV (register state) + the vector
- * table entries those NIV/EIV indexes into + reset SSP + autovec lvl3.
- * stage_tag is the literal "A" or "B" string suffix for the emit line. */
+/* CP-V-2 の出力本体 — DMAC の NIV/EIV(レジスタ状態)+ それらの NIV/EIV が指す
+ * ベクタテーブルエントリ + リセット SSP + オートベクタ lvl3 を読む。
+ * stage_tag は出力行に付けるリテラル "A" または "B" の文字列サフィックス。 */
 static void p82xv_v2_emit(const char *stage_tag, int32_t frame) {
     uint8_t  niv[4], eiv[4];
     uint32_t vec_at_niv[4], vec_at_eiv[4];
     for (int ch = 0; ch < 4; ch++) {
         niv[ch] = DMA[ch].NIV;
         eiv[ch] = DMA[ch].EIV;
-        /* p47_read_long_le is BPC-safe (returns 0xFFFFFFFF on OOB). The
-         * vector table address is (vector_number * 4). */
+        /* p47_read_long_le は BPC 安全(範囲外では 0xFFFFFFFF を返す)。
+         * ベクタテーブルのアドレスは (vector_number * 4)。 */
         vec_at_niv[ch] = p47_read_long_le((uint32_t)niv[ch] * 4u);
         vec_at_eiv[ch] = p47_read_long_le((uint32_t)eiv[ch] * 4u);
     }
@@ -2861,7 +2861,7 @@ static void p82xv_v2_emit(const char *stage_tag, int32_t frame) {
 void p82xv_tick(void) {
     int32_t f = (int32_t)g_mx68k_frame_num;
 
-    /* ---- CP-V-2 stage A (post-init) and stage B (panic-near) ---- */
+    /* ---- CP-V-2 ステージ A(init 後)とステージ B(panic 直前) ---- */
     if (!s_p82xv_v2_armed_postinit && f == (int32_t)P82XV_V2_FRAME_POSTINIT) {
         s_p82xv_v2_armed_postinit = 1;
         p82xv_v2_emit("A", f);
@@ -2871,7 +2871,7 @@ void p82xv_tick(void) {
         p82xv_v2_emit("B", f);
     }
 
-    /* ---- CP-V-5 per-frame sampler — window [80, 95] inclusive (cap 16) ---- */
+    /* ---- CP-V-5 のフレーム毎サンプラ — ウィンドウ [80, 95] 両端含む(上限 16) ---- */
     if (f >= P82XV_WIN_LO && f <= P82XV_WIN_HI) {
         uint16_t sr  = (uint16_t)m68000_get_reg(M68K_SR);
         uint8_t  ipl = (uint8_t)((sr >> 8) & 0x7u);
@@ -2892,7 +2892,7 @@ void p82xv_tick(void) {
                   (unsigned)DMA[0].CSR, (unsigned)DMA[0].CCR);
     }
 }
-#else  /* P82XV_ENABLE == 0 — no-op stubs (orphan-free) */
+#else  /* P82XV_ENABLE == 0 — no-op スタブ(孤立シンボルなし) */
 void p82xv_reset_tick_state(void) { }
 void p82xv_tick(void)             { }
 #endif /* P82XV_ENABLE */
@@ -2935,8 +2935,8 @@ static int s_p543_first_block_vline;
 static int s_p543_last_block_vline;
 #endif
 
-/* P175: Core Keyboard_Int() is a stub; deliver a queued scancode to the MFP here
- * (upstream x11/keyboard.c:637). Raises the MFP keyboard RX interrupt MFP_Int(3). */
+/* P175: Core の Keyboard_Int() はスタブのため、キュー済みスキャンコードをここで MFP へ
+ * 届ける(上流 x11/keyboard.c:637)。MFP のキーボード受信割込み MFP_Int(3) を上げる。 */
 static void mx68k_keyboard_int(void) {
     if (KeyBufRP != KeyBufWP) {
         if (!KeyIntFlag) {
@@ -3295,13 +3295,13 @@ static int consume_pending_ops(void) {
         g_pending_sasi_cache_invalidate = 0;
         sasi_io_cache_invalidate_all();
     }
-    /* P198: consume a queued state save/load at the frame boundary (emulation
-     * thread), so serialization sees a stable, non-mid-instruction machine. */
-    /* P481 (D-42): order is "run → store rc/kind → bump seq → clear the pending
-     * flag last". The previous order cleared the flag first, which would let a
-     * reader that watches the flag observe "done" before the result was stored.
-     * Swift polls g_state_op_seq (not the flag), so this ordering is for
-     * consistency rather than a live defect. */
+    /* P198: キュー済みのステートセーブ/ロードをフレーム境界(エミュレーション
+     * スレッド)で消費し、シリアライズが命令途中でない安定したマシン状態を見るようにする。 */
+    /* P481 (D-42): 順序は「実行 → rc/kind を格納 → seq を進める → 最後に pending
+     * フラグをクリア」。旧順序はフラグを先にクリアしていたため、フラグを監視する
+     * 読み手が結果の格納前に「完了」を観測しうる。Swift はフラグではなく
+     * g_state_op_seq をポーリングするので、この順序は実害のある欠陥への対策という
+     * より一貫性のためのもの。 */
     if (atomic_load(&g_pending_save)) {
         int rc = do_save_state(g_pending_state_path);
         debug_log("[P198] do_save_state('%s') rc=%d\n", g_pending_state_path, rc);
@@ -3348,13 +3348,13 @@ void mx68k_run_frame(void) {
 
     static int frame_num = 0;
     static int first = 1;
-    /* P82-G: publish the current frame index for the m68000_bridge.c
-     * chunk-loop sampler (Part B), which has no other access to it. */
+    /* P82-G: 現在のフレーム番号を m68000_bridge.c の chunk ループのサンプラ
+     * (Part B)向けに公開する。同サンプラには他にこれを知る手段がない。 */
     g_mx68k_frame_num = frame_num;
 
 #if P220_PROBE
-    /* P220 (c): after the guest is running, has the IPL overwritten our value?
-     * Rate-limited to frames 0 / 5 / 60 only. */
+    /* P220 (c): ゲスト実行開始後、IPL が我々の値を上書きしたか?
+     * フレーム 0 / 5 / 60 のみに頻度制限。 */
     if (frame_num == 0 || frame_num == 5 || frame_num == 60) {
         uint32_t v = ((uint32_t)SRAM[0x08^1] << 24) |
                      ((uint32_t)SRAM[0x09^1] << 16) |
@@ -3378,16 +3378,16 @@ void mx68k_run_frame(void) {
         }
     }
 
-    /* P82-X-Q (P82XQ-PROBE-Q1) frame-entry invalidate (Plan §3.3 trigger #1):
-     * drop any cached chunk-boundary state from the prior frame so the next
-     * probe sample re-resolves the canonical guest PC via the Tier-2
-     * BasePC-hint walk. Bounded by the 60Hz call rate so cost is trivial. */
+    /* P82-X-Q (P82XQ-PROBE-Q1) フレーム入口での無効化(Plan §3.3 トリガ #1):
+     * 前フレームのキャッシュ済み chunk 境界状態を捨て、次のプローブ標本が
+     * Tier-2 の BasePC ヒント走査で正規のゲスト PC を解決し直すようにする。
+     * 呼出し頻度は 60Hz で頭打ちなのでコストは無視できる。 */
     mx68k_probe_pc_cache_invalidate();
     if (first) {
         debug_log("[MX68K] mx68k_run_frame() FIRST CALL\n");
 #if P117_EXEC_CYCLE_FEED
-        /* P117-AB experiment marker: feeding EXECUTED cycles (ex) to MFP_Timer/RTC_Timer.
-         * Absent in control (flag=0) so control debug.log stays byte-identical. */
+        /* P117-AB 実験マーカー: 実行済みサイクル(ex)を MFP_Timer/RTC_Timer へ供給する。
+         * 対照(flag=0)では出さないので、対照側 debug.log は byte-identical のまま。 */
         debug_log("[P117-AB] EXEC_CYCLE_FEED=1 (experiment: MFP_Timer/RTC fed ex, not sc)\n");
 #endif
         /* P34-DIAG: フレーム開始時点でのRTEスタブとVSYNCベクタのランタイム確認 */
@@ -3413,12 +3413,12 @@ void mx68k_run_frame(void) {
         first = 0;
     }
 #if P56_ENABLE
-    /* P56 snapshot trigger: at frame == P56_SNAPSHOT_TRIGGER_FRAME (default 60),
-     * delegate to m68000_p56_take_snapshot() (m68000_bridge.c 側 file-scope
-     * static にアクセスするため). /tmp/mx68k_P56_plan.md §3.4 / Edit F. */
+    /* P56 スナップショットトリガ: frame == P56_SNAPSHOT_TRIGGER_FRAME(既定 60)で
+     * m68000_p56_take_snapshot() へ委譲する(m68000_bridge.c 側 file-scope
+     * static にアクセスするため)。/tmp/mx68k_P56_plan.md §3.4 / Edit F。 */
     m68000_p56_take_snapshot(frame_num);
 #endif /* P56_ENABLE */
-    // P10/P14: reset per-frame counters so the first N events per frame are logged
+    // P10/P14: フレーム毎カウンタをリセットし、各フレームの最初の N 件のイベントがログされるようにする
     m68000_reset_addr_err_count();
     m68000_reset_pcguard_count();
 
@@ -3463,7 +3463,7 @@ void mx68k_run_frame(void) {
         }
     }
 
-    /* P47-B-α-FIX: TimerD vec#0x44 (RAM 0x110) panic placeholder pin
+    /* P47-B-α-FIX: TimerD vec#0x44 (RAM 0x110) の panic プレースホルダを pin する
      * 真因: IPL boot中に vec#0x44 が 0x44FF05E4 (panic placeholder) で上書きされ
      *       frame=24 で TimerD underflow → panic chain (0xff05e4..0xff063c)
      *       → 0xff063c 自己無限ループで SR.IPL=6 永久固着
@@ -3504,8 +3504,8 @@ void mx68k_run_frame(void) {
         }
     }
 
-    /* P47-A-DIAG-3: vec #0x46 (RAM 0x118) overwrite watch — capped log count separate
-     * from P30-DIAG so we can see initial value vs IPLROM MFP-init overwrite. */
+    /* P47-A-DIAG-3: vec #0x46 (RAM 0x118) の上書き監視 — P30-DIAG とは別枠の上限付き
+     * ログ件数で、初期値と IPLROM の MFP 初期化による上書きとを見分けられるようにする。 */
     if (MEM) {
         uint32_t cur = p47_read_long_le(0x118);
         if (cur != s_p47_vec46_last && s_p47_vec46_log_cnt < 30) {
@@ -3516,7 +3516,7 @@ void mx68k_run_frame(void) {
         }
     }
 
-    /* P47-A-DIAG-4: $07FC IOCS ABORT pointer change watch */
+    /* P47-A-DIAG-4: $07FC IOCS ABORT ポインタの変化監視 */
     if (MEM) {
         uint32_t cur = p47_read_long_le(0x07FC);
         if (cur != s_p47_abort_ptr_last && s_p47_abort_log_cnt < 30) {
@@ -3543,8 +3543,8 @@ void mx68k_run_frame(void) {
     }
 
     /* P31-DIAG / P47-A-DIAG-5: RTEスタブ実行検出 → スタック内容ダンプ
-     * P47-A: removed s_rte_logged single-shot flag, now always logs but rate-limited
-     * P47-A-DIAG-1: byte-order bug fixed via p47_read_stack_frame() helper */
+     * P47-A: s_rte_logged の one-shot フラグを削除し、常にログするが頻度制限する
+     * P47-A-DIAG-1: p47_read_stack_frame() ヘルパーでバイト順の不具合を修正済み */
     if (MEM) {
         uint32_t pc = m68000_get_reg(M68K_PC);
         if (pc == P29_RTE_STUB_ADDR) {
@@ -3552,7 +3552,7 @@ void mx68k_run_frame(void) {
             uint16_t stk_sr;
             uint32_t stk_pc;
             p47_read_stack_frame(ssp, &stk_sr, &stk_pc);
-            /* Rate limit: log every hit while frame<=30, then 1 per 10 frames up to 100 total */
+            /* 頻度制限: frame<=30 の間は毎回、その後は 10 フレームに 1 回、合計 100 件まで */
             if ((frame_num <= 30 || (frame_num % 10 == 0)) && s_p47_rte_log_cnt < 100) {
                 debug_log("[P47-A-DIAG-5] frame=%d RTE stub hit: SSP=0x%08x stk_SR=0x%04x stk_PC=0x%08x (post-byte-order-fix)\n",
                           frame_num, ssp, stk_sr, stk_pc);
@@ -3579,7 +3579,7 @@ void mx68k_run_frame(void) {
         }
     }
 
-    /* P33-DIAG: memory dump near PC=0x657401 (first occurrence only) */
+    /* P33-DIAG: PC=0x657401 付近のメモリダンプ(初回のみ) */
     {
         static int s_p33_dump_done = 0;
         if (!s_p33_dump_done && MEM) {
@@ -3626,16 +3626,16 @@ void mx68k_run_frame(void) {
      * mx68k_get_vsync_hz() がこれを 10e6 で割って垂直周波数を返す。 */
     g_p641_frame_clocks_10m = clk_total;
 
-    /* P180: MX's c68k core (Core/c68k/c68kexec.c) counts REAL MC68000 cycles — it does
-     * NOT apply the 1/5-MHz scaling that MPX's WinX68k_Exec comment assumes. P149 copied
-     * MPX's clkdiv = clock*5, which over-ran the CPU 5x (a standard X68000 benchmark showed
-     * 826% at 16MHz vs the correct ~160%). Use clkdiv = clock so clk_total = base*(clock/10)
-     * gives the true MHz (10->base*1.0=100%, 16->base*1.6=160%). Timer feed usedclk =
-     * clk_total*10/clkdiv = base is invariant, so MFP/RTC/OPM/ADPCM tick rate is unchanged.
-     * clkdiv MUST be > 0 — usedclk = ClkUsed/clkdiv would divide-by-zero if g_clock_mhz==0
-     * (mx68k_set_clock_mhz has no clamp; Swift config could pass 0). crash-0 is a merge gate. */
-    int32_t clkdiv = (g_clock_mhz > 0 ? g_clock_mhz : 16);      /* P180: was *5. 16MHz -> 16 */
-    clk_total = (int32_t)(((int64_t)clk_total * clkdiv) / 10);  /* CPU budget = base*(clock/10) */
+    /* P180: MX の c68k コア(Core/c68k/c68kexec.c)は実 MC68000 サイクルを数える — MPX の
+     * WinX68k_Exec コメントが前提とする 1/5-MHz スケーリングは適用しない。P149 は MPX の
+     * clkdiv = clock*5 を写していたため CPU が 5 倍速く走った(標準的な X68000 ベンチマークで
+     * 16MHz 時 826%、正しくは約 160%)。clkdiv = clock とし、clk_total = base*(clock/10) が
+     * 真の MHz を与えるようにする(10->base*1.0=100%, 16->base*1.6=160%)。タイマー供給の usedclk =
+     * clk_total*10/clkdiv = base は不変なので、MFP/RTC/OPM/ADPCM の tick レートは変わらない。
+     * clkdiv は必ず > 0 — g_clock_mhz==0 だと usedclk = ClkUsed/clkdiv がゼロ除算になる
+     * (mx68k_set_clock_mhz にクランプは無く、Swift の config が 0 を渡しうる)。crash-0 はマージゲート。 */
+    int32_t clkdiv = (g_clock_mhz > 0 ? g_clock_mhz : 16);      /* P180: 以前は *5。16MHz -> 16 */
+    clk_total = (int32_t)(((int64_t)clk_total * clkdiv) / 10);  /* CPU 予算 = base*(clock/10) */
 
     /* P641: clk_total と対になる走査線数。CRTC_GetFrameClocks() は、ゲストが
      * CRTC レジスタを順に書き換えている途中(組合せが一時的に不正)でも直前の
@@ -3655,7 +3655,7 @@ void mx68k_run_frame(void) {
         }
     }
 
-    // P22.5-DMA: Dump ch0 state before H-line loop (frames 0-20 only)
+    // P22.5-DMA: H ラインループ前に ch0 の状態をダンプ(フレーム 0-20 のみ)
     if (frame_num >= 0 && frame_num <= 20) {
         debug_log("[P22.5-DMA] pre-CPU frame=%d ch0: CSR=%02x CCR=%02x OCR=%02x SCR=%02x MAR=%06x MTC=%04x DAR=%06x\n",
                   frame_num, DMA[0].CSR, DMA[0].CCR, DMA[0].OCR, DMA[0].SCR,
@@ -3680,9 +3680,9 @@ void mx68k_run_frame(void) {
 #ifndef CLOCK_SLICE
 #define CLOCK_SLICE 200
 #endif
-    /* P149: MPX ClkUsed remainder accumulator (winx68k.cpp global). static so the
-     * ≤clkdiv remainder carries across chunks, scanlines AND frames — byte-identical
-     * to MPX. Do NOT reset per frame. Single-threaded (CVDisplayLink frame loop). */
+    /* P149: MPX の ClkUsed 余り累積器(winx68k.cpp のグローバル)。static なので
+     * ≤clkdiv の余りが chunk・走査線・フレームをまたいで持ち越される — MPX と byte-identical。
+     * フレーム毎にリセットしないこと。シングルスレッド(CVDisplayLink のフレームループ)。 */
     static int32_t ClkUsed = 0;
 
     /* P37-DIAG: フレーム先頭SSP記録 */
@@ -3695,25 +3695,25 @@ void mx68k_run_frame(void) {
                   frame_num, s_p37_frame_start_ssp);
     }
 
-    /* P153: frame-local CPU budget. Named frame_icount (NOT ICount) to avoid
-     * shadowing the Core global int32_t ICount (m68000_bridge.c:72), which
-     * Core mfp.c:175 reads as hpos = ICount % HSYNC_CLK for the MFP GPIP H-SYNC
-     * status bit.
-     * P158: MX now mirrors that global (ICount = clk_total at frame start,
-     * ICount -= n per chunk, below) so mfp.c's hpos sweeps like MPX and the
-     * MFP GPIP H-SYNC bit toggles — fixing the H-SYNC wait-loop spin. */
-    /* P153: MPX WinX68k_Exec whole-frame seed (winx68k.cpp:386-410).
-     * frame_icount is a frame-LOCAL budget (MX carries no cross-frame ICount; each
-     * frame runs exactly clk_total, as the old clk_per_line*VLINE+remainder did).
-     * Invariant across the loop: clk_count + frame_icount == clk_total. */
-    int32_t frame_icount = clk_total;       /* MPX: ICount += clk_total (fresh each frame) */
-    ICount = clk_total;                     /* P158: mirror Core global ICount (mfp.c H-SYNC hpos = ICount % HSYNC_CLK) */
-    int32_t clk_count = 0;                  /* MPX: clk_count = -ICount_old -> 0 here      */
-    int32_t clk_next  = clk_total / vline_total_val;   /* first line boundary (vl==0)      */
+    /* P153: フレームローカルな CPU 予算。frame_icount と命名した(ICount ではない)のは、
+     * Core のグローバル int32_t ICount(m68000_bridge.c:72)を隠さないため。これは
+     * Core mfp.c:175 が MFP GPIP の H-SYNC ステータスビット用に hpos = ICount % HSYNC_CLK
+     * として読む。
+     * P158: MX はそのグローバルをミラーするようになった(フレーム先頭で ICount = clk_total、
+     * 下記の chunk ごとに ICount -= n)ので、mfp.c の hpos が MPX と同様に掃引され
+     * MFP GPIP の H-SYNC ビットがトグルする — H-SYNC 待ちループの空回りを修正。 */
+    /* P153: MPX WinX68k_Exec のフレーム全体シード(winx68k.cpp:386-410)。
+     * frame_icount はフレームローカルな予算(MX はフレームをまたぐ ICount を持ち越さず、
+     * 旧 clk_per_line*VLINE+remainder と同じく各フレームちょうど clk_total 分走る)。
+     * ループ全体を通じた不変条件: clk_count + frame_icount == clk_total。 */
+    int32_t frame_icount = clk_total;       /* MPX: ICount += clk_total(毎フレーム新規) */
+    ICount = clk_total;                     /* P158: Core のグローバル ICount をミラー(mfp.c H-SYNC hpos = ICount % HSYNC_CLK) */
+    int32_t clk_count = 0;                  /* MPX: clk_count = -ICount_old -> ここでは 0 */
+    int32_t clk_next  = clk_total / vline_total_val;   /* 最初の走査線境界(vl==0) */
     int32_t clk_line_start = 0;   /* P657: 現在走査線の開始位置(スケール済)。line_len の算出に使う */
     int     hsync     = 1;
     int     vl        = 0;
-    int32_t line_usedclk = 0;               /* MPX clk_line: per-line normalized clock     */
+    int32_t line_usedclk = 0;               /* MPX clk_line: 走査線毎の正規化クロック */
 
 #if P385_ENABLE
     /* P385: 走査線チャンク不変条件「n==0 のチャンクは発生しない」の常設監視。
@@ -3818,12 +3818,12 @@ void mx68k_run_frame(void) {
         if (n == 0) { p385_zero++; if (p385_first_zero_vl < 0) p385_first_zero_vl = vl; }
 #endif
 
-        /* ===== LINE-START (hsync) block — 1 回/ライン ===== */
+        /* ===== LINE-START(hsync)ブロック — 1 回/ライン ===== */
         if (hsync) {
             hsync = 0;
             line_usedclk = 0;
 
-            // HSYNC 割り込み（毎ライン、upstream: MFP_Int(0) at hsync)
+            // HSYNC 割り込み（毎ライン、upstream: hsync 時に MFP_Int(0))
             mx68k_diag_mfp_int(0, "hsync"); /* P47-D-DIAG-G */
 
 #if P384_ENABLE
@@ -3899,7 +3899,7 @@ void mx68k_run_frame(void) {
             if (MFP[MFP_AER] & 0x10) {
                 if (vl == (int)CRTC_VSTART) {
                     /* P40-FIX: P28-FIX の SR IPL 操作を削除。CPU コア (c68k) が CHECK_INT で IRQ マスクを自動処理するため、外部からの SR 操作は不要かつ有害。SR IPL=6 でハンドラ実行中に次の IRQ6 が遮断されるのは正しい動作。 */
-                    /* P33-DIAG: VSYNC fire state (each branch counts independently, up to 5 each = max 15 total) */
+                    /* P33-DIAG: VSYNC 発火時の状態(各分岐が独立に数え、各 5 回まで = 合計最大 15 回) */
                     {
                         static int s_p33_vsync_fire_count = 0;
                         if (s_p33_vsync_fire_count < 5) {
@@ -3921,7 +3921,7 @@ void mx68k_run_frame(void) {
                 if ((int)CRTC_VEND >= (int)vline_total_val) {
                     if (vl == (int)CRTC_VEND - (int)vline_total_val) {
                         /* P40-FIX: P28-FIX の SR IPL 操作を削除。CPU コア (c68k) が CHECK_INT で IRQ マスクを自動処理するため、外部からの SR 操作は不要かつ有害。SR IPL=6 でハンドラ実行中に次の IRQ6 が遮断されるのは正しい動作。 */
-                        /* P33-DIAG: VSYNC fire state (each branch counts independently, up to 5 each = max 15 total) */
+                        /* P33-DIAG: VSYNC 発火時の状態(各分岐が独立に数え、各 5 回まで = 合計最大 15 回) */
                         {
                             static int s_p33_vsync_fire_count = 0;
                             if (s_p33_vsync_fire_count < 5) {
@@ -3942,7 +3942,7 @@ void mx68k_run_frame(void) {
                 } else {
                     if (vl == (int)vline_total_val - 1) {
                         /* P40-FIX: P28-FIX の SR IPL 操作を削除。CPU コア (c68k) が CHECK_INT で IRQ マスクを自動処理するため、外部からの SR 操作は不要かつ有害。SR IPL=6 でハンドラ実行中に次の IRQ6 が遮断されるのは正しい動作。 */
-                        /* P33-DIAG: VSYNC fire state (each branch counts independently, up to 5 each = max 15 total) */
+                        /* P33-DIAG: VSYNC 発火時の状態(各分岐が独立に数え、各 5 回まで = 合計最大 15 回) */
                         {
                             static int s_p33_vsync_fire_count = 0;
                             if (s_p33_vsync_fire_count < 5) {
@@ -3967,14 +3967,14 @@ void mx68k_run_frame(void) {
 #endif
         }
 
-        /* ===== per-CHUNK: CPU + timers — 毎イテレーション（MPX 474-497） =====
-         * P149/P153: CLOCK_SLICE ≤1500 sub-line chunk mirroring MPX WinX68k_Exec
-         * inner do{} (winx68k.cpp:412-494). After Edit A's clkdiv scaling the CPU
-         * budget can exceed CLOCK_SLICE, so the whole frame runs in ≤1500-cyc chunks
-         * and MFP/RTC receive the clkdiv-normalized clock per chunk. This keeps
-         * IRQ/timer granularity MPX-equivalent (c68k checks IRQs only at execute
-         * call boundaries). */
-        int32_t ex = m68000_execute(n);     /* executed cycles: bookkeeping only */
+        /* ===== per-CHUNK: CPU + タイマー — 毎イテレーション（MPX 474-497） =====
+         * P149/P153: MPX WinX68k_Exec の内側 do{}(winx68k.cpp:412-494)を模した
+         * CLOCK_SLICE ≤1500 のライン内チャンク。Edit A の clkdiv スケーリング後は CPU
+         * 予算が CLOCK_SLICE を超え得るため、フレーム全体を ≤1500-cyc チャンクで回し、
+         * MFP/RTC にはチャンクごとに clkdiv 正規化済みクロックを渡す。これにより
+         * IRQ/タイマーの粒度が MPX と同等になる(c68k は execute 呼出しの境界でのみ
+         * IRQ を確認するため)。 */
+        int32_t ex = m68000_execute(n);     /* 実行サイクル数: 記録用のみ */
         total_executed += ex;
         /* P657: 水平フロントポーチ到達 → ラスタコピーの唯一の実行契機。
          * PR#2 は m(= n - m68000_ICountBk)で判定するが、MX は m ≡ n
@@ -4006,18 +4006,18 @@ void mx68k_run_frame(void) {
             CRTC_HorizontalFrontPorch();
         }
 #endif
-        /* P152: charge the timer by the REQUESTED slice n, NOT executed ex.
-         * MPX WinX68k_Exec feeds MFP/RTC m = n - m68000_ICountBk, and
-         * m68000_ICountBk ≡ 0 (init 0; its only writes are in #if 0 dead code),
-         * so m = n. At interrupt/chunk boundaries c68k under-runs the slice
-         * (ex < n); charging ex under-fed Timer-C ~3.3% and fired the FF0B48
-         * calibration late (icount 308493 vs MPX 308239). Charge n and drain
-         * frame_icount by n to match MPX exactly (winx68k.cpp:484-490). */
+        /* P152: タイマーには実行済みの ex ではなく、要求スライス n を加算する。
+         * MPX WinX68k_Exec は MFP/RTC に m = n - m68000_ICountBk を渡すが、
+         * m68000_ICountBk ≡ 0(初期値0、書込みは #if 0 のデッドコード内のみ)
+         * なので m = n。割込み/チャンク境界で c68k はスライスを使い切らない
+         * (ex < n)ため、ex を加算すると Timer-C が約3.3%不足し、FF0B48 の
+         * キャリブレーションが遅れて発火していた(icount 308493 vs MPX 308239)。n を加算し、
+         * frame_icount も n で減らして MPX と完全一致させる(winx68k.cpp:484-490)。 */
         ClkUsed += n * 10;
         int32_t usedclk = ClkUsed / clkdiv;
         ClkUsed -= usedclk * clkdiv;
         line_usedclk += usedclk;
-        MFP_Timer(usedclk);   /* per-chunk feed → IRQ/timer granularity ≤1500 cyc */
+        MFP_Timer(usedclk);   /* per-chunk 供給 → IRQ/タイマー粒度 ≤1500 cyc */
 #if P404_ENABLE
         /* P404-TCWATCH: D-23調査。MFP Timer C の「分母」(= MFP_Timer() 呼出し回数)と
          * 制御レジスタ生値を 30 フレーム毎に無条件ダンプする。Timer C 沈黙時に
@@ -4060,9 +4060,9 @@ void mx68k_run_frame(void) {
             s_p404_tcdcr_active = now_active;
         }
 #endif
-        RTC_Timer(usedclk);   /* RP5C15 1Hz/16Hz alarm, right after MFP (winx68k.cpp:493-494) */
+        RTC_Timer(usedclk);   /* RP5C15 1Hz/16Hz アラーム、MFP の直後(winx68k.cpp:493-494) */
         frame_icount -= n;    /* MPX: ICount -= m, m == n */
-        ICount -= n;          /* P158: mirror Core global ICount so mfp.c H-SYNC bit sweeps (MPX winx68k.cpp:488) */
+        ICount -= n;          /* P158: mfp.c の H-SYNC ビット掃引のため Core グローバル ICount にも反映(MPX winx68k.cpp:488) */
         clk_count    += n;
 
         /* ===== LINE-END block — 1 回/ライン（MPX 499-537） ===== */
@@ -4083,7 +4083,7 @@ void mx68k_run_frame(void) {
                               frame_num, vl, _p37_ssp, _p37_delta,
                               _p37_pc, MFP[MFP_IERA], MFP[MFP_IPRB], MFP[MFP_ISRB]);
                     if (MEM && _p37_ssp >= 0x400 && _p37_ssp < (uint32_t)(12*1024*1024 - 6)) {
-                        /* P47-A-DIAG-1: byte-order bug fixed via p47_read_stack_frame() */
+                        /* P47-A-DIAG-1: バイト順バグは p47_read_stack_frame() で修正済み */
                         uint16_t _p37_stk_sr;
                         uint32_t _p37_stk_pc;
                         p47_read_stack_frame(_p37_ssp, &_p37_stk_sr, &_p37_stk_pc);
@@ -4094,7 +4094,7 @@ void mx68k_run_frame(void) {
                 }
             }
 
-            /* P33-DIAG: frame=0 BIOS initialization trace (every 200 H-lines) */
+            /* P33-DIAG: frame=0 の BIOS 初期化トレース(200 Hライン毎) */
             {
                 static uint32_t s_p33_bios_cnt = 0;
                 if (frame_num == 0) {
@@ -4111,18 +4111,18 @@ void mx68k_run_frame(void) {
                 }
             }
 
-            /* P149: MFP タイマー feed relocated into the CLOCK_SLICE chunk loop above
-             * (per-chunk MFP_Timer(usedclk)). The P117_EXEC_CYCLE_FEED branches are
-             * retired — the normalized per-chunk feed supersedes both. The per-line
-             * poll/sampler snapshots below stay (read-only, sampled once per line). */
+            /* P149: MFP タイマーへの供給は上の CLOCK_SLICE チャンクループへ移設
+             * (per-chunk の MFP_Timer(usedclk))。P117_EXEC_CYCLE_FEED 分岐は
+             * 廃止 — 正規化済みの per-chunk 供給が両方を置き換える。下のライン単位の
+             * poll/サンプラーのスナップショットは残す(read-only、1ラインに1回採取)。 */
 #if P136_ENABLE
             p136_poll(P136_MFP_TIMER, vl);
 #endif
 
 #if P82A_ENABLE
-            /* P82-A-3: detect Timer-C IPRB[bit5=0x20] rising edge.
-             * MFP_Timer fires MFP_Int(10) which sets IPRB |= 0x20.
-             * We sample IPRB before and after MFP_Timer to catch the moment. */
+            /* P82-A-3: Timer-C の IPRB[bit5=0x20] の立ち上がりエッジを検出する。
+             * MFP_Timer は MFP_Int(10) を発火し、それが IPRB |= 0x20 を立てる。
+             * MFP_Timer の前後で IPRB を採取してその瞬間を捉える。 */
             {
                 static uint8_t s_p82a3_iprb_prev = 0;
                 static int s_p82a3_count = 0;
@@ -4149,9 +4149,9 @@ void mx68k_run_frame(void) {
             }
 #endif /* P82A_ENABLE */
 
-            /* P47-C-3 / P149: RTC_Timer (RP5C15 1Hz/16Hz alarm) feed relocated into the
-             * CLOCK_SLICE chunk loop above (per-chunk RTC_Timer(usedclk)), right after
-             * MFP_Timer as MPX does (winx68k.cpp:493-494). P117 branches retired. */
+            /* P47-C-3 / P149: RTC_Timer(RP5C15 1Hz/16Hz アラーム)への供給は上の
+             * CLOCK_SLICE チャンクループへ移設(per-chunk の RTC_Timer(usedclk))、MPX と同様に
+             * MFP_Timer の直後(winx68k.cpp:493-494)。P117 分岐は廃止。 */
 #if P136_ENABLE
             p136_poll(P136_RTC_TIMER, vl);
 #endif
@@ -4170,9 +4170,9 @@ void mx68k_run_frame(void) {
 
             // DMA 実行 (upstream: DMA_Exec(0)/1/2 のみ、3 は存在しない)
             // P153 DELTA 2: DMA は per-line 据置（per-chunk へ移さない — Timer-C fix を隔離）
-            /* P164: capture DMA ch0 full register block around DMA_Exec(0) to see why
-             * an armed channel (MTC!=0) with FDC data ready does not drain. Read-only,
-             * bounded, stall-window gated. Call count/order unchanged (single call). */
+            /* P164: DMA_Exec(0) の前後で DMA ch0 の全レジスタブロックを採取し、
+             * arm 済みチャンネル(MTC!=0)が FDC データ準備済みなのに消化されない理由を調べる。read-only、
+             * 件数上限付き、ストール区間限定。呼出し回数/順序は不変(単一呼出し)。 */
             {
                 static int s_p164 = 0;
                 if (frame_num >= 55 && frame_num <= 80 && DMA[0].MTC != 0 && s_p164 < 24) {
@@ -4192,7 +4192,7 @@ void mx68k_run_frame(void) {
                     uint32_t p367_dst0_a = (DMA[0].OCR & 0x80) ? DMA[0].MAR : DMA[0].DAR;
                     uint16_t p367_mtc0_a = DMA[0].MTC;
 #endif
-                    DMA_Exec(0);   /* the real call, now instrumented */
+                    DMA_Exec(0);   /* 本来の呼出し(計装付き) */
 #if P367_ENABLE
                     {
                         uint32_t p367_dst1_a = (DMA[0].OCR & 0x80) ? DMA[0].MAR : DMA[0].DAR;
@@ -4204,8 +4204,8 @@ void mx68k_run_frame(void) {
                               frame_num, (unsigned)csr_before, (unsigned)DMA[0].CSR,
                               (unsigned)mtc_before, (unsigned)DMA[0].MTC,
                               (int)(mtc_before - DMA[0].MTC));
-                    /* P165: sample the bytes the DMA just wrote to memory, to see if real
-                     * disk content flows (varies per block) or repeats/garbage. */
+                    /* P165: DMA が直前にメモリへ書いたバイトを採取し、実ディスク内容が
+                     * 流れているか(ブロック毎に変化)、繰り返し/不正値かを確認する。 */
                     {
                         uint32_t mar = DMA[0].MAR & 0x00FFFFFF;
                         uint32_t base = (mar >= 8) ? (mar - 8) : 0;
@@ -4232,8 +4232,8 @@ void mx68k_run_frame(void) {
 #endif
                 }
             }
-            /* P181: DMAC ch0 is FDD-dedicated; ACT bit set = real disk R/W in progress
-             * (seek/select/poll leave it clear). Light the access lamp only on actual transfer. */
+            /* P181: DMAC ch0 は FDD 専用。ACT ビットが立つ = 実ディスク R/W 中
+             * (seek/select/poll では立たない)。実転送時のみアクセスランプを点灯する。 */
             if (DMA[0].CSR & 0x08u) mx68k_fdd_note_rw();
 #if P136_ENABLE
             p136_poll(P136_DMA0, vl);
@@ -4270,8 +4270,8 @@ void mx68k_run_frame(void) {
 #endif
 
             // OPM / ADPCM タイマー (毎ライン)
-            // P149: feed the per-line clkdiv-normalized clock (MPX clk_line = line_usedclk),
-            // NOT raw sc — after Edit A's clkdiv scaling, raw sc would run FM/ADPCM too fast.
+            // P149: ライン単位の clkdiv 正規化済みクロック(MPX clk_line = line_usedclk)を供給する。
+            // 生の sc ではない — Edit A の clkdiv スケーリング後は、生の sc だと FM/ADPCM が速く回りすぎる。
             OPM_Timer((uint32_t)line_usedclk);
             ADPCM_PreUpdate((uint32_t)line_usedclk);
             /* P488: MIDI ボードのタイマー更新 + 送出キューのフラッシュ。
@@ -4430,10 +4430,10 @@ void mx68k_run_frame(void) {
     int32_t executed = total_executed;
 
 #if P63_PROBE_ENABLE
-    /* Probe-C: per-frame FDD_IsReady(0) state log.
-     * FDD_IsReady returns 1 when SetDelay[0]==0 (disk fully settled).
-     * Expected TRUE by frame ~3 after disk insert. If still 0 at frame 10+,
-     * FDD_SetFDInt drain is not working (H2 confirmed). */
+    /* Probe-C: フレーム毎の FDD_IsReady(0) 状態ログ。
+     * FDD_IsReady は SetDelay[0]==0(ディスクが完全に安定)のとき 1 を返す。
+     * ディスク挿入後フレーム ~3 までに TRUE になるはず。フレーム 10 以降もまだ 0 なら、
+     * FDD_SetFDInt の drain が機能していない(H2 確定)。 */
     {
         static int s_p63_fddready_frames  = 0;
         static int s_p63_fddready_was_true = 0;
@@ -4448,9 +4448,9 @@ void mx68k_run_frame(void) {
     }
 #endif /* P63_PROBE_ENABLE */
 #if P64_PROBE_ENABLE
-    /* Probe-B: snapshot the TRAP#15 vector at the very first frame to
-     * establish a baseline. Compare with Probe-A's value at the time of
-     * the error to see if the vector was updated during boot. */
+    /* Probe-B: 最初のフレームで TRAP#15 ベクタのスナップショットを取り、
+     * 基準値とする。エラー発生時点の Probe-A の値と比較し、起動中に
+     * ベクタが更新されたかを確認する。 */
     {
         static int s_p64_snap_done = 0;
         if (!s_p64_snap_done) {
@@ -4477,16 +4477,16 @@ void mx68k_run_frame(void) {
     }
 #endif /* P65_PROBE_ENABLE */
 
-    // P22.5-DMA: Dump ch0 state after H-line loop (frames 0-20 only)
+    // P22.5-DMA: Hラインループ後の ch0 状態をダンプ(フレーム 0-20 のみ)
     if (frame_num >= 0 && frame_num <= 20) {
         debug_log("[P22.5-DMA] post-CPU frame=%d ch0: CSR=%02x CCR=%02x OCR=%02x SCR=%02x MAR=%06x MTC=%04x DAR=%06x\n",
                   frame_num, DMA[0].CSR, DMA[0].CCR, DMA[0].OCR, DMA[0].SCR,
                   DMA[0].MAR, DMA[0].MTC, DMA[0].DAR);
     }
 
-    /* P48-D: One-shot forensic dump of low-RAM stall region + SSP top at
-     * frame=50. Zero-cost when not triggered. Guarded so the SSP dump skips
-     * if SSP is in mapped I/O / >=0xC00000 (C-3: prevent OOB host read). */
+    /* P48-D: frame=50 で低位 RAM のストール領域 + SSP 先頭を one-shot で
+     * 調査用ダンプする。発火しなければコストゼロ。SSP がマップ済み I/O / >=0xC00000 に
+     * ある場合は SSP ダンプを飛ばすようガード済み(C-3: ホスト側の範囲外読出しを防止)。 */
     {
         static int s_p48d_dumped = 0;
         if (frame_num == 50 && !s_p48d_dumped && MEM) {
@@ -4502,7 +4502,7 @@ void mx68k_run_frame(void) {
             }
             uint32_t ssp = m68000_get_reg(M68K_MSP) & 0x00FFFFFFu;
             if (ssp >= 0xC00000u) {
-                /* C-3: SSP outside 12MB RAM range — host MEM[] read would OOB. */
+                /* C-3: SSP が 12MB RAM 範囲外 — ホストの MEM[] 読出しが範囲外になる。 */
                 debug_log("[P48-D-DUMP] SSP=0x%06x outside RAM range, stack dump skipped\n", ssp);
             } else if (ssp + 32 > 12u * 1024u * 1024u) {
                 debug_log("[P48-D-DUMP] SSP=0x%06x too close to RAM end, stack dump skipped\n", ssp);
@@ -4539,7 +4539,7 @@ void mx68k_run_frame(void) {
                       frame_num, rdy0, ioc_stat);
         }
 
-        /* FDD insert/eject interrupt timing (must be called every frame) */
+        /* FDD 挿入/排出の割込みタイミング(毎フレーム呼ぶ必要あり) */
         FDD_SetFDInt();
 #if P136_ENABLE
         p136_poll(P136_FDD_SETFDINT, -1);   /* per-frame (line loop 外): sentinel line=-1 */
@@ -4612,15 +4612,15 @@ void mx68k_run_frame(void) {
 #endif /* P514_ENABLE */
     Pal_TrackContrast();
 
-    // ---- audio generation ----
-    // Generate one frame worth of samples (44100/60 = 735)
+    // ---- 音声生成 ----
+    // 1フレーム分のサンプルを生成する(44100/60 = 735)
     // OPM_Timer / ADPCM_PreUpdate は Hラインループ内で呼び済み – ここでは audio 出力のみ
-    /* P211b: couple audio generation to the guest VSYNC rate. P211 paces run_frame()
-     * to 55.46/61.46Hz; with the old fixed /60 (735/frame) that under-supplied the ring
-     * (55.46*735=40763 < 44100) -> ADPCM dropouts. round(44100/vsync) keeps
-     * (paced_freq * audio_frames) == AUDIO_SAMPLE_RATE regardless of the paced rate.
-     * NOTE: uses the SAME mx68k_get_vsync_hz() as the Swift run_frame accumulator, so
-     * the two always agree (their product is 44100/sec). */
+    /* P211b: 音声生成をゲストの VSYNC レートに連動させる。P211 は run_frame() を
+     * 55.46/61.46Hz でペーシングするが、旧来の固定 /60(735/フレーム)ではリングへの供給が
+     * 不足し(55.46*735=40763 < 44100)、ADPCM の音切れが起きていた。round(44100/vsync) により
+     * ペーシングレートによらず (paced_freq * audio_frames) == AUDIO_SAMPLE_RATE を保つ。
+     * 注意: Swift 側の run_frame アキュムレータと「同じ」mx68k_get_vsync_hz() を使うので、
+     * 両者は常に一致する(積は 44100/秒)。 */
     /* P465-C (D-6): round(44100/vhz) は毎フレーム独立に丸めるため端数が毎回捨てられ、
      * 15kHzモード(55.46Hz)では約9.4フレーム/秒の慢性的な生成不足(31kHzモードでは
      * 逆方向の過剰)が蓄積し、リングバッファのアンダーラン=ゼロ埋めスプライスの
@@ -4636,14 +4636,14 @@ void mx68k_run_frame(void) {
     s_p465_audio_frame_accum += (double)g_audio_sample_rate_hz / vhz;
     int audio_frames = (int)s_p465_audio_frame_accum;
     s_p465_audio_frame_accum -= (double)audio_frames;
-    if (audio_frames > AUDIO_FRAMES_MAX) audio_frames = AUDIO_FRAMES_MAX;  /* buffer guard */
+    if (audio_frames > AUDIO_FRAMES_MAX) audio_frames = AUDIO_FRAMES_MAX;  /* バッファ保護 */
     if (audio_frames < 1) audio_frames = 1;
     int16_t tmp_opm[AUDIO_FRAMES_MAX * 2];
     int16_t tmp_adpcm[AUDIO_FRAMES_MAX * 2];
     int16_t tmp_mix[AUDIO_FRAMES_MAX * 2];
 
     memset(tmp_opm, 0, sizeof(tmp_opm));
-    // OPM_Update writes interleaved stereo L/R into buffer[0..length*2-1]
+    // OPM_Update はインターリーブされたステレオ L/R を buffer[0..length*2-1] へ書き込む
     OPM_Update(tmp_opm, audio_frames, tmp_opm, tmp_opm + audio_frames * 2);
 
     memset(tmp_adpcm, 0, sizeof(tmp_adpcm));
@@ -4969,9 +4969,9 @@ void mx68k_run_frame(void) {
     p510_ext_scsi_dump();
     frame_num++;
 #if P82XG_ENABLE
-    /* P82-X-G: FDC/IOC register-access trace VERDICT one-shot. Emitted once
-     * when frame>=95 is first reached (the certain post-window point; the
-     * observation window is frames 80-90). frame 87 で boot が停止しても CPU は
+    /* P82-X-G: FDC/IOC レジスタアクセストレースの VERDICT one-shot。frame>=95 に
+     * 初めて到達した時点で1回だけ出力する(観測窓 frames 80-90 の後で確実に到達する
+     * 時点)。frame 87 で boot が停止しても CPU は
      * スピンループを回し続け frame_num は進むため frame 95 は確実に到達する。
      * p82xg_emit_verdict() 内部に s_p82xg_verdict_done ガードがあるので、
      * 多重呼び出しになっても 1 回だけダンプする (read-only)。 */
@@ -4980,9 +4980,9 @@ void mx68k_run_frame(void) {
     }
 #endif
 #if P82XH_ENABLE
-    /* P82-X-H: FDC ISR (vec 0x60) execution-path trace VERDICT one-shot.
-     * Emitted once when frame>=96 is first reached (the certain post-window
-     * point; the observation window is frames 80-95). frame 87 で boot が
+    /* P82-X-H: FDC ISR (vec 0x60) 実行経路トレースの VERDICT one-shot。
+     * frame>=96 に初めて到達した時点で1回だけ出力する(観測窓 frames 80-95 の後で
+     * 確実に到達する時点)。frame 87 で boot が
      * 停止しても CPU はスピンループを回し続け frame_num は進むため frame 96
      * は確実に到達する。p82xh_emit_verdict() 内部に s_p82xh_verdict_done
      * ガードがあるので多重呼び出しになっても 1 回だけダンプする (read-only)。 */
@@ -5002,7 +5002,7 @@ void mx68k_run_frame(void) {
     }
 #endif
 #if P82XL_ENABLE
-    /* P82-X-L: Recalibrate->ReadData transition VERDICT one-shot。frame>=96
+    /* P82-X-L: Recalibrate->ReadData 遷移の VERDICT one-shot。frame>=96
      * 到達で 1 回だけ出力（観測窓は frames 80-95）。boot が停止しても CPU は
      * スピンループを回し続け frame_num は進むため frame 96 は確実に到達する。
      * p82xl_emit_verdict() 内部に p82xl_verdict_done ガードがあるので多重
@@ -5012,7 +5012,7 @@ void mx68k_run_frame(void) {
     }
 #endif
 #if P82XM_ENABLE
-    /* P82-X-M: boot-sector DMA delivery / IPLROM bootability-reject VERDICT
+    /* P82-X-M: ブートセクタの DMA 配送 / IPLROM によるブート不可判定の VERDICT
      * one-shot。frame>=96 到達で 1 回だけ出力（観測窓は frames 80-95）。boot が
      * 停止しても CPU はスピンループを回し続け frame_num は進むため frame 96 は
      * 確実に到達する。p82xm_emit_verdict() 内部に p82xm_g_verdict_done ガード
@@ -5024,73 +5024,73 @@ void mx68k_run_frame(void) {
     }
 #endif
 #if P82XN_ENABLE
-    /* P82-X-N: per-frame CP-A snapshot scheduler — slot 0 at frame 5 (pre-DMA
-     * failsafe) and slots 1/2/3 at STR=1 + 2/+4/+6 frames respectively. The
-     * STR observer lives in trace_Memory_WriteB/W; p82xn_cpa_tick reads
-     * p82xn_str_seen_frame and acts. Idempotent (slot bit-mask guards). */
+    /* P82-X-N: フレーム毎の CP-A スナップショットスケジューラ — slot 0 は frame 5(DMA 前の
+     * フェイルセーフ)、slot 1/2/3 はそれぞれ STR=1 + 2/+4/+6 フレーム。
+     * STR の監視は trace_Memory_WriteB/W にあり、p82xn_cpa_tick は
+     * p82xn_str_seen_frame を読んで動作する。冪等(slot ビットマスクでガード)。 */
     p82xn_cpa_tick();
-    /* P82-X-N: VERDICT one-shot at frame>=96 — same gating pattern as
-     * P82-X-K/-L/-M. p82xn_verdict_done (TU-local to m68000_bridge.c) keeps
-     * the dump to a single emit even on repeated calls. */
+    /* P82-X-N: frame>=96 での VERDICT one-shot — P82-X-K/-L/-M と同じゲート
+     * パターン。p82xn_verdict_done(m68000_bridge.c の TU-local)により、繰り返し
+     * 呼ばれてもダンプは1回だけに保たれる。 */
     if (frame_num >= 96) {
         p82xn_emit_verdict();
     }
 #endif
 #if P82XO_ENABLE
-    /* P82-X-O: per-frame CP-O-3 anchor driver — anchor 0 at frame 5
-     * (pre-override), anchor 1 at frame 30 (override-stable). anchor 2 is
-     * taken from p82xo_on_vector_fetch synchronously with CP-O-1 latch. */
+    /* P82-X-O: フレーム毎の CP-O-3 アンカー駆動 — anchor 0 は frame 5
+     * (override 前)、anchor 1 は frame 30(override 安定後)。anchor 2 は
+     * p82xo_on_vector_fetch から CP-O-1 の latch と同期して取得する。 */
     p82xo_tick();
-    /* P82-X-O: VERDICT one-shot at frame>=96 — same gating idiom as P82XN.
-     * p82xo_verdict_done (TU-local to m68000_bridge.c) keeps the dump to a
-     * single emit even on repeated calls. */
+    /* P82-X-O: frame>=96 での VERDICT one-shot — P82XN と同じゲートの書き方。
+     * p82xo_verdict_done(m68000_bridge.c の TU-local)により、繰り返し呼ばれても
+     * ダンプは1回だけに保たれる。 */
     if (frame_num >= 96) {
         p82xo_emit_verdict();
     }
 #endif
 #if P82XP_ENABLE
-    /* P82-X-P: per-frame CP-P-D D-2 BusErrHandling sticky-edge poll — catches
-     * BusError events that miss the trace callbacks (DMAC/SCSI/MIDI 等 trace
-     * 非経由経路). VERDICT one-shot at frame>=96 — same gating idiom as P82XO.
-     * p82xp_verdict_done (TU-local to m68000_bridge.c) keeps the dump to a
-     * single emit even on repeated calls. */
+    /* P82-X-P: フレーム毎の CP-P-D D-2 BusErrHandling sticky-edge ポーリング — trace
+     * コールバックで捕捉できない BusError イベント(DMAC/SCSI/MIDI 等 trace
+     * 非経由経路)を拾う。frame>=96 での VERDICT one-shot — P82XO と同じゲートの書き方。
+     * p82xp_verdict_done(m68000_bridge.c の TU-local)により、繰り返し呼ばれても
+     * ダンプは1回だけに保たれる。 */
     p82xp_tick();
     if (frame_num >= 96) {
         p82xp_emit_verdict();
     }
 #endif
-    /* P82-X-Q verdict (Plan §4 / §6). One-shot at frame >= 96 from the
-     * dump-side. Internally guarded so multiple calls are no-ops. */
+    /* P82-X-Q の verdict(Plan §4 / §6)。ダンプ側から frame >= 96 で one-shot。
+     * 内部でガードされているため、複数回呼んでも no-op。 */
     if (frame_num >= 96) {
         p82xq_emit_verdict();
     }
-    /* P82-X-R (Round 5) per-frame tick (CP-R-4 DMAC NIV/EIV snap at
-     * anchor frame=90 + CP-R-5 BusErr extern sticky-edge per-frame
-     * poll) and one-shot verdict at frame≥96. Internally guarded so
-     * extra calls are no-ops. Read-only — Plan §3 / §5 / §6. */
+    /* P82-X-R(Round 5)のフレーム毎 tick(anchor frame=90 での CP-R-4 DMAC NIV/EIV
+     * スナップ + CP-R-5 BusErr extern sticky-edge のフレーム毎
+     * ポーリング)と frame≥96 での one-shot verdict。内部でガードされているため
+     * 余分な呼出しは no-op。read-only — Plan §3 / §5 / §6。 */
     p82xr_tick();
     if (frame_num >= 96) {
         p82xr_emit_verdict((uint32_t)frame_num);
     }
-    /* P82-X-T per-frame tick — drives CP-T-2 (DMA-CCR-GATE edge),
-     * CP-T-3 (IOC-INTSTAT-GATE bit7 rising-edge), CP-T-5 (FDC trajectory
-     * 1 row/frame in window 80-95), and CP-T-6 (NIV/EIV stage A frame 5 +
-     * stage B frame 90). All emit one-shot or capped — read-only.
-     * Plan: /tmp/mx68k_P82-X-T_plan.md §3. */
+    /* P82-X-T のフレーム毎 tick — CP-T-2(DMA-CCR-GATE エッジ)、
+     * CP-T-3(IOC-INTSTAT-GATE bit7 立ち上がりエッジ)、CP-T-5(窓 80-95 での FDC 軌跡
+     * 1行/フレーム)、CP-T-6(NIV/EIV stage A frame 5 +
+     * stage B frame 90)を駆動する。いずれも one-shot か件数上限付き — read-only。
+     * Plan: /tmp/mx68k_P82-X-T_plan.md §3。 */
     p82xt_tick();
-    /* P82-X-U per-frame tick — drives CP-U-1 (FDC MSR/bufready sampler,
-     * window 80-95), CP-U-3 (PC band classify, window 60-95), and CP-U-5
-     * ($C90 result-buffer one-shot at frame=90). CP-U-2/U-4 live in the
-     * per-chunk hook (m68000_bridge.c). CP-U-6 lives in trace_Memory_WriteB.
-     * All emit one-shot or capped — read-only.
-     * Plan: /tmp/mx68k_P82-X-U_plan.md §3. */
+    /* P82-X-U のフレーム毎 tick — CP-U-1(FDC MSR/bufready サンプラー、
+     * 窓 80-95)、CP-U-3(PC 帯域分類、窓 60-95)、CP-U-5
+     * (frame=90 での $C90 結果バッファ one-shot)を駆動する。CP-U-2/U-4 は
+     * per-chunk フック(m68000_bridge.c)にある。CP-U-6 は trace_Memory_WriteB にある。
+     * いずれも one-shot か件数上限付き — read-only。
+     * Plan: /tmp/mx68k_P82-X-U_plan.md §3。 */
     p82xu_tick();
-    /* P82-X-V per-frame tick — drives CP-V-2 (DMAC NIV/EIV vector-table
-     * snap at frame=5 stage A + frame=90 stage B, per Codex Q2 vectored
-     * verdict) and CP-V-5 (IRQH all-levels + IPL + MFP IPRA/B + DMA0
-     * CSR/CCR sampler, window 80-95, cap 16). CP-V-3/V-4 live in the
-     * per-chunk hook (m68000_bridge.c). All emit one-shot or capped —
-     * read-only. Plan: /tmp/mx68k_P82-X-V_plan.md §3. */
+    /* P82-X-V のフレーム毎 tick — CP-V-2(DMAC NIV/EIV ベクタテーブルの
+     * frame=5 stage A + frame=90 stage B でのスナップ、Codex Q2 の vectored
+     * verdict による)と CP-V-5(IRQH 全レベル + IPL + MFP IPRA/B + DMA0
+     * CSR/CCR サンプラー、窓 80-95、上限 16)を駆動する。CP-V-3/V-4 は
+     * per-chunk フック(m68000_bridge.c)にある。いずれも one-shot か件数上限付き —
+     * read-only。Plan: /tmp/mx68k_P82-X-V_plan.md §3。 */
     p82xv_tick();
     /* P37-DIAG: フレーム末尾のNEST-IRQカウントとSSP総変化記録 */
     if (frame_num <= 20) {
@@ -5100,15 +5100,15 @@ void mx68k_run_frame(void) {
                   "total-delta=%+d NEST-IRQ(VSYNC)=%d\n",
                   frame_num - 1, _p37_end_ssp, _p37_total_delta, s_p37_vsync_count);
     }
-    /* P47-A-DIAG-6: SR.IPL and MFP ISR registers per-frame end (frame<=30) for
-     * direct observation of IRQ6 nesting and IPL transitions. */
+    /* P47-A-DIAG-6: IRQ6 のネストと IPL 遷移を直接観測するため、SR.IPL と MFP ISR
+     * レジスタをフレーム末尾ごとに記録する(frame<=30)。 */
     if (frame_num <= 30) {
         uint32_t sr  = m68000_get_reg(M68K_SR);
         uint8_t  ipl = (uint8_t)((sr >> 8) & 7);
-        uint32_t pc  = m68000_get_reg(M68K_PC) & 0xFFFFFFu;  /* P82-F-1: per-frame PC */
-        /* P82-G: D0/D7 + A5/A6. 0xFF063C executes MOVE.L D7,(2,A6) inside an
-         * A6-relative command-line/path parser; D7 (and D0) carry the IOCS
-         * error/result code, A6 is the parameter block, A5 the source string. */
+        uint32_t pc  = m68000_get_reg(M68K_PC) & 0xFFFFFFu;  /* P82-F-1: フレーム毎の PC */
+        /* P82-G: D0/D7 + A5/A6。0xFF063C は A6 相対のコマンドライン/パス解析処理の中で
+         * MOVE.L D7,(2,A6) を実行する。D7(と D0)は IOCS のエラー/結果コードを保持し、
+         * A6 はパラメータブロック、A5 はソース文字列を指す。 */
         uint32_t d0  = m68000_get_reg(M68K_D0);
         uint32_t d7  = m68000_get_reg(M68K_D7);
         uint32_t a5  = m68000_get_reg(M68K_A5);
@@ -5124,14 +5124,14 @@ void mx68k_run_frame(void) {
                   MFP[MFP_TCDCR], (unsigned)pc,
                   (unsigned)d0, (unsigned)d7, (unsigned)a5, (unsigned)a6);
     }
-    /* P47-D-DIAG-I-VECTBL: dump vec slots $00-$140 at frame=1, 5, 10, 20 to
-     * confirm IPL-ROM has overwritten the default $ff05e4 with proper handlers.
-     * Spec §3.4 / §6.1 DIAG-F.
-     * Slots of interest:
-     *   $b8 (vec#$2e TRAP#14)  — should become 0x00ff0632
-     *   $7c (vec#$1f NMI/L7)   — should become 0x00ff05c8
-     *   $100-$13f (vec#$40-$4f MFP) — should become specific handlers,
-     *                                 NOT 0x00ff05e4 */
+    /* P47-D-DIAG-I-VECTBL: frame=1, 5, 10, 20 でベクタスロット $00-$140 をダンプし、
+     * IPL-ROM が既定値 $ff05e4 を適切なハンドラで上書きしたことを確認する。
+     * Spec §3.4 / §6.1 DIAG-F。
+     * 注目するスロット:
+     *   $b8 (vec#$2e TRAP#14)  — 0x00ff0632 になるはず
+     *   $7c (vec#$1f NMI/L7)   — 0x00ff05c8 になるはず
+     *   $100-$13f (vec#$40-$4f MFP) — それぞれ個別のハンドラになるはずで、
+     *                                 0x00ff05e4 のままではない */
     {
         static int s_p47d_vectbl_dumped[4] = {0, 0, 0, 0};
         int slot = -1;
@@ -5156,7 +5156,7 @@ void mx68k_run_frame(void) {
             }
         }
     }
-    /* P33-DIAG: SSP per-frame delta tracking */
+    /* P33-DIAG: SSP のフレーム毎の差分追跡 */
     {
         static uint32_t s_p33_last_ssp = 0;
         uint32_t cur_ssp = m68000_get_reg(M68K_MSP);
@@ -5171,7 +5171,7 @@ void mx68k_run_frame(void) {
                 uint32_t ram_limit = (uint32_t)(12*1024*1024 - 6);  /* 0xBFFFF9 */
                 if (MEM && cur_ssp >= 0x400 && cur_ssp < ram_limit
                     && s_p34_stack_dump_count < 5) {
-                    /* P47-A-DIAG-1: byte-order bug fixed via p47_read_stack_frame() */
+                    /* P47-A-DIAG-1: バイト順バグは p47_read_stack_frame() で修正済み */
                     uint16_t stk_sr;
                     uint32_t stk_pc;
                     p47_read_stack_frame(cur_ssp, &stk_sr, &stk_pc);
@@ -5201,9 +5201,9 @@ void mx68k_run_frame(void) {
         }
         s_p33_last_ssp = cur_ssp;
     }
-    /* P47-A-DIAG-2: BIOS panic entry trap. Detect PC at any of three known panic
-     * points (0xff0632 = lea, 0xff0638 = bsr completed, 0xff063c = halt loop)
-     * and dump 32 longwords of supervisor stack to identify the panic call chain. */
+    /* P47-A-DIAG-2: BIOS panic 入口の捕捉。既知の3つの panic 地点
+     * (0xff0632 = lea、0xff0638 = bsr 完了、0xff063c = halt ループ)のいずれかで PC を検出し、
+     * スーパーバイザスタックを 32 ロングワードダンプして panic の呼出し連鎖を特定する。 */
     {
         uint32_t pc = m68000_get_reg(M68K_PC);
         if (s_p47_panic_logged < 3 &&
@@ -5231,14 +5231,14 @@ void mx68k_run_frame(void) {
         }
     }
 
-    /* P166: boot progress metric — advancing (new RAM code reached / text printed)
-     * vs frozen (fixed loop)? Per-frame PC high-water mark + text-printed check,
-     * logged every 30 frames over a long run. Read-only. */
+    /* P166: 起動進捗の指標 — 進行中(新しい RAM コードに到達 / テキストが表示された)
+     * か停止中(固定ループ)か？ フレーム毎の PC 最高到達点 + テキスト表示の有無を、
+     * 長時間実行の間30フレーム毎に記録する。read-only。 */
     {
         static uint32_t s_p166_max_ram_pc      = 0;
         static uint32_t s_p166_last_logged_max = 0;
         uint32_t p166_pc = (uint32_t)m68000_get_reg(M68K_PC) & 0xFFFFFF;
-        /* RAM-region code (loaded program), excluding low vectors and ROM/IO */
+        /* RAM 領域のコード(ロード済みプログラム)。低位ベクタと ROM/IO は除外 */
         if (p166_pc >= 0x002000 && p166_pc < 0xc00000 && p166_pc > s_p166_max_ram_pc)
             s_p166_max_ram_pc = p166_pc;
         if (frame_num >= 30 && (frame_num % 30) == 0) {
@@ -5347,7 +5347,7 @@ void mx68k_run_frame(void) {
                           (unsigned)m68000_get_reg(M68K_A0), (unsigned)m68000_get_reg(M68K_A1),
                           (unsigned)m68000_get_reg(M68K_A7));
                 if (MEM && cur_ssp >= 0x400 && cur_ssp < (uint32_t)(12*1024*1024 + 4 - 12)) {
-                    /* P47-A-DIAG-1: byte-order bug fixed — read each word as host-native LE16 */
+                    /* P47-A-DIAG-1: バイト順バグ修正済み — 各ワードをホストネイティブの LE16 として読む */
                     debug_log("[P41-DIAG-STK] frame=%d SSP=0x%08x "
                               "stk[0]=0x%04x stk[1]=0x%04x stk[2]=0x%04x "
                               "stk[3]=0x%04x stk[4]=0x%04x stk[5]=0x%04x (post-byte-order-fix)\n",
@@ -5358,7 +5358,7 @@ void mx68k_run_frame(void) {
                               (unsigned)*(uint16_t*)&MEM[cur_ssp +  6],
                               (unsigned)*(uint16_t*)&MEM[cur_ssp +  8],
                               (unsigned)*(uint16_t*)&MEM[cur_ssp + 10]);
-                    /* Also expose stk_SR + stk_PC reconstructed (LE16 native) for direct check */
+                    /* 直接確認用に、再構成した stk_SR + stk_PC(LE16 ネイティブ)も出力する */
                     uint16_t _p41_stk_sr;
                     uint32_t _p41_stk_pc;
                     p47_read_stack_frame(cur_ssp, &_p41_stk_sr, &_p41_stk_pc);
@@ -5373,7 +5373,7 @@ void mx68k_run_frame(void) {
     /* P12-TRACE: frame<=10毎フレーム、frame>=600はクラッシュ解析のため毎フレーム詳細ログ、それ以外は30フレームごと */
     {
         int do_log = (frame_num <= 10) ||
-                     (frame_num >= 40 && frame_num <= 55) ||  /* P21-DIAG: frame=47 crash zone */
+                     (frame_num >= 40 && frame_num <= 55) ||  /* P21-DIAG: frame=47 のクラッシュ区間 */
                      (frame_num >= 600) ||
                      (frame_num % 30 == 0);
         int do_detail = (frame_num >= 40 && frame_num <= 55) || (frame_num >= 600);
@@ -5492,18 +5492,18 @@ int mx68k_fdd_insert(int drive, const char* path) {
     strncpy(g_fdd_path[drive], path, sizeof(g_fdd_path[drive]) - 1);
     g_fdd_path[drive][sizeof(g_fdd_path[drive]) - 1] = '\0';
 
-    /* P48-A (★ 案1): Drain SetDelay synchronously from 3 to 1 via two
-     * successive FDD_SetFDInt() calls. The third 1->0 transition (which is
-     * the one that actually dispatches IRQH_Int(1,&FDD_Int)) is left to the
-     * existing every-frame FDD_SetFDInt() call inside mx68k_run_frame()
-     * (see line ~1049). That call fires on frame=1 while P23-FIX has
-     * IOC_IntStat=0x0E (bit1 set), so IRQ1 is guaranteed to be queued via
-     * the regular px68k code path — no synthetic dispatch is performed here.
+    /* P48-A (★ 案1): FDD_SetFDInt() を2回続けて呼び、SetDelay を 3 から 1 まで
+     * 同期的に drain する。3回目の 1->0 遷移(実際に IRQH_Int(1,&FDD_Int) を
+     * 発行するもの)は、mx68k_run_frame() 内にある既存の毎フレームの
+     * FDD_SetFDInt() 呼出しに任せる
+     * (line ~1049 参照)。その呼出しは、P23-FIX により
+     * IOC_IntStat=0x0E(bit1 セット)となっている frame=1 で発火するので、IRQ1 は
+     * 通常の px68k コード経路で確実にキューされる — ここでは合成的な発行は一切行わない。
      *
-     * Subsumes P46-FIX-A (single FDD_SetFDInt() drain 3->2). */
+     * P46-FIX-A(単一の FDD_SetFDInt() による 3->2 の drain)を包含する。 */
     s_p48a_drain_count++;
     FDD_SetFDInt();   /* SetDelay 3 -> 2 */
-    FDD_SetFDInt();   /* SetDelay 2 -> 1 (frame=1 will complete 1 -> 0 + IRQ) */
+    FDD_SetFDInt();   /* SetDelay 2 -> 1(frame=1 で 1 -> 0 + IRQ が完了する) */
     debug_log("[P48-A-DRAIN] drive=%d SetDelay drained 3->1 (frame=1 will fire IRQ) "
               "FDD_IsReady(%d)=%d IOC_IntStat=0x%02x IRQH_IRQ[1]=%d "
               "(drain_count=%d)\n",
@@ -5511,28 +5511,28 @@ int mx68k_fdd_insert(int drive, const char* path) {
               (unsigned)IOC_IntStat, (int)IRQH_IRQ[1],
               s_p48a_drain_count);
 
-    /* P49-B-FDD-INT-PULSE: optional one-shot bit6 set of IOC_IntStat at
-     * FDD insertion. Spec §3.1: bit6 = FDD INT (DISK IN edge). Spec §5.2
-     * says it should fire on DISK IN 0->1; px68k base core does not
-     * implement this OR (Code-inv §B.2). Gated OFF by default — see
-     * the P49B_FDD_INT_PULSE_ENABLE block-comment near the top of this
-     * file for the full enable-side prerequisites (paired bit6-clear
-     * path is mandatory).
+    /* P49-B-FDD-INT-PULSE: FDD 挿入時に IOC_IntStat の bit6 を one-shot でセットする
+     * オプション。Spec §3.1: bit6 = FDD INT(DISK IN エッジ)。Spec §5.2 では
+     * DISK IN 0->1 で発火すべきとされるが、px68k 本体コアはこの OR を
+     * 実装していない(Code-inv §B.2)。既定ではゲート OFF — 有効化側の
+     * 前提条件の全容は、このファイル冒頭付近の P49B_FDD_INT_PULSE_ENABLE
+     * ブロックコメントを参照(対となる bit6 クリア経路の追加が
+     * 必須)。
      *
-     * NOTE on placement: this stub stays exactly here at the
-     * mx68k_fdd_insert() call site. Spec §5.2's "edge" semantics are
-     * approximated by "OR bit6 once per FDD insert call". If the stub is
-     * ever moved away from mx68k_fdd_insert(), eject+reinsert mid-run
-     * would miss the edge — keep it here (Requirements Review §6 spec
-     * note). */
+     * 配置に関する注意: このスタブは mx68k_fdd_insert() の呼出し箇所である
+     * ここに置いたままにすること。Spec §5.2 の「エッジ」の意味論は、
+     * 「FDD 挿入呼出し1回につき bit6 を1回 OR する」で近似している。スタブを
+     * mx68k_fdd_insert() から別の場所へ移すと、実行中の排出+再挿入で
+     * エッジを取りこぼす — ここに置いたままにすること(Requirements Review §6 の仕様
+     * 注記)。 */
 #if P49B_FDD_INT_PULSE_ENABLE
     {
         uint8_t prev = IOC_IntStat;
-        IOC_IntStat |= 0x40u;  /* FDD INT source bit (Spec §3.1 bit6) */
+        IOC_IntStat |= 0x40u;  /* FDD INT 要因ビット(Spec §3.1 bit6) */
         debug_log("[P49-B-FDD-INT-PULSE] one-shot bit6 set: "
                   "IOC_IntStat 0x%02x -> 0x%02x (drive=%d)\n",
                   (unsigned)prev, (unsigned)IOC_IntStat, drive);
-        /* Existing IRQH_Int(1,&FDD_Int) drain via P48-A delivers IRQ1. */
+        /* P48-A 経由の既存の IRQH_Int(1,&FDD_Int) drain が IRQ1 を届ける。 */
     }
 #endif
     return 0;
@@ -5648,30 +5648,30 @@ static bool p687_read_head8(const char* path, uint8_t out[8]) {
 }
 
 /* ======================================================================
- * P200: HDD (SASI .hdf) mount
+ * P200: HDD(SASI .hdf)マウント
  *
- * Config.HDImage[] holds the SASI disk-image path per slot. sasi.c opens
- * that path on demand (256B/sector, offset SASI_Sector<<8, raw image, no
- * header); an empty string means "no drive" and sasi.c returns the no-drive
- * status itself. The SASI Read/Write handlers are already wired into the
- * Core memory tables, so mounting is purely storing the path — sasi.c
- * re-opens it fresh on the very next sector access (no cache), no reset
- * needed.
+ * Config.HDImage[] はスロットごとの SASI ディスクイメージのパスを保持する。sasi.c は
+ * 必要時にそのパスを開く(256B/セクタ、オフセット SASI_Sector<<8、生イメージ、ヘッダ
+ * 無し)。空文字列は「ドライブ無し」を意味し、sasi.c 自身がドライブ無しの
+ * ステータスを返す。SASI の Read/Write ハンドラは既に Core のメモリテーブルへ
+ * 配線済みなので、マウントはパスを格納するだけで済む — sasi.c は
+ * 次のセクタアクセスでそのパスを新たに開き直す(キャッシュ無し)ため、リセットは
+ * 不要。
  *
- * device-ID mapping: logical unit 0..7 -> physical index unit*2 (SASI device
- * 0 -> HDImage[0], device 1 -> HDImage[2], … device 7 -> HDImage[14]).
- * LUN1 slots (odd indices) are not used — Human68k probes the SASI bus per
- * device ID, so a second drive must be a distinct device (index 2), not LUN1
- * (index 1), or it stays invisible.
+ * デバイスIDの対応: 論理ユニット 0..7 -> 物理インデックス unit*2(SASI デバイス
+ * 0 -> HDImage[0]、デバイス 1 -> HDImage[2]、… デバイス 7 -> HDImage[14])。
+ * LUN1 スロット(奇数インデックス)は使わない — Human68k は SASI バスを
+ * デバイスIDごとに探査するため、2台目のドライブは別デバイス(index 2)にする必要があり、
+ * LUN1(index 1)にすると見えないままになる。
  *
- * P455: unit count 2 -> MX68K_SASI_UNIT_COUNT (8). The upper bound is the Core
- * SELECT presence test (sasi.c:426) reading HDImage[dev*2+1], i.e. index 15 for
- * device 7, which exactly fills prop.h:19's HDImage[16]; see the _Static_assert
- * next to s_sasi_hdd_path[].
+ * P455: ユニット数 2 -> MX68K_SASI_UNIT_COUNT(8)。上限は Core の
+ * SELECT 存在確認(sasi.c:426)が HDImage[dev*2+1] を読むことによる。つまりデバイス 7 では
+ * index 15 となり、prop.h:19 の HDImage[16] をちょうど使い切る。s_sasi_hdd_path[] の
+ * 隣にある _Static_assert を参照。
  *
- * Thread note: like mx68k_fdd_insert, this writes the path on the main thread.
- * A torn read by the emulation thread at worst makes File_Open fail -> the
- * benign no-drive status; no reset is scheduled or needed here.
+ * スレッドに関する注意: mx68k_fdd_insert と同様、パスはメインスレッドで書き込む。
+ * エミュレーションスレッドが書込み途中の値を読んでも、最悪 File_Open が失敗して
+ * 無害なドライブ無しステータスになるだけ。ここでリセットは予約せず、その必要もない。
  * ==================================================================== */
 int mx68k_hdd_insert(int unit, const char* path) {
     if (unit < 0 || unit >= MX68K_SASI_UNIT_COUNT) return -1;
@@ -5726,14 +5726,14 @@ int mx68k_hdd_insert(int unit, const char* path) {
      * ディスクが無言で消えることがない。 */
     strlcpy(s_sasi_hdd_path[unit], Config.HDImage[idx],
             sizeof(s_sasi_hdd_path[unit]));
-    /* P239/P502: no reset needed — sasi.c still looks Config.HDImage[] up by
-     * path on every sector access, so the new path takes effect on the very next
-     * SASI sector I/O (verified via source read + hands-on test, P238 followup).
-     * P502 added a Bridge-side fd cache under those File_* calls, so "no cache"
-     * is no longer literally true; the conclusion is unchanged because the
-     * invalidation hook below (g_pending_sasi_cache_invalidate) makes
-     * mx68k_run_frame() close every cached fd at the next frame boundary — a
-     * stale descriptor for the previous image can never be reused. */
+    /* P239/P502: リセット不要 — sasi.c は今もセクタアクセスのたびに Config.HDImage[] を
+     * パスで参照するので、新しいパスは次の SASI セクタ I/O から
+     * 有効になる(ソース読解 + hands-on テストで確認済み、P238 フォローアップ)。
+     * P502 でそれらの File_* 呼出しの下に Bridge 側の fd キャッシュを追加したため、「キャッシュ無し」
+     * は文字どおりには正しくなくなったが、結論は変わらない。下の
+     * 無効化フック(g_pending_sasi_cache_invalidate)により
+     * mx68k_run_frame() が次のフレーム境界でキャッシュ済みの fd をすべて閉じるため —
+     * 前のイメージの古いディスクリプタが再利用されることはあり得ない。 */
     g_pending_sasi_cache_invalidate = 1;
     return 0;
 }
@@ -5755,14 +5755,14 @@ int mx68k_hdd_eject(int unit) {
     /* P447 (C2'): eject も同じ真実源を更新する。これが無いと、Eject 直後の ⌘R で
      * 古い非空シャドウから取り外したはずのディスクが復活する。 */
     s_sasi_hdd_path[unit][0] = '\0';
-    /* P239/P502: no reset needed — sasi.c still looks Config.HDImage[] up by
-     * path on every sector access, so the cleared path takes effect on the very
-     * next SASI sector I/O. P502 added a Bridge-side fd cache under those File_*
-     * calls, so "no cache" is no longer literally true; the conclusion is
-     * unchanged because the invalidation hook below
-     * (g_pending_sasi_cache_invalidate) makes mx68k_run_frame() close every
-     * cached fd at the next frame boundary — the ejected image's descriptor is
-     * released rather than lingering. */
+    /* P239/P502: リセット不要 — sasi.c は今もセクタアクセスのたびに Config.HDImage[] を
+     * パスで参照するので、クリアしたパスは次の SASI セクタ I/O から
+     * 有効になる。P502 でそれらの File_* 呼出しの下に Bridge 側の fd キャッシュを
+     * 追加したため、「キャッシュ無し」は文字どおりには正しくなくなったが、結論は
+     * 変わらない。下の無効化フック
+     * (g_pending_sasi_cache_invalidate)により mx68k_run_frame() が次のフレーム境界で
+     * キャッシュ済みの fd をすべて閉じるため — 排出したイメージのディスクリプタは
+     * 残り続けずに解放される。 */
     g_pending_sasi_cache_invalidate = 1;
     return 0;
 }
@@ -5793,17 +5793,17 @@ bool mx68k_hdd_is_inserted(int unit) {
 }
 
 /* ======================================================================
- * P241 Stage A: external SCSI (CZ-6BS1) disk mount.
+ * P241 Stage A: 外付け SCSI(CZ-6BS1)のディスクマウント。
  *
- * SCSI ID 0..6 maps directly to Config.SCSIEXHDImage[id] (prop.h: the index is
- * the SCSI ID itself, unlike SASI's unit*2). id 7 is the host X68000 and is not
- * mountable. Same shape as mx68k_hdd_insert: store the path only — scsi.c
- * re-opens the image per block access with no cache (scsi.c File_Open), so the
- * new path takes effect on the very next SCSI block I/O; no reset needed.
+ * SCSI ID 0..6 は Config.SCSIEXHDImage[id] に直接対応する(prop.h: SASI の unit*2 と違い、
+ * インデックスは SCSI ID そのもの)。id 7 はホストの X68000 であり、マウント
+ * できない。mx68k_hdd_insert と同じ形: パスを格納するだけ — scsi.c は
+ * ブロックアクセスごとにキャッシュ無しでイメージを開き直す(scsi.c File_Open)ので、
+ * 新しいパスは次の SCSI ブロック I/O から有効になる。リセットは不要。
  *
- * Thread note: like mx68k_hdd_insert, this writes the path on the main thread;
- * a torn read by the emulation thread at worst makes File_Open fail -> the
- * benign no-device status.
+ * スレッドに関する注意: mx68k_hdd_insert と同様、パスはメインスレッドで書き込む。
+ * エミュレーションスレッドが書込み途中の値を読んでも、最悪 File_Open が失敗して
+ * 無害なデバイス無しステータスになるだけ。
  * ==================================================================== */
 int mx68k_scsi_insert(int id, const char* path) {
     if (id < 0 || id > 6) return -1;
@@ -5847,9 +5847,9 @@ bool mx68k_scsi_is_inserted(int id) {
 }
 
 /* ====================================================================
- * P247 Stage 1: Internal SCSI (SUPER+ built-in SPC MB89352) skeleton.
- * Path/ROM held in Bridge only; NOT yet wired to real I/O. Real SPC
- * transfer logic and $FC0000 IPL mapping arrive in Stage 2/4.
+ * P247 Stage 1: 内蔵 SCSI(SUPER+ 内蔵 SPC MB89352)の骨組み。
+ * パス/ROM は Bridge 内で保持するだけで、実 I/O にはまだ配線していない。実際の SPC
+ * 転送ロジックと $FC0000 の IPL マッピングは Stage 2/4 で導入する。
  * ==================================================================== */
 /* P251: s_scsi_in_rom / s_scsi_in_rom_loaded は Stage 2c で外部リンケージへ
  * 変更(scsi_spc_bridge.cpp が ROM を、scsi_in_bridge.c が loaded フラグを
@@ -6020,7 +6020,7 @@ static char s_cd_path[1024];
 #define P676_CD_RAW_MAX      912579600L
 #define P676_CD_ISO_SECTOR   2048L
 #define P676_CD_ISO_MAX      0x2BED5000L   /* 736,675,840 */
-#define P676_CD_MIN          0x800L        /* 2048 = 1 sector */
+#define P676_CD_MIN          0x800L        /* 2048 = 1 セクタ */
 
 static bool p676_cd_size_valid(long size) {
     if (size < P676_CD_MIN) return false;
@@ -6147,8 +6147,8 @@ bool mx68k_scsi_in_is_inserted(int id) {
     return s_scsi_in_image[id][0] != '\0';
 }
 
-/* P204: guest SRAM $ED0029 (XEiJ SRAM_EJECT) bit0 = eject FD at power-off.
-   SRAM[] is byte-swapped (adr^1) so guest $ED0029 -> SRAM[0x28]. */
+/* P204: ゲスト SRAM $ED0029(XEiJ SRAM_EJECT)の bit0 = 電源 OFF 時に FD を排出する。
+   SRAM[] はバイトスワップ済み(adr^1)なので、ゲストの $ED0029 -> SRAM[0x28]。 */
 bool mx68k_sram_eject_on_poweroff(void) { return (SRAM[0x28] & 0x01) != 0; }
 
 /* P776: ゲスト起点のソフトウェア電源OFF要求の取得(読み取り+クリアの one-shot)。
@@ -6163,31 +6163,31 @@ int mx68k_take_guest_poweroff_request(void) {
 }
 
 /* ======================================================================
- * P198: State save / load (Phase 2 #4)
+ * P198: ステートのセーブ / ロード(Phase 2 #4)
  *
- * A versioned snapshot of the emulated machine's guest-visible state.
- * Best-effort V1 (no reference implementation): fmgen/ADPCM internal DSP
- * state and FDC sector phase are NOT captured (guest re-writes re-sync them).
+ * エミュレート対象マシンの、ゲストから見える状態のバージョン付きスナップショット。
+ * ベストエフォートの V1(参照実装無し): fmgen/ADPCM 内部の DSP 状態と
+ * FDC のセクタ位相は保存しない(ゲストによる再書込みで再同期される)。
  *
- * Non-static globals that lack a header declaration (defined in bg.c). Verified
- * non-static in Core/px68k/x68k/bg.c:13-14 (full memcpy, both directions).
+ * ヘッダ宣言の無い非 static グローバル(bg.c で定義)。Core/px68k/x68k/bg.c:13-14 で
+ * 非 static であることを確認済み(両方向とも全体を memcpy)。
  * ==================================================================== */
 extern uint8_t BG[0x8000];
 extern uint8_t Sprite_Regs[0x800];
 
-#define MX68K_STATE_MAGIC   "MX68KSAV"       /* 8 bytes, no NUL */
-#define MX68K_STATE_TRAILER 0x4B383653u       /* "S68K" trailer sentinel */
-/* P479 (D-41症状1): 1u -> 2u. The OPM shadow block is a new, mandatory block in
- * the fixed block order, so the file layout changed. Bumping the version makes
- * a pre-P479 file fail with the explicit version check (rc=-11) instead of
- * mis-parsing into the trailer/size checks with a confusing error. Pre-P479
- * .mxstate files can no longer be loaded — by design. */
+#define MX68K_STATE_MAGIC   "MX68KSAV"       /* 8 バイト、NUL 無し */
+#define MX68K_STATE_TRAILER 0x4B383653u       /* "S68K" 末尾の sentinel */
+/* P479 (D-41症状1): 1u -> 2u。OPM シャドウブロックは固定ブロック順に新たに加わる必須
+ * ブロックなので、ファイルレイアウトが変わった。バージョンを上げることで、P479 より前の
+ * ファイルは trailer/サイズ検査へ誤解析されて紛らわしいエラーになるのではなく、
+ * 明示的なバージョン検査(rc=-11)で失敗するようになる。P479 より前の
+ * .mxstate ファイルはもう読み込めない — 意図どおりの仕様。 */
 #define MX68K_STATE_VERSION 2u
 
-/* Shared field visitor: identical field order/size for save and load so the
- * two directions can never drift. save=1 packs emulator->buf; save=0 unpacks
- * buf->emulator. Returns the byte length of the block (structural, value-
- * independent — so it also serves as the "measure" for load-side validation). */
+/* 共有フィールドビジター: セーブとロードでフィールドの順序/サイズを同一にし、
+ * 両方向が食い違うことがないようにする。save=1 は emulator->buf へ詰め、save=0 は
+ * buf->emulator へ展開する。ブロックのバイト長を返す(構造的に決まり、値には
+ * 依存しない — そのためロード側検証での「計測」としても使える)。 */
 #define STATE_FIELD(v)      do { if (buf) { if (save) memcpy(buf + off, &(v), sizeof(v)); \
                                             else       memcpy(&(v), buf + off, sizeof(v)); } \
                                   off += (uint32_t)sizeof(v); } while (0)
@@ -6195,7 +6195,7 @@ extern uint8_t Sprite_Regs[0x800];
                                             else       memcpy((p), buf + off, (n)); } \
                                   off += (uint32_t)(n); } while (0)
 
-/* --- composite blocks (all-memcpy fields; CPU is handled separately) --- */
+/* --- 複合ブロック(全フィールド memcpy。CPU は別扱い) --- */
 
 static uint32_t state_crtc_block(uint8_t* buf, int save) {
     uint32_t off = 0;
@@ -6208,8 +6208,8 @@ static uint32_t state_crtc_block(uint8_t* buf, int save) {
     STATE_FIELDN(VCReg0, 2);  STATE_FIELDN(VCReg1, 2);  STATE_FIELDN(VCReg2, 2);
     STATE_FIELD(CRTC_IntLine);
     STATE_FIELD(CRTC_FastClr);
-    /* CRTC_DispScan dropped: not linked into MX build + derived display-scan
-     * value recomputed each frame (safe to omit from the snapshot). */
+    /* CRTC_DispScan は除外: MX ビルドにリンクされておらず、かつ表示走査の派生値で
+     * 毎フレーム再計算される(スナップショットから省いても安全)。 */
     STATE_FIELD(CRTC_FastClrLine);
     STATE_FIELD(CRTC_FastClrMask);
     STATE_FIELD(CRTC_VStep);
@@ -6229,8 +6229,8 @@ static uint32_t state_pal_block(uint8_t* buf, int save) {
 static uint32_t state_mfp_block(uint8_t* buf, int save) {
     uint32_t off = 0;
     STATE_FIELDN(MFP, 24);
-    /* Timer_Count dropped: not linked into MX build + MFP timer counters
-     * reload from their data registers after load (acceptable best-effort). */
+    /* Timer_Count は除外: MX ビルドにリンクされておらず、MFP タイマーのカウンタは
+     * ロード後にデータレジスタから再ロードされる(ベストエフォートとして許容)。 */
     STATE_FIELD(LastKey);
     STATE_FIELD(keyLED);
     STATE_FIELD(keyREP_DELAY);
@@ -6249,10 +6249,10 @@ static uint32_t state_ioc_block(uint8_t* buf, int save) {
     return off;
 }
 
-/* P479 (D-41症状1): the Bridge-side OPM register shadow (see Bridge/opm_shadow.h).
- * The OPM chip exposes no register read-back, so this shadow — recorded from the
- * CPU write hook — is the only available snapshot of the tone parameters. Block
- * size is 256+256+5 = 517 B, well within the 2048 B scratch buffer. */
+/* P479 (D-41症状1): Bridge 側の OPM レジスタシャドウ(Bridge/opm_shadow.h 参照)。
+ * OPM チップはレジスタの読み戻しを提供しないので、CPU 書込みフックで記録した
+ * このシャドウが、音色パラメータの唯一利用可能なスナップショットとなる。ブロック
+ * サイズは 256+256+5 = 517 B で、2048 B のスクラッチバッファに十分収まる。 */
 static uint32_t state_opm_block(uint8_t* buf, int save) {
     uint32_t off = 0;
     STATE_FIELDN(g_opm_shadow, 256);
@@ -6289,22 +6289,22 @@ static uint32_t state_timing_block(uint8_t* buf, int save) {
     return off;
 }
 
-/* CPU block: 21 x uint32 = 84 bytes, fixed order.
- * D0-D7, A0-A7, SR, USP, PC, C68K.Status, C68K.IRQLine. */
+/* CPU ブロック: 21 x uint32 = 84 バイト、固定順。
+ * D0-D7, A0-A7, SR, USP, PC, C68K.Status, C68K.IRQLine。 */
 #define STATE_CPU_BYTES (21u * 4u)
 
-/* P198: TextDrawWork is a DERIVED text-plane buffer rebuilt write-through inside
- * TVRAM_Write(); the bulk TVRAM memcpy on load bypasses that rebuild, so the text
- * plane must be serialized directly to avoid stale content after load. */
+/* P198: TextDrawWork は TVRAM_Write() 内で write-through に再構築される「派生」テキストプレーン
+ * バッファ。ロード時の TVRAM 一括 memcpy はその再構築を通らないため、ロード後に古い内容が
+ * 残らないよう、テキストプレーンを直接シリアライズする必要がある。 */
 #define STATE_TDW_BYTES (1024u * 1024u + 100u)
 
-/* P198: BGCHR8/BGCHR16 are DERIVED, decoded PCG pattern buffers, rebuilt
- * write-through inside BG_Write() (bg.c:262-267) from the raw BG[] pattern RAM.
- * The bulk BG[] memcpy on load bypasses that rebuild, so — exactly like
- * TextDrawWork above — the decoded sprite/BG patterns must be serialized directly
- * or sprite rendering shows stale patterns until the guest next rewrites PCG.
- * These globals have external linkage but are not declared in bg.h, so declare
- * them here (Core is not modified). Sizes match bg.c: 8*8*256 / 16*16*256. */
+/* P198: BGCHR8/BGCHR16 はデコード済み PCG パターンの「派生」バッファで、生の BG[] パターン
+ * RAM から BG_Write()(bg.c:262-267)内で write-through に再構築される。
+ * ロード時の BG[] 一括 memcpy はその再構築を通らないため、上の TextDrawWork と
+ * まったく同様に、デコード済みのスプライト/BG パターンを直接シリアライズしないと、
+ * ゲストが次に PCG を書き換えるまでスプライト描画に古いパターンが表示される。
+ * これらのグローバルは外部リンケージを持つが bg.h で宣言されていないので、ここで宣言する
+ * (Core は改変しない)。サイズは bg.c と一致: 8*8*256 / 16*16*256。 */
 extern uint8_t BGCHR8[8 * 8 * 256];
 extern uint8_t BGCHR16[16 * 16 * 256];
 #define STATE_BGCHR8_BYTES  (8u * 8u * 256u)     /* 16384 */
@@ -6325,11 +6325,11 @@ static void state_cpu_save(uint8_t* buf) {
 static void state_cpu_load(const uint8_t* buf) {
     uint32_t w[21];
     memcpy(w, buf, STATE_CPU_BYTES);
-    /* Order is load-bearing (C68k_Set_USP branches on flag_S):
-     * D0-D7, A0-A6, SR, then A7 + USP, raw Status/IRQLine, PC LAST. */
+    /* 順序が重要(C68k_Set_USP は flag_S で分岐する):
+     * D0-D7, A0-A6, SR, 次に A7 + USP, 生の Status/IRQLine, PC は最後。 */
     int i = 0;
     for (int r = M68K_D0; r <= M68K_D7; r++) m68000_set_reg(r, w[i++]);
-    /* A0-A6 now, A7 after SR */
+    /* ここでは A0-A6、A7 は SR の後 */
     for (int r = M68K_A0; r <= M68K_A6; r++) m68000_set_reg(r, w[i++]);
     uint32_t a7  = w[i++];
     uint32_t sr  = w[i++];
@@ -6342,18 +6342,18 @@ static void state_cpu_load(const uint8_t* buf) {
     m68000_set_reg(M68K_USP, usp);
     C68K.Status  = status;
     C68K.IRQLine = irqline;
-    /* derived fetch/basepc rebuilt from PC below via set_reg(PC) + cpu_setOPbase24 */
+    /* 派生値の fetch/basepc は、下の set_reg(PC) + cpu_setOPbase24 により PC から再構築される */
     m68000_set_reg(M68K_PC, pc);
 }
 
-/* size-tagged block writer */
+/* サイズタグ付きブロックの書出し */
 static int state_wblk(FILE* f, const void* p, uint32_t n) {
     if (fwrite(&n, 4, 1, f) != 1) return -1;
     if (n && fwrite(p, 1, n, f) != n) return -1;
     return 0;
 }
 
-/* write a scalar (helper for header fields) */
+/* スカラー値を書き出す(ヘッダフィールド用ヘルパ) */
 static int state_w32(FILE* f, uint32_t v) { return fwrite(&v, 4, 1, f) == 1 ? 0 : -1; }
 
 static int do_save_state(const char* path) {
@@ -6362,19 +6362,19 @@ static int do_save_state(const char* path) {
     if (!f) return -2;
 
     int rc = 0;
-    uint8_t scratch[2048];   /* must fit the largest composite block
-                              * (palette = 1025 B; P479 OPM shadow = 517 B) */
-    /* P472: size the RAM block from the physical allocation, not from
-     * g_memory_size_mb — MEM is always 12 MB, so a smaller setting used to make
-     * the snapshot capture only the leading part of guest RAM (D-11). */
+    uint8_t scratch[2048];   /* 最大の複合ブロックが収まる必要がある
+                              * (パレット = 1025 B、P479 OPM シャドウ = 517 B) */
+    /* P472: RAM ブロックのサイズは g_memory_size_mb ではなく物理的な確保量から
+     * 決める — MEM は常に 12 MB なので、以前は小さい設定だとスナップショットが
+     * ゲスト RAM の先頭部分しか取り込んでいなかった(D-11)。 */
     uint32_t mem_bytes = MX68K_RAM_BYTES;
 
-    /* header */
+    /* ヘッダ */
     if (fwrite(MX68K_STATE_MAGIC, 1, 8, f) != 8) { rc = -3; goto done; }
     if (state_w32(f, MX68K_STATE_VERSION))       { rc = -3; goto done; }
     if (state_w32(f, 0u /*flags*/))              { rc = -3; goto done; }
 
-    /* config header */
+    /* 設定ヘッダ */
     if (state_w32(f, (uint32_t)g_machine_type))  { rc = -3; goto done; }
     if (state_w32(f, (uint32_t)g_memory_size_mb)){ rc = -3; goto done; }
     if (state_w32(f, (uint32_t)g_clock_mhz))     { rc = -3; goto done; }
@@ -6385,13 +6385,13 @@ static int do_save_state(const char* path) {
         if (len && fwrite(g_fdd_path[d], 1, len, f) != len) { rc = -3; goto done; }
     }
 
-    /* blocks (fixed order) */
+    /* ブロック(固定順) */
     /* 1. CPU */
     state_cpu_save(scratch);
     if (state_wblk(f, scratch, STATE_CPU_BYTES)) { rc = -4; goto done; }
     /* 2. MEM */
     if (state_wblk(f, MEM, mem_bytes))           { rc = -4; goto done; }
-    /* 3. TVRAM / 3b. TextDrawWork (derived text plane) / 4. GVRAM / 5. SRAM */
+    /* 3. TVRAM / 3b. TextDrawWork(派生テキストプレーン) / 4. GVRAM / 5. SRAM */
     if (state_wblk(f, TVRAM, 0x80000))           { rc = -4; goto done; }
     if (state_wblk(f, TextDrawWork, STATE_TDW_BYTES)) { rc = -4; goto done; }
     if (state_wblk(f, GVRAM, 0x80000))           { rc = -4; goto done; }
@@ -6400,13 +6400,13 @@ static int do_save_state(const char* path) {
      * ブロックは長さ付き自己記述式のため、旧 16KB 形式のステートは読込み側の
      * ブロック単位分岐だけで引き続き読める(MX68K_STATE_VERSION は据え置き)。 */
     if (state_wblk(f, sram_ext_snapshot64(), 0x10000)) { rc = -4; goto done; }
-    /* 6. BG RAM / 7. Sprite regs / 7b. decoded PCG pattern buffers */
+    /* 6. BG RAM / 7. スプライトレジスタ / 7b. デコード済み PCG パターンバッファ */
     if (state_wblk(f, BG, 0x8000))               { rc = -4; goto done; }
     if (state_wblk(f, Sprite_Regs, 0x800))       { rc = -4; goto done; }
     if (state_wblk(f, BGCHR8, STATE_BGCHR8_BYTES))   { rc = -4; goto done; }
     if (state_wblk(f, BGCHR16, STATE_BGCHR16_BYTES)) { rc = -4; goto done; }
-    /* 8. CRTC / 9. Palette / 10. MFP / 11. DMAC / 12. IOC misc / 13. BG regs / 14. timing
-     * / 15. OPM shadow (P479) */
+    /* 8. CRTC / 9. パレット / 10. MFP / 11. DMAC / 12. IOCその他 / 13. BGレジスタ / 14. タイミング
+     * / 15. OPMシャドウ (P479) */
     {
         uint32_t n;
         n = state_crtc_block(scratch, 1);   if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
@@ -6419,19 +6419,19 @@ static int do_save_state(const char* path) {
         n = state_opm_block(scratch, 1);    if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
     }
 
-    /* trailer */
+    /* トレーラ */
     if (state_w32(f, MX68K_STATE_TRAILER)) { rc = -5; goto done; }
 
 done:
     fclose(f);
-    if (rc != 0) remove(path);   /* do not leave a truncated snapshot */
+    if (rc != 0) remove(path);   /* 途中で切れたスナップショットを残さない */
     return rc;
 }
 
-/* Load cursor over the in-memory file buffer. */
+/* メモリ上のファイルバッファを走査するロード用カーソル。 */
 typedef struct { const uint8_t* base; size_t len, pos; int err; } state_rdcur;
 
-/* read one size-tagged block; validates the tag fits the buffer (no mutation). */
+/* サイズタグ付きブロックを1つ読む。タグがバッファ内に収まるか検証する(状態変更なし)。 */
 static const uint8_t* state_rblk(state_rdcur* c, uint32_t* outn) {
     if (c->err) return NULL;
     if (c->pos + 4 > c->len) { c->err = 1; return NULL; }
@@ -6444,8 +6444,8 @@ static const uint8_t* state_rblk(state_rdcur* c, uint32_t* outn) {
 static int do_load_state(const char* path) {
     if (!path || !MEM) return -1;
 
-    /* All locals declared up front so the early-exit gotos never jump over a
-     * declaration (keeps strict C / -Werror happy). */
+    /* 早期脱出用のgotoが宣言を飛び越えないよう、ローカル変数はすべて
+     * 先頭で宣言する(厳格なC / -Werrorを通すため)。 */
     FILE* f = NULL;
     long fsz = 0;
     uint8_t* fb = NULL;
@@ -6465,7 +6465,7 @@ static int do_load_state(const char* path) {
              n_bg = 0, n_spr = 0, n_bgchr8 = 0, n_bgchr16 = 0, n_crtc = 0, n_pal = 0,
              n_mfp = 0, n_dma = 0, n_ioc = 0, n_bgr = 0, n_tim = 0, n_opm = 0;
 
-    /* --- read whole file into memory --- */
+    /* --- ファイル全体をメモリへ読み込む --- */
     f = fopen(path, "rb");
     if (!f) return -2;
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -2; }
@@ -6479,7 +6479,7 @@ static int do_load_state(const char* path) {
 
     c.base = fb; c.len = (size_t)fsz; c.pos = 0; c.err = 0;
 
-    /* --- PASS 1: parse + validate everything, NO emulator mutation --- */
+    /* --- PASS 1: 全体を解析・検証する。エミュレータ状態は一切変更しない --- */
     if (c.len < 16 || memcmp(c.base, MX68K_STATE_MAGIC, 8) != 0) { rc = -10; goto out; }
     c.pos = 8;
     memcpy(&version, c.base + c.pos, 4); c.pos += 4;
@@ -6487,15 +6487,15 @@ static int do_load_state(const char* path) {
     (void)flags;
     if (version != MX68K_STATE_VERSION) { rc = -11; goto out; }
 
-    /* config header */
+    /* 設定ヘッダ */
     if (c.pos + 16 > c.len) { rc = -10; goto out; }
     memcpy(&s_machine, c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_mem,     c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_clock,   c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_fpu,     c.base + c.pos, 4); c.pos += 4;
-    /* P481 (D-42): -15 (not -11) — rc=-11 is reserved for "state file written by
-     * an older, incompatible MX68K version" so the UI can say exactly that; an
-     * out-of-range memory size is an unrelated condition and needs its own code. */
+    /* P481 (D-42): -11ではなく-15とする——rc=-11は「古い非互換のMX68Kバージョンで
+     * 書かれたステートファイル」専用に予約されており、UIがその旨を正確に表示できるようにする。
+     * メモリサイズの範囲外は無関係な条件なので、独自のコードが必要。 */
     if (s_mem <= 0 || s_mem > 12) { rc = -15; goto out; }
     for (int d = 0; d < 2; d++) {
         if (c.pos + 4 > c.len) { rc = -10; goto out; }
@@ -6504,7 +6504,7 @@ static int do_load_state(const char* path) {
         memcpy(s_fdd[d], c.base + c.pos, plen); s_fdd[d][plen] = '\0'; c.pos += plen;
     }
 
-    /* block index (ptr+len), captured during validation */
+    /* ブロック索引(ptr+len)。検証中に取得する */
     blk_cpu   = state_rblk(&c, &n_cpu);
     blk_mem   = state_rblk(&c, &n_mem);
     blk_tvram = state_rblk(&c, &n_tvram);
@@ -6525,17 +6525,17 @@ static int do_load_state(const char* path) {
     blk_opm   = state_rblk(&c, &n_opm);    /* P479 */
     if (c.err) { rc = -12; goto out; }
 
-    /* trailer */
+    /* トレーラ */
     if (c.pos + 4 > c.len) { rc = -12; goto out; }
     memcpy(&trailer, c.base + c.pos, 4); c.pos += 4;
     if (trailer != MX68K_STATE_TRAILER) { rc = -13; goto out; }
 
-    /* exact per-block size validation (structural; measured from save direction) */
-    /* P472: expect the full physical RAM size, not the saved g_memory_size_mb —
-     * MEM is always 12 MB, so a smaller value used to leave the remainder of
-     * guest RAM unrestored after a load (D-11). Pre-P472 state files saved with
-     * a <12 MB setting now fail the n_mem check below (rc=-14) instead of
-     * silently restoring only part of RAM. */
+    /* ブロックごとの厳密なサイズ検証(構造的検証。サイズはセーブ側から実測) */
+    /* P472: 保存されたg_memory_size_mbではなく、物理RAMの全サイズを期待値とする——
+     * MEMは常に12MBなので、それより小さい値だとロード後にゲストRAMの
+     * 残りの部分が復元されないままになっていた(D-11)。<12MB設定で保存された
+     * P472以前のステートファイルは、RAMの一部だけを黙って復元するのではなく、
+     * 下記のn_memチェックで失敗する(rc=-14)ようになった。 */
     exp_mem = MX68K_RAM_BYTES;
     if (n_cpu   != STATE_CPU_BYTES)          { rc = -14; goto out; }
     if (n_mem   != exp_mem)                  { rc = -14; goto out; }
@@ -6559,8 +6559,8 @@ static int do_load_state(const char* path) {
     if (n_tim   != state_timing_block(NULL, 1)) { rc = -14; goto out; }
     if (n_opm   != state_opm_block(NULL, 1))  { rc = -14; goto out; }
 
-    /* --- PASS 2: apply (structure fully validated) --- */
-    /* config mismatch -> reconfigure + hard reset before restoring RAM/regs */
+    /* --- PASS 2: 適用(構造は検証済み) --- */
+    /* 設定不一致 -> RAM/レジスタ復元の前に再設定+ハードリセット */
     if (s_machine != g_machine_type || s_mem != g_memory_size_mb ||
         s_clock != g_clock_mhz || (s_fpu != 0) != g_fpu_enabled) {
         mx68k_set_machine_type(s_machine);
@@ -6570,7 +6570,7 @@ static int do_load_state(const char* path) {
         mx68k_reset_hard();
     }
 
-    /* bulk RAM/regs (memcpy) */
+    /* RAM/レジスタの一括復元(memcpy) */
     memcpy(MEM,         blk_mem,   exp_mem);
     memcpy(TVRAM,       blk_tvram, 0x80000);
     memcpy(TextDrawWork, blk_tdw,  STATE_TDW_BYTES);
@@ -6597,99 +6597,99 @@ static int do_load_state(const char* path) {
     state_ioc_block((uint8_t*)blk_ioc, 0);
     state_bgregs_block((uint8_t*)blk_bgr, 0);
     state_timing_block((uint8_t*)blk_tim, 0);
-    /* P479: restores the Bridge-side shadow only; the replay into the chip
-     * happens further below, after the P474 key-off loop. */
+    /* P479: ここではBridge側のシャドウのみを復元する。チップへの再生は
+     * さらに下、P474のkey-offループの後で行う。 */
     state_opm_block((uint8_t*)blk_opm, 0);
 
-    /* derived-state rebuild (before CPU regs, per plan). P473: this must call
-     * Pal32_ChangeContrast() directly, NOT Pal_TrackContrast().
-     * Pal_TrackContrast() (palette.c:160) starts with the guard
-     * "if (SysPort[1] == Contrast_Value) return;" -- and immediately after a
-     * state load those two are always equal, because SysPort[1] (restored by
-     * state_ioc_block) and Contrast_Value (restored by state_pal_block) both
-     * come from the same save-time snapshot. So the guard always fires and the
-     * rebuild never runs. Pal32_ChangeContrast() (palette.c:174) skips that
-     * guard and unconditionally rebuilds Pal32/GrphPal32/TextPal32 from the
-     * just-restored Pal_Regs -- the one-shot rebuild a state load needs, rather
-     * than the gradual per-frame CRT-like convergence Pal_TrackContrast() is
-     * designed for. */
+    /* 派生状態の再構築(計画どおりCPUレジスタより前)。P473: ここでは
+     * Pal_TrackContrast()ではなくPal32_ChangeContrast()を直接呼ぶ必要がある。
+     * Pal_TrackContrast()(palette.c:160)は冒頭にガード
+     * "if (SysPort[1] == Contrast_Value) return;"を持つ——そしてステートロード
+     * 直後はこの2つが常に等しい。SysPort[1](state_ioc_blockで復元)と
+     * Contrast_Value(state_pal_blockで復元)はどちらも同じセーブ時点の
+     * スナップショットに由来するからである。そのためガードが常に成立し、
+     * 再構築が一度も走らない。Pal32_ChangeContrast()(palette.c:174)はこの
+     * ガードを通らず、復元直後のPal_RegsからPal32/GrphPal32/TextPal32を
+     * 無条件に再構築する——Pal_TrackContrast()が想定するCRT的なフレーム
+     * ごとの段階的な収束ではなく、ステートロードに必要なone-shotの再構築
+     * である。 */
     Pal32_ChangeContrast(Contrast_Value);
     TVRAM_SetAllDirty();
     memset(s_compose_fb, 0, sizeof(s_compose_fb));   /* P535: ロード前フレームの残像を持ち越さない */
 
-    /* P474 (D-38): force the sound chips silent on state load.
+    /* P474 (D-38): ステートロード時に音源チップを強制的に無音化する。
      *
-     * WHY: none of the 17 blocks written by do_save_state() carries OPM
-     * (YM2151) or ADPCM chip state -- the only audio-adjacent fields saved are
-     * ADPCM_Clock/ADPCM_ClockRate inside state_ioc_block(), which are the chip
-     * clock divider, not playback state. And nothing in this function resets
-     * the sound chips either (ADPCM_Init()/OPM reset only run on the
-     * config-mismatch path above, via mx68k_reset_hard()). So a note or sample
-     * that was sounding at load time keeps sounding afterwards: the guest music
-     * driver we just restored holds the internal state of the (silent) save
-     * point, so it has no reason to emit the key-off that would stop it.
+     * 理由: do_save_state()が書き出す17ブロックのいずれもOPM(YM2151)や
+     * ADPCMのチップ状態を持たない——音声関連で保存されるのは
+     * state_ioc_block()内のADPCM_Clock/ADPCM_ClockRateだけで、これはチップの
+     * クロック分周であって再生状態ではない。さらにこの関数内には音源チップを
+     * リセットする処理も無い(ADPCM_Init()/OPMリセットは上記の設定不一致経路で
+     * mx68k_reset_hard()経由でのみ実行される)。そのためロード時点で鳴っていた
+     * 音符やサンプルはその後も鳴り続ける。復元したばかりのゲストの音楽
+     * ドライバは(無音だった)セーブ時点の内部状態を持っているため、それを
+     * 止めるkey-offを発行する理由が無いのである。
      *
-     * OPM: write the KEYON register (0x08) once per channel with the operator
-     * slot mask (data>>3) left at 0, which key-offs all 4 operators of that
-     * channel (opm.cpp:183-185, ch[data&7].KeyControl(data>>3)).
+     * OPM: KEYONレジスタ(0x08)へ、オペレータのスロットマスク(data>>3)を
+     * 0のままチャンネルごとに1回書き込む。これでそのチャンネルの4オペレータ
+     * すべてがkey-offされる(opm.cpp:183-185, ch[data&7].KeyControl(data>>3))。
      *
-     * ** CALLING CONVENTION (corrected 2026-07-31 after the first P474 attempt
-     * measurably did nothing): the first argument of
-     * OPM_Write(uint32_t adr, uint8_t data) is NOT a register number -- it is
-     * the X68000 I/O bus port select (0 = address latch, 1 = data write).
-     * OPM_Write() (fmg_wrap.cpp:141-143) is only a thin C wrapper forwarding
-     * to MyOPM::WriteIO() (fmg_wrap.cpp:58-68), which is the two-stage latch:
+     * ** 呼び出し規約(P474の初回実装が計測上まったく効果が無かったため
+     * 2026-07-31に訂正):
+     * OPM_Write(uint32_t adr, uint8_t data)の第1引数はレジスタ番号ではない——
+     * X68000のI/Oバス上のポート選択である(0 = アドレスlatch、1 = データ書込み)。
+     * OPM_Write()(fmg_wrap.cpp:141-143)は薄いCラッパにすぎず、
+     * 2段階latchであるMyOPM::WriteIO()(fmg_wrap.cpp:58-68)へ転送するだけ:
      * "if (adr&1) { ...; SetReg(CurReg, data); } else { CurReg = data; }".
-     * The guest write path uses the same two-stage sequence: mem_wrap.c:345
-     * maps $E90001 (addr&3==1) to OPM_Write(0, val) and :347 maps $E90003
-     * (addr&3==3) to OPM_Write(1, val).
-     * The first attempt wrote OPM_Write(0x08, ch); since 0x08&1 == 0 it fell
-     * into the address-latch branch every time, SetReg() was never called and
-     * no key-off was ever issued. The correct form is the pair below.
+     * ゲストの書込み経路も同じ2段階シーケンスを使う: mem_wrap.c:345は
+     * $E90001(addr&3==1)をOPM_Write(0, val)へ、:347は$E90003
+     * (addr&3==3)をOPM_Write(1, val)へ対応付けている。
+     * 初回実装はOPM_Write(0x08, ch)と書いていた。0x08&1 == 0なので毎回
+     * アドレスlatch側の分岐に入り、SetReg()は一度も呼ばれず、key-offも
+     * 一度も発行されなかった。正しい形は下記の2回1組の呼び出しである。
      *
-     * Known minor side effect (accepted): after this loop, the Core-internal
-     * CurReg (private, not restorable from the Bridge) is left pointing at
-     * 0x08 -- CurReg is only updated by an address-latch write (adr=0), and
-     * the channel number appears only in the data write (adr=1), so what
-     * remains is always register 0x08, never "the last channel number". If a
-     * load interrupts the guest mid-sequence (address latched, data write
-     * pending), that pending data write would land on register 0x08
-     * (KEYON/KEYOFF) instead of its intended register. The timing window is
-     * extremely narrow and the consequence is a single stray key event, so
-     * this is accepted rather than invoking the narrow Core-modification
-     * exception (recorded as a known limitation in Docs/09).
+     * 既知の軽微な副作用(許容済み): このループ後、Core内部の
+     * CurReg(privateでBridgeからは復元不可)は0x08を指したまま残る
+     * ——CurRegはアドレスlatch書込み(adr=0)でのみ更新され、チャンネル
+     * 番号はデータ書込み(adr=1)にしか現れないため、残るのは常に
+     * レジスタ0x08であり、「最後のチャンネル番号」にはならない。ゲストの
+     * シーケンス途中(アドレスlatch済み・データ書込み待ち)でロードが割り込むと、
+     * その保留中のデータ書込みは本来のレジスタではなくレジスタ0x08
+     * (KEYON/KEYOFF)に書き込まれてしまう。このタイミング窓は
+     * 極めて狭く、結果も余分なキーイベント1回にとどまるため、
+     * 狭いCore改変例外を発動するのではなく許容する
+     * (Docs/09に既知の制限として記録済み)。
      *
-     * OPM_Reset() is deliberately NOT used: it would also clear the timer A/B
-     * settings, and many X68000 music drivers use the OPM timer interrupt as
-     * their tempo source -- wiping it would be a worse regression than the bug
-     * (music that never resumes after a load). Key-off alone silences the
-     * voices while preserving tone, timer and all other register state.
+     * OPM_Reset()は意図的に使わない: タイマーA/Bの設定まで消してしまうため。
+     * X68000の音楽ドライバの多くはOPMタイマー割込みをテンポ源として使うので、
+     * それを消すと元の不具合より悪い回帰になる
+     * (ロード後に音楽が二度と再開しない)。key-offだけなら、音色・タイマー・
+     * その他すべてのレジスタ状態を保ったまま発音を止められる。
      *
-     * ADPCM: ADPCM_Init(g_audio_sample_rate_hz) is the exact call already used at mx68k_init()
-     * and mx68k_reset_hard() (existing pattern, not a new one). It clears
-     * ADPCM_Playing, the buffer pointers and the interpolation history, and
-     * does NOT touch ADPCM_ClockRate/ADPCM_Clock -- those are separate
-     * variables (adpcm.c:39-40 vs the assignment at :347) and were already
-     * restored moments ago by the state_ioc_block() call above. */
+     * ADPCM: ADPCM_Init(g_audio_sample_rate_hz)は、mx68k_init()と
+     * mx68k_reset_hard()で既に使われているのと全く同じ呼び出し(新規パターンではない)。
+     * ADPCM_Playing・バッファポインタ・補間履歴をクリアし、
+     * ADPCM_ClockRate/ADPCM_Clockには触れない——これらは別の変数
+     * (adpcm.c:39-40。代入は:347)で、直前の上記state_ioc_block()呼び出しで
+     * 既に復元済みである。 */
     for (int ch = 0; ch < 8; ch++) {
-        OPM_Write(0, 0x08);              /* addr latch: KEYON reg */
-        OPM_Write(1, (uint8_t)ch);       /* data: slot mask=0 -> KeyOff all 4 operators of this channel */
+        OPM_Write(0, 0x08);              /* アドレスlatch: KEYONレジスタ */
+        OPM_Write(1, (uint8_t)ch);       /* データ: スロットマスク=0 -> このチャンネルの4オペレータすべてをKeyOff */
     }
 
-    /* P479 (D-41症状1): replay the shadowed OPM tone registers so the chip
-     * matches what was actually saved, instead of whatever it drifted to
-     * between save and load. KEYON (0x08) is excluded -- the KEYOFF loop
-     * above already silences all channels; replaying 0x08 would re-trigger
-     * notes. Registers 0x01/0x14 are replayed with specific bits masked off
-     * to avoid one-shot side effects (LFO phase reset / timer IRQ-flag
-     * clear) that would not have happened at the actual save moment.
-     * Register 0x1B (CT/W, LFO waveform) is deliberately EXCLUDED -- writing
-     * it unconditionally also fires FDC_SetForceReady() via fmg_wrap.cpp's
-     * WriteIO (CurReg==0x1b branch), which would stomp the FDC's live ready
-     * flag with a stale save-time bit unrelated to the actual FDD state.
-     * The tone-quality cost (LFO waveform not restored across a load) is
-     * accepted as a known minor limitation to avoid that risk (Code Review
-     * finding, see Docs/09 D-41). */
+    /* P479 (D-41症状1): シャドウに保持したOPM音色レジスタを再生し、チップの状態を
+     * セーブとロードの間にずれた値ではなく、実際にセーブされた内容へ
+     * 一致させる。KEYON(0x08)は除外する——上記のKEYOFFループで
+     * 全チャンネルは既に無音化済みで、0x08を再生すると音符が
+     * 再発音してしまう。レジスタ0x01/0x14は、実際のセーブ時点では起きなかった
+     * one-shotの副作用(LFO位相リセット/タイマーIRQフラグの
+     * クリア)を避けるため、特定ビットをマスクして再生する。
+     * レジスタ0x1B(CT/W、LFO波形)は意図的に除外する——無条件に書くと
+     * fmg_wrap.cppのWriteIO(CurReg==0x1b分岐)経由でFDC_SetForceReady()も
+     * 発火し、FDCの現在のreadyフラグを、実際のFDD状態と無関係な
+     * セーブ時点の古いビットで上書きしてしまう。
+     * そのリスクを避けるため、音質面の代償(ロードをまたいでLFO波形が
+     * 復元されない)は既知の軽微な制限として許容する(Code Reviewの
+     * 指摘、Docs/09 D-41参照)。 */
     {
         static const uint8_t kOpmReplayOrder[] = {
             0x01, 0x0F, 0x10, 0x11, 0x12, 0x14, 0x18, 0x19,
@@ -6697,12 +6697,12 @@ static int do_load_state(const char* path) {
             0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f,
             0x30,0x31,0x32,0x33,0x34,0x35,0x36,0x37,
             0x38,0x39,0x3a,0x3b,0x3c,0x3d,0x3e,0x3f
-            /* 0x40-0xFF (TL/AR/DR/SR/RR) added by range loop below.
-             * 0x1B intentionally omitted -- see comment above. */
+            /* 0x40-0xFF (TL/AR/DR/SR/RR) は下の範囲ループで追加する。
+             * 0x1Bは意図的に除外——上のコメント参照。 */
         };
         for (size_t i = 0; i < sizeof(kOpmReplayOrder); i++) {
             uint8_t reg = kOpmReplayOrder[i];
-            if (reg == 0x19) continue;   /* handled separately below (2 slots) */
+            if (reg == 0x19) continue;   /* 下で別途処理(2スロット) */
             if (!g_opm_written[reg]) continue;
             uint8_t data = g_opm_shadow[reg];
             if (reg == 0x01) data &= (uint8_t)~0x02;
@@ -6717,12 +6717,12 @@ static int do_load_state(const char* path) {
             OPM_Write(0, (uint8_t)reg);
             OPM_Write(1, g_opm_shadow[reg]);
         }
-        /* restore the two-stage latch itself last -- also fixes the P474
-         * known limitation where CurReg was left stuck at 0x08 after the
-         * KEYOFF loop (see the P474 comment above). Note: if the saved
-         * CurReg happened to be 0x1B, this final write still only latches
-         * the address (adr=0), it does not perform the data write that
-         * triggers WriteIO's CurReg==0x1b side effects -- safe. */
+        /* 2段階latch自体を最後に復元する——これによりP474の既知の制限
+         * (KEYOFFループ後にCurRegが0x08のまま残る問題、上のP474コメント
+         * 参照)も解消する。注意: セーブ時のCurRegがたまたま0x1Bだった
+         * 場合でも、この最後の書込みはアドレスをlatchするだけ(adr=0)で、
+         * WriteIOのCurReg==0x1b副作用を引き起こすデータ書込みは
+         * 行わない——安全。 */
         OPM_Write(0, g_opm_curreg);
     }
 
@@ -6745,13 +6745,13 @@ static int do_load_state(const char* path) {
      * あり、同一バッファに対して複数回呼んでも安全(冪等)。 */
     state_ioc_block((uint8_t*)blk_ioc, 0);
 
-    /* CPU regs restored LAST (PC last inside) */
+    /* CPUレジスタは最後に復元する(その中でもPCが最後) */
     state_cpu_load(blk_cpu);
     cpu_setOPbase24((uint32_t)m68000_get_reg(M68K_PC));
 
-    /* FDD re-mount if the saved image path differs from the current one.
-     * mx68k_fdd_insert is safe to call on the emulation thread (it only stores
-     * the path + loads the image via the Core FDD API). */
+    /* 保存されたイメージパスが現在のものと異なればFDDを再マウントする。
+     * mx68k_fdd_insertはエミュレーションスレッドから呼んでも安全(パスの保存と
+     * Core FDD API経由のイメージ読込みしか行わない)。 */
     for (int d = 0; d < 2; d++) {
         if (strcmp(s_fdd[d], g_fdd_path[d]) != 0) {
             if (s_fdd[d][0] != '\0') mx68k_fdd_insert(d, s_fdd[d]);
@@ -6769,7 +6769,7 @@ int mx68k_save_state(const char* path) {
     strncpy(g_pending_state_path, path, sizeof(g_pending_state_path) - 1);
     g_pending_state_path[sizeof(g_pending_state_path) - 1] = '\0';
     atomic_store(&g_pending_save, 1);
-    return 0;   /* queued; runs at the next run_frame boundary */
+    return 0;   /* キュー投入済み。次のrun_frame境界で実行される */
 }
 
 int mx68k_load_state(const char* path) {
@@ -6777,12 +6777,12 @@ int mx68k_load_state(const char* path) {
     strncpy(g_pending_state_path, path, sizeof(g_pending_state_path) - 1);
     g_pending_state_path[sizeof(g_pending_state_path) - 1] = '\0';
     atomic_store(&g_pending_load, 1);
-    return 0;   /* queued; runs at the next run_frame boundary */
+    return 0;   /* キュー投入済み。次のrun_frame境界で実行される */
 }
 
-/* P481 (D-42): completion readout for the queued save/load (see g_state_op_seq).
- * Callers snapshot mx68k_state_op_seq() before queueing, then poll until it
- * changes; at that point mx68k_last_state_rc()/_kind() describe that operation. */
+/* P481 (D-42): キュー投入したセーブ/ロードの完了読み出し(g_state_op_seq参照)。
+ * 呼び出し側はキュー投入前にmx68k_state_op_seq()を控え、値が変わるまで
+ * ポーリングする。変化した時点でmx68k_last_state_rc()/_kind()がその操作の結果を示す。 */
 unsigned int mx68k_state_op_seq(void)    { return atomic_load(&g_state_op_seq); }
 int          mx68k_last_state_rc(void)   { return atomic_load(&g_state_op_rc); }
 int          mx68k_last_state_kind(void) { return atomic_load(&g_state_op_kind); }
@@ -6800,7 +6800,7 @@ void mx68k_schedule_sram_clear(void) {
     g_pending_sram_clear = 1;
 }
 
-// ---- settings ----
+// ---- 設定 ----
 void mx68k_set_machine_type(int type) {
     g_machine_type = type;
 }
@@ -6821,9 +6821,9 @@ void mx68k_set_scsi_ext_board_installed(bool installed) {
     g_scsi_ext_board_installed = installed;
 }
 
-/* P85-A (MAJOR-1): export the file-static g_memory_size_mb so the P85A MEMSIZE
- * probe in m68000_bridge.c can read it without an `extern int g_memory_size_mb`
- * (which would fail to link against an internal-linkage symbol). Read-only. */
+/* P85-A (MAJOR-1): ファイルstaticのg_memory_size_mbを公開し、m68000_bridge.cのP85A MEMSIZE
+ * プローブが`extern int g_memory_size_mb`(内部リンケージのシンボルには
+ * リンクできない)を使わずに読めるようにする。read-only。 */
 int mx68k_get_memory_size_mb(void) {
     return g_memory_size_mb;
 }
@@ -6834,18 +6834,18 @@ void mx68k_set_clock_mhz(int mhz) {
 
 static char g_iplrom30_path[4096];
 
-/* P241 Stage A: external SCSI (CZ-6BS1) IPL ROM. SCSIIPL[] is the non-static
- * global defined in Core/px68k/x68k/scsi.c (0x2000 = 8KB); referenced here via
- * extern so Core stays unmodified. */
-extern uint8_t SCSIIPL[];               /* scsi.c: external CZ-6BS1 IPL ROM 0x2000 */
+/* P241 Stage A: 外付けSCSI(CZ-6BS1)IPL ROM。SCSIIPL[]はCore/px68k/x68k/scsi.cで
+ * 定義された非staticのグローバル(0x2000 = 8KB)。Coreを無改変に保つため
+ * ここではextern経由で参照する。 */
+extern uint8_t SCSIIPL[];               /* scsi.c: 外付けCZ-6BS1 IPL ROM 0x2000 */
 static bool s_scsi_ext_rom_loaded = false;
 
-/* Load the external SCSI (CZ-6BS1) IPL ROM (SCSIEXROM.DAT, 8KB) into SCSIIPL[].
- * Optional: if the file is absent the external-SCSI boot path is simply disabled
- * (not a fatal error). Size 0x2000 (0x1FE0 also accepted, WinX68k/XM6 compat).
- * ★SCSIIPL is stored LE16-byte-swapped: both scsi.c's data read (adr^1) and the
- * c68k LE-native fetch of $EA0000 require it — same technique as the IPLROM
- * s_ipl_fetch build above. */
+/* 外付けSCSI(CZ-6BS1)のIPL ROM(SCSIEXROM.DAT、8KB)をSCSIIPL[]へ読み込む。
+ * 任意: ファイルが無ければ外付けSCSIからの起動経路が無効になるだけ
+ * (致命的エラーではない)。サイズは0x2000(WinX68k/XM6互換で0x1FE0も受け付ける)。
+ * ★SCSIIPLはLE16でバイトスワップして格納する: scsi.cのデータ読出し(adr^1)と
+ * c68kによる$EA0000のLEネイティブフェッチの両方がそれを必要とする——上のIPLROM
+ * s_ipl_fetch構築と同じ手法。 */
 void mx68k_set_scsi_ext_rom_path(const char* path) {
     s_scsi_ext_rom_loaded = false;
     memset(SCSIIPL, 0, 0x2000);
@@ -6863,7 +6863,7 @@ void mx68k_set_scsi_ext_rom_path(const char* path) {
     size_t n = fread(tmp, 1, 0x2000, fp);
     fclose(fp);
     if (n < 0x1FE0) { debug_log("[MX68K] SCSIEXROM: short read %zu\n", n); return; }
-    for (size_t i = 0; i + 1 < n; i += 2) {   /* LE16 swap store */
+    for (size_t i = 0; i + 1 < n; i += 2) {   /* LE16スワップして格納 */
         SCSIIPL[i]     = tmp[i + 1];
         SCSIIPL[i + 1] = tmp[i];
     }
@@ -6904,14 +6904,14 @@ void mx68k_set_bios_path(const char* iplrom, const char* cgrom) {
                 memset(FONT, 0, 0xC0000);
                 cg_ok = (fread(FONT, 1, 0xC0000, fp) == 0xC0000);
                 if (cg_ok) {
-                    /* P174: byte-swap FONT to LE-native. CGROM.DAT is stored big-endian,
-                     * but MX reads FONT via the LE-native *(uint16_t*)&FONT[] convention
-                     * (Core mem_wrap.c:510/555/557, Bridge m68000_bridge.c:21569/21571/22017,
-                     * and the c68k fetch region at m68000_bridge.c:25463). Without this swap
-                     * every font-row read is byte-swapped -> full-width chars show their
-                     * left/right 8px halves swapped and half-width chars overlap. FONT is a
-                     * read-only ROM with a single (LE) read convention, so an in-place swap
-                     * is uniformly correct. */
+                    /* P174: FONTをLEネイティブへバイトスワップする。CGROM.DATはビッグエンディアンで格納されているが、
+                     * MXはFONTをLEネイティブの*(uint16_t*)&FONT[]規約で読む
+                     * (Core mem_wrap.c:510/555/557、Bridge m68000_bridge.c:21569/21571/22017、
+                     * およびm68000_bridge.c:25463のc68kフェッチ領域)。このスワップが無いと
+                     * フォント行の読出しがすべてバイト逆順になる -> 全角文字は左右8pxの半分が
+                     * 入れ替わって表示され、半角文字は重なる。FONTは読出し規約が1つ(LE)
+                     * しかないread-onlyのROMなので、その場でのスワップが
+                     * 一律に正しい。 */
                     for (uint32_t i = 0; i < 0xC0000; i += 2) {
                         uint8_t t = FONT[i];
                         FONT[i]     = FONT[i + 1];
@@ -7149,14 +7149,14 @@ void mx68k_set_opm_volume(int vol) {
     if (vol < 0) vol = 0;
     if (vol > 16) vol = 16;
     g_opm_volume = vol;
-    OPM_SetVolume((uint8_t)vol);   /* P512: was empty stub; wire to Core OPM volume (0-16), same scale as ADPCM. */
+    OPM_SetVolume((uint8_t)vol);   /* P512: 以前は空スタブ。CoreのOPM音量(0-16)へ配線、ADPCMと同じスケール。 */
 }
 
 void mx68k_set_adpcm_volume(int vol) {
     if (vol < 0) vol = 0;
     if (vol > 16) vol = 16;
-    g_adpcm_volume = vol;   /* P512: remember for the hard-reset re-apply path. */
-    ADPCM_SetVolume((uint8_t)vol);   /* P210: was empty stub; wire to Core ADPCM volume (0-16). */
+    g_adpcm_volume = vol;   /* P512: ハードリセット時の再適用経路のために記憶しておく。 */
+    ADPCM_SetVolume((uint8_t)vol);   /* P210: 以前は空スタブ。CoreのADPCM音量(0-16)へ配線。 */
 }
 
 /* P624: ターボモード中の音声再生レート設定(P555 の mx68k_set_turbo_audio_mute を置換)。
@@ -7299,14 +7299,14 @@ void mx68k_sram_clear(void) {
     sram_ext_clear();
 }
 
-// ---- framebuffer ----
+// ---- フレームバッファ ----
 static inline uint32_t px68k_color_to_rgba(uint32_t c)
 {
-    // px68k stores colors as 0xRRGGBB00 (R@bits24-31, G@16-23, B@8-15).
-    // P184: the Metal texture is .bgra8Unorm, so emit B,G,R,A byte order (BGRA)
-    // to match it. (Previously emitted R,G,B,A → R/B swapped on display: blue
-    // rendered as orange. White/green are swap-invariant, which is why text
-    // looked correct and only color-heavy graphics revealed the swap.)
+    // px68kは色を0xRRGGBB00(R@bits24-31, G@16-23, B@8-15)で保持する。
+    // P184: Metalテクスチャは.bgra8Unormなので、それに合わせてB,G,R,Aのバイト順(BGRA)で
+    // 出力する。(以前はR,G,B,Aで出力していた → 表示でR/Bが入れ替わり、青が
+    // オレンジで描画されていた。白/緑は入れ替えても変わらないため、文字は
+    // 正しく見え、色数の多いグラフィックでのみ入れ替わりが露見した。)
     // c=0xRRGGBB00 → (c>>8)=0x00RRGGBB → bytes B,G,R + A=0xFF = BGRA.
     return ((c >> 8) & 0x00FFFFFF) | 0xFF000000;
 }
@@ -7389,15 +7389,15 @@ static int mx68k_crtc_std_window(uint8_t r20lo,
 
     if (hires) {
         switch (hdots) {
-        case 0: *r02_std = 6;  *r03_std = 38;  *r00_std = 45;  break;   /* 256 dot  R00=0x2D */
-        case 1: *r02_std = 17; *r03_std = 81;  *r00_std = 91;  break;   /* 512 dot  R00=0x5B */
-        case 2: *r02_std = 28; *r03_std = 124; *r00_std = 137; break;   /* 768 dot  R00=0x89 */
+        case 0: *r02_std = 6;  *r03_std = 38;  *r00_std = 45;  break;   /* 256ドット  R00=0x2D */
+        case 1: *r02_std = 17; *r03_std = 81;  *r00_std = 91;  break;   /* 512ドット  R00=0x5B */
+        case 2: *r02_std = 28; *r03_std = 124; *r00_std = 137; break;   /* 768ドット  R00=0x89 */
         default: return 0;                              /* 11: 表2-12 に無し */
         }
     } else {
         switch (hdots) {
-        case 0: *r02_std = 0; *r03_std = 32; *r00_std = 37; break;      /* 256 dot  R00=0x25 */
-        case 1: *r02_std = 5; *r03_std = 69; *r00_std = 75; break;      /* 512 dot  R00=0x4B */
+        case 0: *r02_std = 0; *r03_std = 32; *r00_std = 37; break;      /* 256ドット  R00=0x25 */
+        case 1: *r02_std = 5; *r03_std = 69; *r00_std = 75; break;      /* 512ドット  R00=0x4B */
         default: return 0;                              /* 15.98kHz の 768/未定義は無し */
         }
     }
@@ -7791,9 +7791,9 @@ static void mx68k_render_end(void) {
     }
 #endif
 
-    /* P162: text layer enabled (TXON) but zero visible pixels — diagnose
-     * whether the text VRAM is empty (boot stalled before printing) vs a
-     * render-path defect. Read-only, bounded (<=6 dumps, only while stuck). */
+    /* P162: テキスト面が有効(TXON)なのに可視画素がゼロ——テキストVRAMが空
+     * (表示前に起動が停止)なのか、描画経路の不具合なのかを診断する。
+     * read-only、上限あり(ダンプは6回まで、停止中のみ)。 */
     static int s_p162_dumps = 0;
     if (log_this && (VCReg2[1] & 0x20) && nonzero_pixels == 0 && s_p162_dumps < 6) {
         s_p162_dumps++;
@@ -7836,7 +7836,7 @@ static void mx68k_render_end(void) {
                (size_t)disp_w * 4);
     }
 
-    s_fb_w[back] = disp_w;   /* P179+P595: publish size paired with buffer(実描画寸法) */
+    s_fb_w[back] = disp_w;   /* P179+P595: バッファと対になるサイズ(実描画寸法)を公開 */
     s_fb_h[back] = disp_h;
     /* P595 (D-55): 寸法と同じ back インデックスへ表示ジオメトリも書き、下の release
      * store が張る既存の happens-before 境界でまとめて公開する(新規の同期機構は不要)。 */
@@ -7845,7 +7845,7 @@ static void mx68k_render_end(void) {
     s_fb_offx[back]    = s_render_offx;
     s_fb_offy[back]    = s_render_offy;
     s_fb_geomode[back] = s_render_geomode;
-    atomic_store_explicit(&s_fb_front, back, memory_order_release);  /* P179: publish complete frame */
+    atomic_store_explicit(&s_fb_front, back, memory_order_release);  /* P179: 完成したフレームを公開 */
 #if P303_ENABLE
     atomic_store_explicit(&s_fb_front_frame_num, fb_call_count, memory_order_release);
 #endif
@@ -8261,7 +8261,7 @@ static void mx68k_draw_display_line(void) {
             ecx = ((BG0ScrollX - BG_HAdjust) & 0x1f8) >> 2;
             step = TextDotX >> 3;
         } else {
-            int32_t adjust16 = p359_bg_above_text ? 0 : BG_HAdjust;   /* Code Review round1 */
+            int32_t adjust16 = p359_bg_above_text ? 0 : BG_HAdjust;   /* Code Review 第1ラウンド */
             edx = BG_BG0TOP + (((BG0ScrollY + VLINEBG - BG_VLINE) & 0x3f0) << 3);
             ecx = ((BG0ScrollX - adjust16) & 0x3f0) >> 3;
             step = TextDotX >> 4;
@@ -8330,7 +8330,7 @@ static void mx68k_draw_display_line(void) {
     if (TextDotX > 1024) TextDotX = 1024;
 
     {
-        // Clear line buffers for this scanline.
+        // この走査線のラインバッファをクリアする。
         memset(Grp_LineBuf32, 0, sizeof(uint32_t) * disp_w);
         memset(BG_LineBuf32 + 16, 0, sizeof(uint32_t) * disp_w);
         memset(Text_TrFlag + 16, 0, disp_w);
@@ -8417,13 +8417,13 @@ static void mx68k_draw_display_line(void) {
             }
         }
 
-        // BG / Sprites and text share one line buffer (BG_LineBuf32) and one flag byte
-        // (Text_TrFlag: bit0=text tvram.c:259, bit1=sprite/BG bg.c:355), so the plane that
-        // paints LAST owns the pixel color. P213: pick the order from the inter-plane
-        // priority the way upstream does (windraw.c:645) instead of hardcoding one order —
-        // with sprite in front of text (Super Xevious: VCReg1[0]=0x09 -> sp=0 tx=2) the
-        // fixed order let the text plane overwrite sprite pixels.
-        int text_on = (VCReg2[1] & 0x20) != 0;   // P161: text enable (VCReg2 b5 TXON)
+        // BG/スプライトとテキストは1つのラインバッファ(BG_LineBuf32)と1つのフラグバイト
+        // (Text_TrFlag: bit0=テキスト tvram.c:259、bit1=スプライト/BG bg.c:355)を共有するため、
+        // 最後に描いた面がその画素の色を持つ。P213: 描画順を1つに固定せず、上流
+        // (windraw.c:645)と同様に面間プライオリティから決める——
+        // スプライトがテキストより手前の場合(Super Xevious: VCReg1[0]=0x09 -> sp=0 tx=2)、
+        // 固定順ではテキスト面がスプライトの画素を上書きしていた。
+        int text_on = (VCReg2[1] & 0x20) != 0;   // P161: テキスト有効(VCReg2 b5 TXON)
         /* P436 (D-5): px68k上流(MPX68K windraw.c:664,681で確認)の sp 描画
          * ゲートのうち、BG_Regs[0x11]&2(h_res未定義値)判定を追加した。
          * ★P436時点のコメント「ゲート1(BG_Regs[8]&2、DISP)は実測で常に真」
@@ -8441,8 +8441,8 @@ static void mx68k_draw_display_line(void) {
          * サンプリングで乖離0。 */
         int sp_on   = ((VCReg2[1] & 0x40) != 0) && ((BG_Regs[8] & 0x02) != 0)
                       && ((BG_Regs[0x11] & 0x02) == 0);   // P161/P436/P544(D-36): SPON + DISP + h_res定義済み(参照実装3種と一致)
-        // Same condition as upstream windraw.c:645 ((VCReg1[0]&0x30)>>2) < (VCReg1[0]&0x0c),
-        // i.e. sprite priority < text priority.
+        // 上流windraw.c:645と同じ条件 ((VCReg1[0]&0x30)>>2) < (VCReg1[0]&0x0c)、
+        // すなわちスプライトのプライオリティ < テキストのプライオリティ。
         int bg_above_text = (((VCReg1[0] & 0x30) >> 2) < (VCReg1[0] & 0x0c));
 
 #if P543_ENABLE
@@ -8532,12 +8532,12 @@ static void mx68k_draw_display_line(void) {
         }
 #endif
 
-        // Text layer — P197: draw the text plane OPAQUE when it is the only enabled
-        // plane, so text index-0 fills the backdrop color (TextPal32[0]) instead of
-        // being transparent (black). The X68000 backmost plane is the opaque base.
-        // (SX-Window desktop is an index-0/index-1 dither; non-opaque lost the index-0
-        // olive backdrop, turning the desktop deep-blue.) When graphics or sprite/BG
-        // planes are also enabled they provide the base, so keep text transparent then.
+        // テキスト面——P197: 有効な面がテキスト面だけのときは不透明で描画し、
+        // テキストのindex 0が透明(黒)にならず背景色(TextPal32[0])で
+        // 塗られるようにする。X68000の最背面の面は不透明な下地である。
+        // (SX-Windowのデスクトップはindex 0/index 1のディザで、非不透明だとindex 0の
+        // オリーブ色の背景が失われ、デスクトップが濃紺になっていた。)グラフィック面や
+        // スプライト/BG面も有効なときはそれらが下地になるので、テキストは透明のままにする。
         int text_opaq = ((VCReg2[1] & 0x0F) == 0) && ((VCReg2[1] & 0x40) == 0);
         /* P392: bg_above_text構成では上流(MPX68K x11/windraw.c:656)がGRPの有無に
          * 関わらず無条件にText_DrawLine_C(1)を呼ぶ——テキスト索引0が画面背景色
@@ -8599,9 +8599,9 @@ static void mx68k_draw_display_line(void) {
 #endif
 
         if (bg_above_text) {
-            // Same order as upstream windraw.c:649/664. BG_DrawLine's opaq argument now
-            // matches upstream exactly: !text_on floods the line with TextPal32[0]
-            // (bg.c:499) only when the text plane is off, avoiding erasure of text drawn
+            // 上流windraw.c:649/664と同じ順序。BG_DrawLineのopaq引数は現在
+            // 上流と完全に一致する: !text_onのときは、テキスト面がオフのときに限り
+            // ラインをTextPal32[0]で塗りつぶし(bg.c:499)、テキストを消してしまうことを避ける
             // just above when text_on=1 (D-35症状1修正、P466。旧コメントの「text_opaq
             // が単独所有」は本修正前の記述で、現在は誤り)。
             if (text_on) Text_DrawLine(text_opaq);
@@ -8715,14 +8715,14 @@ static void mx68k_draw_display_line(void) {
             if (text_on) Text_DrawLine(0);
         }
 
-        // Composite into s_framebuffer (RGBA8888, tightly packed disp_w x disp_h) — P172
-        // P197: inter-plane priority from VCReg1[0] (smaller value = front-most, 0 = front).
-        // Tie: text/BG plane wins (upstream order GRP<SP<TEXT). VCReg1[1] is intra-graphic-page
-        // priority (used above), NOT inter-plane — the old (VCReg1[1]&1) read the wrong byte.
+        // s_framebuffer(RGBA8888、disp_w x disp_hで詰めて配置)へ合成する——P172
+        // P197: 面間プライオリティはVCReg1[0]から(値が小さいほど手前、0 = 最前面)。
+        // 同値ならテキスト/BG面が勝つ(上流の順序GRP<SP<TEXT)。VCReg1[1]はグラフィックページ内の
+        // プライオリティ(上で使用)であって面間ではない——旧来の(VCReg1[1]&1)は誤ったバイトを読んでいた。
         uint8_t* dst = fb + (y * MX_COMPOSE_STRIDE) * 4;   /* P535: 固定ストライド */
-        int pri_gr = (VCReg1[0]     ) & 3;   // graphic plane
-        int pri_tx = (VCReg1[0] >> 2) & 3;   // text plane
-        int pri_sp = (VCReg1[0] >> 4) & 3;   // sprite / background plane
+        int pri_gr = (VCReg1[0]     ) & 3;   // グラフィック面
+        int pri_tx = (VCReg1[0] >> 2) & 3;   // テキスト面
+        int pri_sp = (VCReg1[0] >> 4) & 3;   // スプライト/BG面
         /* P501-D44: VC R1 の優先度値 3 は値 2 と同一ランク。生値 pri_* は温存する
          * (既存の [P282]/[P357-COMPOSE]/mx68k_get_status が生値を表示しているため)。
          * 一次情報源: XM6 vm/render.cpp:1049-1051 / px68k本家 x11/windraw.c:1275,1288,1306
@@ -8747,11 +8747,11 @@ static void mx68k_draw_display_line(void) {
             // P284: SP 背半(偶数色)は graphic プレーン内で page1 の上に重なる(graphic 優先度のまま)
             if (sp_active && Grp_LineBuf32SP2[x]) gcol = Grp_LineBuf32SP2[x];
             int off = x + 16;
-            uint32_t tcol = BG_LineBuf32[off];                 // text or bg pixel color
-            // P217: on the X68000 color index 0 is transparent, so decide transparency
-            // from the color value the way upstream windraw.c:271 (WD_SUB) does with
-            // `w != 0`. The flag only says a plane painted the pixel, not that it is
-            // opaque — bg.c:370 sets it even when it writes color 0.
+            uint32_t tcol = BG_LineBuf32[off];                 // テキストまたはBGの画素色
+            // P217: X68000では色index 0が透明なので、上流windraw.c:271(WD_SUB)が
+            // `w != 0`で行っているのと同様に、透明かどうかを色の値から判定する。
+            // フラグはある面がその画素を描いたことを示すだけで、不透明であることは
+            // 示さない——bg.c:370は色0を書いたときでもフラグを立てる。
             int has_text = (Text_TrFlag[off] & 1) && tcol;
             /* P539: 参照実装の WinDraw_DrawBGLine(opaq, td) は td==0 のとき
              * Text_TrFlag を見ず「値が非0なら書く」(MPX x11/windraw.c:402 _DBL_SUB2)。
@@ -8940,9 +8940,9 @@ static void mx68k_draw_display_line(void) {
                 s_p217_y_max = y;
             }
 #endif
-            // P213: a pixel carrying both flags is owned by whichever plane painted last,
-            // so score it with that plane's priority (was: always the text plane, which made
-            // sprite pixels lose to the graphic plane).
+            // P213: 両方のフラグを持つ画素は最後に描いた面のものなので、
+            // その面のプライオリティで評価する(以前は常にテキスト面で評価しており、
+            // スプライトの画素がグラフィック面に負けていた)。
             // P501-D44: 比較はランク値(3→2 に丸めたもの)で行う。生値 pri_* は温存。
             int rank_t = bg_above_text ? (has_bg   ? rank_sp : (has_text ? rank_tx : -1))
                                        : (has_text ? rank_tx : (has_bg   ? rank_sp : -1));
@@ -8969,13 +8969,13 @@ static void mx68k_draw_display_line(void) {
             }
 
             if (gcol && has_t) {
-                col = (rank_gr < rank_t) ? gcol : tcol;        // smaller = front; tie -> text/bg
+                col = (rank_gr < rank_t) ? gcol : tcol;        // 小さいほど手前。同値 -> テキスト/BG
             } else if (gcol) {
                 col = gcol;
             } else if (has_t) {
                 col = tcol;
             } else {
-                col = tcol;                                    // typically 0
+                col = tcol;                                    // 通常は0
             }
 
             // P284: SP 前半(奇数色)は全プレーンの最前面(スプライトより手前)に描く
@@ -9015,7 +9015,7 @@ const uint8_t* mx68k_get_framebuffer_geom(int* width, int* height,
     if (v_scale) *v_scale = s_fb_vscale[front];
     if (off_x)   *off_x   = s_fb_offx[front];
     if (off_y)   *off_y   = s_fb_offy[front];
-    return s_framebuffer[front];   /* P179: latest complete frame */
+    return s_framebuffer[front];   /* P179: 最新の完成フレーム */
 }
 
 /* P595 (D-55): 診断・モニタ表示専用の geo_mode(0=恒等 1=標準R00/R04 2=非標準R00
@@ -9052,10 +9052,10 @@ const uint8_t* mx68k_get_framebuffer(int* width, int* height) {
         }
     }
 #endif
-    return fb;   /* P179: latest complete frame; back buffer is being rendered */
+    return fb;   /* P179: 最新の完成フレーム。バックバッファは描画中 */
 }
 
-// ---- audio ----
+// ---- 音声 ----
 int mx68k_audio_read(int16_t* buffer, int frames) {
 #if P464_RINGFILL_ENABLE
     /* P464 (D-6再調査): ここは CoreAudio 実時間スレッド。★debug_log() などの同期I/Oは
@@ -9237,7 +9237,7 @@ int mx68k_audio_read(int16_t* buffer, int frames) {
     return frames;
 }
 
-// ---- input ----
+// ---- 入力 ----
 #if P214_ENABLE
 /* P214-K（診断・既定は休止）: make/break を先頭 60 イベントだけ記録する。
  * Core keyboard.c はリピートを生成しない（KeyBuf への書込は下の 2 箇所のみ）ので、
@@ -9252,8 +9252,8 @@ static void p214_k_log(const char *kind, uint8_t keycode) {
 #endif
 
 void mx68k_key_down(uint8_t keycode) {
-    /* P175: Core keyboard.c is a stub — push the X68000 scancode into KeyBuf here
-     * (upstream send_keycode: down=code). */
+    /* P175: Coreのkeyboard.cはスタブなので、ここでX68000のスキャンコードをKeyBufへ積む
+     * (上流のsend_keycode: down=code)。 */
 #if P214_ENABLE
     p214_k_log("make ", keycode);
 #endif
@@ -9323,7 +9323,7 @@ void mx68k_joy_set1(int port, uint8_t bits) {
     GamePad_SetState1((int32_t)port, bits);
 }
 
-// ---- status ----
+// ---- ステータス ----
 void mx68k_get_status(MX68KStatus* status) {
     if (!status) return;
     memset(status, 0, sizeof(*status));
@@ -9340,10 +9340,10 @@ void mx68k_get_status(MX68KStatus* status) {
     status->memory_mb = g_memory_size_mb;
     status->fpu_enabled = g_fpu_enabled;
     status->fdd0_inserted = (FDD_IsReady(0) != 0);
-    status->fdd0_active = (mx68k_fdd_accessing(0) != 0);   /* P160: red = accessing */
+    status->fdd0_active = (mx68k_fdd_accessing(0) != 0);   /* P160: 赤 = アクセス中 */
     status->fdd1_inserted = (FDD_IsReady(1) != 0);
-    status->fdd1_active = (mx68k_fdd_accessing(1) != 0);   /* P160: red = accessing */
-    status->hdd_busy = (mx68k_hdd_accessing() != 0);       /* P201: HD BUSY lamp */
+    status->fdd1_active = (mx68k_fdd_accessing(1) != 0);   /* P160: 赤 = アクセス中 */
+    status->hdd_busy = (mx68k_hdd_accessing() != 0);       /* P201: HD BUSYランプ */
     /* P455: 8 ユニットの装着マスクを生値として出す(表示には使わない)。
      * ★SCSI の在席はここに OR しない — 「SASI が何台か」が読めなくなるため。
      * ★P456: 導出は mx68k_sasi_unit_mask() に一本化(式は literally 同一で
@@ -9374,12 +9374,12 @@ void mx68k_get_status(MX68KStatus* status) {
     /* P684: ドライブ 2/3 も同じ経路で Swift 側へ渡す。 */
     status->fdd2_media_present = (mx68k_fdd_media_present(2) != 0);
     status->fdd3_media_present = (mx68k_fdd_media_present(3) != 0);
-    status->fdd2_active = (mx68k_fdd_accessing(2) != 0);   /* P689: red = accessing */
-    status->fdd3_active = (mx68k_fdd_accessing(3) != 0);   /* P689: red = accessing */
+    status->fdd2_active = (mx68k_fdd_accessing(2) != 0);   /* P689: 赤 = アクセス中 */
+    status->fdd3_active = (mx68k_fdd_accessing(3) != 0);   /* P689: 赤 = アクセス中 */
 }
 
-/* P286: developer monitor panels. Read-only snapshots of existing extern globals
- * (no Core changes). Same no-lock snapshot-copy contract as mx68k_get_status. */
+/* P286: 開発者向けモニタパネル。既存のexternグローバルのread-onlyスナップショット
+ * (Core変更なし)。mx68k_get_statusと同じロック無しスナップショットコピーの契約。 */
 void mx68k_get_crtc_status(MX68KCRTCStatus* status) {
     if (!status) return;
     memset(status, 0, sizeof(*status));
@@ -9521,14 +9521,14 @@ void mx68k_get_rtc_status(MX68K_RTCStatus* out) {
 
     /* ---- 制御 / アラーム(BANK1)。RTC_Write() が実際に格納する真の状態 ---- */
     out->bank          = RTC_Bank;
-    out->clkout_select = RTC_Regs[1][0] & 0x07;   /* rtc.c:142 Clock OutPut select */
+    out->clkout_select = RTC_Regs[1][0] & 0x07;   /* rtc.c:142 Clock OutPut選択 */
     out->adj           = RTC_Regs[1][1] & 0x01;   /* rtc.c:143 ADJ */
     /* アラームの分/時/日は「1の位」「10の位」の 2 レジスタに分かれている
      * (rtc.c:144-150)。RTC_Read() の BANK1 case が使うのと同じマスクを掛けた上で
      * 10 進値へ合成する(Swift 側で BCD 復元をやり直さずに済むように)。 */
     out->alarm_min  = (uint8_t)(((RTC_Regs[1][3] & 0x07) * 10) + (RTC_Regs[1][2] & 0x0f));
     out->alarm_hour = (uint8_t)(((RTC_Regs[1][5] & 0x03) * 10) + (RTC_Regs[1][4] & 0x0f));
-    out->alarm_wday = RTC_Regs[1][6] & 0x07;      /* rtc.c:148 Alarm day of week */
+    out->alarm_wday = RTC_Regs[1][6] & 0x07;      /* rtc.c:148 アラームの曜日 */
     out->alarm_day  = (uint8_t)(((RTC_Regs[1][8] & 0x03) * 10) + (RTC_Regs[1][7] & 0x0f));
     out->hour_mode_24 = RTC_Regs[1][10] & 0x01;   /* rtc.c:152 / RTC_Init():27 で既定 1(24h) */
     out->leap_year_ctr = RTC_Regs[1][11] & 0x03;  /* rtc.c:153。★読み戻されない(下記) */
@@ -9554,7 +9554,7 @@ void mx68k_get_rtc_status(MX68K_RTCStatus* out) {
                 tm24 = (uint8_t)(tm->tm_hour);
             } else {                                /* 12時間制 (rtc.c:49-52) */
                 tm24 = (uint8_t)((tm->tm_hour) % 12);
-                if ((tm->tm_hour) >= 12) tm24 = (uint8_t)(tm24 + 20);   /* PM set */
+                if ((tm->tm_hour) >= 12) tm24 = (uint8_t)(tm24 + 20);   /* PMをセット */
             }
             out->sec    = (uint8_t)(tm->tm_sec);
             out->minute = (uint8_t)(tm->tm_min);
@@ -9941,12 +9941,12 @@ void mx68k_set_text_plane_backdrop(int enabled) {
     s_text_plane_backdrop = enabled ? 1 : 0;
 }
 
-/* P343: dump the derived text-plane buffer (TextDrawWork, 1024x1024) as RGBA8888
- * so a monitor panel can view its raw contents, the same way XM6's BG monitor
- * shows a page. Read-only; palette index maps directly through TextPal32 exactly
- * as Text_DrawLine does (tvram.c:245/257). t==0 -> TextPal32[0](backdrop, P356
- * default) or transparent (P356 toggled off; same convention as
- * mx68k_get_sprite_pattern_rgba). */
+/* P343: 派生したテキスト面バッファ(TextDrawWork、1024x1024)をRGBA8888でダンプし、
+ * XM6のBGモニタがページを表示するのと同様に、モニタパネルで生の内容を
+ * 見られるようにする。read-only。パレットindexはText_DrawLineと全く同じく
+ * TextPal32を通して直接変換する(tvram.c:245/257)。t==0 -> TextPal32[0](背景色、P356
+ * 既定)または透明(P356でオフに切替時。mx68k_get_sprite_pattern_rgbaと
+ * 同じ規約)。 */
 void mx68k_get_text_plane_rgba(uint8_t* out_rgba) {
     if (!out_rgba) return;
     extern uint8_t  TextDrawWork[1024*1024 + 100];
@@ -9966,18 +9966,18 @@ void mx68k_get_text_plane_rgba(uint8_t* out_rgba) {
     }
 }
 
-/* P348: dump BG page 0/1 to a 1024x1024 RGBA buffer for a monitor panel, the same
- * way XM6's BG page monitor lets you see the raw tilemap+pattern content. Reuses
- * the existing Core tile decoder (bg_drawline_loopx16/x8, bg.c) one row at a time
- * instead of re-implementing its flip-bit tricks — safer and byte-identical to
- * what the real compositor would draw. Saves/restores VLINEBG/BG_VLINE/TextDotX
- * so this on-demand dump doesn't disturb the next real frame's rendering. */
+/* P348: XM6のBGページモニタで生のタイルマップ+パターン内容を見られるのと同様に、
+ * BGページ0/1をモニタパネル用に1024x1024のRGBAバッファへダンプする。フリップビットの
+ * 小技を再実装せず、既存のCoreタイルデコーダ(bg_drawline_loopx16/x8、bg.c)を1行ずつ
+ * 再利用する——より安全で、実際の合成器が描く内容とバイト単位で一致する。
+ * VLINEBG/BG_VLINE/TextDotXを退避・復元し、このオンデマンドのダンプが次の
+ * 実フレームの描画を乱さないようにしている。 */
 void mx68k_get_bg_page_rgba(int page, uint8_t* out_rgba, int* out_size) {
     if (!out_rgba) return;
     extern void bg_drawline_loopx16(uint16_t, uint32_t, uint32_t, int32_t, int32_t);
     extern void bg_drawline_loopx8(uint16_t, uint32_t, uint32_t, int32_t, int32_t);
     memset(out_rgba, 0, 1024 * 1024 * 4);
-    int size = BG_CHRSIZE * 64;   /* 512 (CHRSIZE=8) or 1024 (CHRSIZE=16) */
+    int size = BG_CHRSIZE * 64;   /* 512 (CHRSIZE=8) または 1024 (CHRSIZE=16) */
     if (out_size) *out_size = size;
     uint16_t bgtop = (page == 0) ? BG_BG0TOP : BG_BG1TOP;
 
@@ -9992,9 +9992,9 @@ void mx68k_get_bg_page_rgba(int page, uint8_t* out_rgba, int* out_size) {
         if (BG_CHRSIZE == 8) bg_drawline_loopx8(bgtop, 0, 0, 0, 0);
         else                 bg_drawline_loopx16(bgtop, 0, 0, 0, 0);
         for (int x = 0; x < size; x++) {
-            /* Matches the real compositor's has_bg test exactly (EmulatorBridge.c
-             * ~4494: (Text_TrFlag[off]&2) && tcol, where tcol IS BG_LineBuf32[off]) —
-             * a set flag with color 0 (palette-bank-only dat) is still transparent. */
+            /* 実際の合成器のhas_bg判定と完全に一致させている(EmulatorBridge.c
+             * ~4494: (Text_TrFlag[off]&2) && tcol、ここでtcolはBG_LineBuf32[off]そのもの)——
+             * フラグが立っていても色0(パレットバンクのみのdat)なら透明のまま。 */
             if ((Text_TrFlag[16 + x] & 2) && BG_LineBuf32[16 + x] != 0) {
                 uint32_t *px = (uint32_t*)(out_rgba + (line * 1024 + x) * 4);
                 *px = px68k_color_to_rgba(BG_LineBuf32[16 + x]);
@@ -10004,12 +10004,12 @@ void mx68k_get_bg_page_rgba(int page, uint8_t* out_rgba, int* out_size) {
     VLINEBG = save_vlinebg; BG_VLINE = save_bgvline; TextDotX = save_textdotx;
 }
 
-/* P348/P690: dump a graphics-page (GRP) to a 512x512 RGBA buffer. GVRAM
- * addressing mirrors the real per-mode read paths in gvram.c
- * (Grp_DrawLine4 / Grp_DrawLine8TR / Grp_DrawLine16) with the scanline scroll
- * terms dropped — a direct, scanline-independent page dump.
- * Returns 0 (buffer left zeroed) for modes this dump does not cover. */
-extern uint16_t Pal16Adr[256];   /* gvram.c:22 — not declared in gvram.h */
+/* P348/P690: グラフィックページ(GRP)を512x512のRGBAバッファへダンプする。GVRAMの
+ * アドレス計算はgvram.cのモード別の実際の読出し経路
+ * (Grp_DrawLine4 / Grp_DrawLine8TR / Grp_DrawLine16)を踏襲し、走査線スクロール
+ * の項を除いたもの——走査線に依存しない直接のページダンプ。
+ * このダンプが対象としないモードでは0を返す(バッファはゼロのまま)。 */
+extern uint16_t Pal16Adr[256];   /* gvram.c:22——gvram.hでは宣言されていない */
 
 /* P690: D11 (CRTC R20 bit3) をここに一元化する。gvram.c:94 GVRAM_Read /
  * :159 GVRAM_Write は D11 が立つ間 &3 の値に関わらず GVRAM 全域を 65536 色の
@@ -10092,11 +10092,11 @@ uint8_t mx68k_get_vc_reg1_0_live(void) { return VCReg1[0]; }
 uint8_t mx68k_get_vc_reg2_1_live(void) { return VCReg2[1]; }
 uint8_t mx68k_get_bg_regs9_live(void) { return BG_Regs[9]; }
 
-/* P211: expose the guest's current vertical-sync rate so the Swift frame driver
- * can pace mx68k_run_frame() to wall-clock. CRTC R20 (CRTC_Regs[0x29]) bit4 selects
- * the horizontal scan rate: hi-res 31.5kHz -> 55.46Hz, lo-res 15.98kHz -> 61.46Hz.
- * (10e6 / VSYNC_HIGH 180310 = 55.46; 10e6 / VSYNC_NORM 162707 = 61.46). Read-only;
- * matches the existing CRTC_Regs[0x29] & 0x10 hi-res test used for the clock total. */
+/* P211: ゲストの現在の垂直同期レートを公開し、Swiftのフレームドライバが
+ * mx68k_run_frame()を実時間に合わせて刻めるようにする。CRTC R20(CRTC_Regs[0x29])のbit4が
+ * 水平走査周波数を選択する: 高解像度31.5kHz -> 55.46Hz、低解像度15.98kHz -> 61.46Hz。
+ * (10e6 / VSYNC_HIGH 180310 = 55.46; 10e6 / VSYNC_NORM 162707 = 61.46)。read-only。
+ * クロック総数の計算で使っている既存のCRTC_Regs[0x29] & 0x10高解像度判定と一致する。 */
 double mx68k_get_vsync_hz(void) {
     /* P641(D-65): 直近フレームが実際に使った1フィールド予算(名目10MHz基準、
      * クロック倍率スケーリング前)から算出する。これにより CRTC レジスタ
@@ -10385,11 +10385,11 @@ int mx68k_get_region_map(MX68KRegionInfo* out, int max) {
     return n;
 }
 
-// ---- API alias shims (EmulatorBridge.h uses shorter names) ----
+// ---- APIエイリアスshim(EmulatorBridge.hは短い名前を使う) ----
 void mx68k_set_memory_size(int mb) { mx68k_set_memory_mb(mb); }
 void mx68k_set_clock(int mhz)      { mx68k_set_clock_mhz(mhz); }
 
-// ---- Debug helpers ----
+// ---- デバッグ用ヘルパ ----
 void mx68k_set_debug_log_enabled(int enabled) {
     atomic_store_explicit(&s_debug_log_enabled, enabled ? 1 : 0, memory_order_relaxed);
 }
@@ -10421,7 +10421,7 @@ void mx68k_set_trace_enabled(bool enabled) {
     (void)enabled;
 }
 
-// ---- Musashi dummy stubs (not used when Config.CPU_Emu == 0) ----
+// ---- Musashiのダミースタブ(Config.CPU_Emu == 0のときは未使用) ----
 void m68k_set_cpu_type(int type) { (void)type; }
 void m68k_init(void) {}
 void m68k_pulse_reset(void) {}
