@@ -61,8 +61,8 @@ struct RootView: View {
 
 @main
 struct MX68KApp: App {
-    // P53 — install AppDelegate so applicationWillTerminate / SIGTERM
-    // signal source actually fire. See /tmp/mx68k_P53_plan.md §7 Edit D.
+    // P53 — applicationWillTerminate / SIGTERM シグナルソースが確実に発火するよう
+    // AppDelegate を組み込む。/tmp/mx68k_P53_plan.md §7 Edit D を参照。
     @NSApplicationDelegateAdaptor(MX68KAppDelegate.self) var appDelegate
 
     // P563 — @StateObject(=観測)をやめ、AppRootObjects の静的ストレージを読むだけの
@@ -111,9 +111,9 @@ struct MX68KApp: App {
                 .environmentObject(emulatorViewModel)
         }
 
-        // P600 — memory dump viewer / memory map viewer. Both read through the
-        // side-effect-free mx68k_read_memory_bytes / mx68k_get_region_map pair,
-        // so they need no environment objects.
+        // P600 — メモリダンプビューア / メモリマップビューア。どちらも副作用のない
+        // mx68k_read_memory_bytes / mx68k_get_region_map の組を通じて読み取るため、
+        // environment object を必要としない。
         Window("Memory", id: "monitor-memory") {
             MemoryDumpMonitorView()
         }
@@ -121,10 +121,10 @@ struct MX68KApp: App {
             MemoryMapMonitorView()
         }
 
-        // P740 — disassembly viewer. Unlike the two P600 windows above, this one
-        // reaches the guest through cpu_readmem24 (Core's Debabelizer), so it must
-        // serialize against the emulation thread — it needs EmulatorViewModel purely
-        // to obtain `engine` for `withEmulationLock`.
+        // P740 — 逆アセンブルビューア。上の P600 の 2 ウィンドウと異なり、こちらは
+        // cpu_readmem24(Core の Debabelizer)経由でゲストへアクセスするため、
+        // エミュレーションスレッドとの排他が必要 — EmulatorViewModel は
+        // `withEmulationLock` 用の `engine` を得るためだけに必要としている。
         Window("Disassembly", id: "monitor-disasm") {
             DisassemblyMonitorView()
                 .environmentObject(emulatorViewModel)
@@ -138,7 +138,7 @@ struct MX68KApp: App {
                 .environmentObject(emulatorViewModel)
         }
 
-        // P286 — developer monitor panels (CRTC / Video Controller / BG・Sprite).
+        // P286 — 開発者向けモニタパネル群(CRTC / Video Controller / BG・Sprite)。
         Window("CRTC", id: "monitor-crtc") {
             CRTCMonitorView()
                 .environmentObject(emulatorViewModel)
@@ -161,7 +161,7 @@ struct MX68KApp: App {
             BGMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P550 — palette monitor (TextPal32 / GrphPal32 256 colors + contrast).
+        // P550 — パレットモニタ(TextPal32 / GrphPal32 の 256 色 + コントラスト)。
         Window("Palette", id: "monitor-palette") {
             PaletteMonitorView()
                 .environmentObject(emulatorViewModel)
@@ -170,95 +170,95 @@ struct MX68KApp: App {
             SpriteMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P328 — full 128-slot sprite table map (including unused slots).
+        // P328 — スプライトテーブル全 128 スロットのマップ(未使用スロットを含む)。
         Window("Sprite Table Map", id: "monitor-sprite-table") {
             SpriteTableMapView()
                 .environmentObject(emulatorViewModel)
         }
-        // P328 — renderer panel (composited framebuffer preview, moved from Sprite).
+        // P328 — レンダラパネル(合成済みフレームバッファのプレビュー。Sprite から移設)。
         Window("Renderer", id: "monitor-renderer") {
             RendererMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P343 — text plane preview (raw TextDrawWork contents).
+        // P343 — テキスト面プレビュー(TextDrawWork の生の内容)。
         Window("Text Plane", id: "monitor-text") {
             TextPlaneMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P348 — BG page preview (raw BG0/BG1 tilemap+pattern contents).
+        // P348 — BG ページプレビュー(BG0/BG1 のタイルマップ+パターンの生の内容)。
         Window("BG Page", id: "monitor-bg-page") {
             BGPageMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P348 — graphics page preview (raw GVRAM contents, 256-color mode).
+        // P348 — グラフィックページプレビュー(GVRAM の生の内容、256 色モード)。
         Window("Graphics Page", id: "monitor-grp-page") {
             GrpPageMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P365 — BG+Sprite composite buffer preview (pre-final-priority-merge state).
+        // P365 — BG+Sprite 合成バッファのプレビュー(最終プライオリティ合成前の状態)。
         Window("BG+Sprite Composite", id: "monitor-bgsp-composite") {
             BGSPCompositeMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P484 — sound monitor (ADPCM section; OPM section follows in P485).
+        // P484 — サウンドモニタ(ADPCM セクション。OPM セクションは P485 で追加)。
         Window("Sound", id: "monitor-sound") {
             SoundMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P631 — OPM synthesizer panel (8 stacked per-channel keyboards + KCF/V/PAN).
-        // Independent of the sound monitor window: it has its own visibility gate
-        // (EmulatorEngine.opmSynthVisible), so closing one does not stop the other.
+        // P631 — OPM シンセサイザーパネル(チャンネルごとの鍵盤 8 段 + KCF/V/PAN)。
+        // サウンドモニタのウィンドウとは独立: 専用の表示ゲート
+        // (EmulatorEngine.opmSynthVisible)を持つため、片方を閉じてももう片方は止まらない。
         Window("OPM Synthesizer", id: "monitor-opm-synth") {
             OPMSynthesizerView()
                 .environmentObject(emulatorViewModel)
         }
-        // P551 — input monitor (gamepad port assignment / raw joystick byte / mouse state).
-        // The gamepad/mouse sections read InputManager.shared directly, but P695 added a
-        // keyboard lock-LED section whose value comes from the bridge through the usual
-        // per-frame monitor path, so emulatorViewModel is now required.
+        // P551 — 入力モニタ(ゲームパッドのポート割り当て / 生のジョイスティックバイト / マウス状態)。
+        // ゲームパッド/マウスのセクションは InputManager.shared を直接読むが、P695 で
+        // キーボードのロック LED セクションを追加した。その値は通常の毎フレームのモニタ経路で
+        // ブリッジから届くため、emulatorViewModel が必要になった。
         Window("Input", id: "monitor-input") {
             InputMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P692 — storage monitor (SASI 8 units + SCSI ID0-6 incl. MO/CD mount state).
-        // Needs configManager as well: the panel deliberately shows the configured
-        // path next to the live one so the two can be compared (⌘R pending badge).
+        // P692 — ストレージモニタ(SASI 8 ユニット + SCSI ID0-6。MO/CD のマウント状態を含む)。
+        // configManager も必要: パネルは設定上のパスを実際に使用中のパスと意図的に並べて
+        // 表示し、両者を比較できるようにしている(⌘R 待ちバッジ)。
         Window("Storage", id: "monitor-storage") {
             StorageMonitorView()
                 .environmentObject(emulatorViewModel)
                 .environmentObject(configManager)
         }
-        // P693 — MIDI monitor (board wiring / TX-RX counters / YM3802 registers).
-        // Needs configManager as well: the panel shows the current MIDI settings
-        // (reset command, send-on-init, output delay) and the selected device names.
+        // P693 — MIDI モニタ(ボード配線 / 送受信カウンタ / YM3802 レジスタ)。
+        // configManager も必要: パネルは現在の MIDI 設定(リセットコマンド・初期化時送信・
+        // 出力ディレイ)と選択中のデバイス名を表示する。
         Window("MIDI", id: "monitor-midi") {
             MIDIMonitorView()
                 .environmentObject(emulatorViewModel)
                 .environmentObject(configManager)
         }
-        // P694 — RTC monitor (RP5C15 control/alarm registers + host-clock snapshot).
-        // Reads only emulatorViewModel.rtcMonitorStatus, so configManager is not needed.
+        // P694 — RTC モニタ(RP5C15 の制御/アラームレジスタ + ホスト時計のスナップショット)。
+        // emulatorViewModel.rtcMonitorStatus しか読まないため、configManager は不要。
         Window("RTC", id: "monitor-rtc") {
             RTCMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P287 — performance monitor (measured fps / per-frame processing time).
+        // P287 — パフォーマンスモニタ(実測 fps / 1 フレームあたりの処理時間)。
         Window("Performance", id: "monitor-perf") {
             PerformanceMonitorView()
                 .environmentObject(emulatorViewModel)
         }
-        // P744 — log viewer (live tail of debug.log). Its display data comes only
-        // from the log file on disk. P753 added a Logging toggle, so it now needs
-        // configManager to persist that choice (and calls the three
-        // mx68k_*_debug_log_enabled / mx68k_is_debug_build bridge functions —
-        // it still never touches emulation state).
+        // P744 — ログビューア(debug.log のライブ tail 表示)。表示データはディスク上の
+        // ログファイルからのみ得る。P753 で Logging トグルを追加したため、その選択を
+        // 永続化する configManager が必要になった(また 3 つのブリッジ関数
+        // mx68k_*_debug_log_enabled / mx68k_is_debug_build を呼ぶが、
+        // エミュレーション状態には依然として一切触れない)。
         Window("Log Viewer", id: "monitor-log") {
             LogViewerView()
                 .environmentObject(configManager)
         }
 
-        // P228 — on-screen software keyboard (full JIS replica). Talks to the
-        // guest directly through the C bridge, so it needs no environment objects.
+        // P228 — 画面上のソフトウェアキーボード(JIS 配列の完全再現)。C ブリッジを通じて
+        // ゲストと直接やり取りするため、environment object を必要としない。
         Window("Software Keyboard", id: "soft-keyboard") {
             SoftKeyboardView()
         }

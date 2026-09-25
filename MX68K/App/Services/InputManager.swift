@@ -473,7 +473,7 @@ class InputManager: ObservableObject {
             UInt16(kVK_ANSI_Minus): 0x0C,        // '-'
             UInt16(kVK_ANSI_Equal): 0x0D,        // JIS 凡例 '^'
             UInt16(kVK_JIS_Yen): 0x0E,           // '¥'
-            UInt16(kVK_Delete): 0x0F,            // macOS Backspace -> X68000 BS
+            UInt16(kVK_Delete): 0x0F,            // macOS の Backspace -> X68000 の BS
             // QWERTY 行 (row2)
             UInt16(kVK_Tab): 0x10,
             UInt16(kVK_ANSI_Q): 0x11, UInt16(kVK_ANSI_W): 0x12, UInt16(kVK_ANSI_E): 0x13,
@@ -596,13 +596,13 @@ class InputManager: ObservableObject {
             if isDown && !wasDown { mx68k_key_down(code) }
             else if !isDown && wasDown { mx68k_key_up(code) }
         }
-        // CAPSLOCK: toggle -> down+up pulse on any change
+        // CAPSLOCK: トグル動作のため、状態が変わるたびに押下+解放のパルスを送る
         if now.contains(.capsLock) != lastModifiers.contains(.capsLock) {
             mx68k_key_down(0x5D)
             mx68k_key_up(0x5D)
         }
         lastModifiers = now
-        // COMMAND (Cmd) intentionally not mapped (preserve macOS shortcuts)
+        // COMMAND(Cmd)キーは意図的に割り当てない(macOS のショートカットを維持するため)
     }
 
     // P196: 絶対座標追従。ホストカーソルの Metal ビュー内座標を framebuffer 座標へ

@@ -79,7 +79,7 @@ class ConfigManager: ObservableObject {
         let fm = FileManager.default
         let home = NSHomeDirectory()
 
-        // Default BIOS directory: ~/Library/Application Support/MX68K/bios/
+        // 既定の BIOS ディレクトリ: ~/Library/Application Support/MX68K/bios/
         let biosDir = "\(home)/Library/Application Support/MX68K/bios"
         try? fm.createDirectory(atPath: biosDir, withIntermediateDirectories: true)
 
