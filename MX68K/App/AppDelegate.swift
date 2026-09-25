@@ -2,27 +2,27 @@ import AppKit
 import Foundation
 import Dispatch
 
-/// P53 — NSApplicationDelegate that wires graceful termination paths
-/// (Cmd-Q, menu Quit, dock Quit, SIGTERM, SIGINT) into the C bridge so
-/// that mx68k_shutdown / atexit summary actually run.
+/// P53 — 正常終了の各経路(Cmd-Q・メニューの Quit・Dock の Quit・SIGTERM・SIGINT)を
+/// C ブリッジへ接続し、mx68k_shutdown / atexit サマリが確実に実行されるようにする
+/// NSApplicationDelegate。
 ///
-/// File name matches Docs/02_プロジェクト構造.md:100 (`AppDelegate.swift`).
-/// Class name retained as `MX68KAppDelegate` for MX68K* project naming
-/// symmetry.
+/// ファイル名は Docs/02_プロジェクト構造.md:100 に合わせている(`AppDelegate.swift`)。
+/// クラス名は MX68K* というプロジェクト内の命名との対称性のため
+/// `MX68KAppDelegate` のまま残している。
 ///
-/// Shutdown chain (every graceful path):
+/// 終了処理の連鎖(すべての正常終了経路で共通):
 ///   signal/Cmd-Q
 ///     -> applicationWillTerminate
-///        -> mx68k_log_delegate_fire()                  (C bridge -> debug.log)
-///        -> EmulatorViewModel.shared.stopEmulation()   (engine.stop -> audio teardown -> mx68k_shutdown)
+///        -> mx68k_log_delegate_fire()                  (C ブリッジ経由で debug.log へ出力)
+///        -> EmulatorViewModel.shared.stopEmulation()   (engine.stop -> オーディオ解体 -> mx68k_shutdown)
 ///     -> AppKit exit(3)
-///     -> atexit -> mx68k_atexit_summary()              (P52-SUMMARY etc.)
+///     -> atexit -> mx68k_atexit_summary()              (P52-SUMMARY 等)
 ///
-/// See /tmp/mx68k_P53_plan.md §7 Edit C / §12.3.
+/// /tmp/mx68k_P53_plan.md §7 Edit C / §12.3 を参照。
 final class MX68KAppDelegate: NSObject, NSApplicationDelegate {
 
-    /// Strong references required — DispatchSourceSignal is cancelled when
-    /// it goes out of scope (Spec Inv §C).
+    /// 強参照での保持が必須 — DispatchSourceSignal はスコープを外れると
+    /// キャンセルされる(Spec Inv §C)。
     private var sigtermSource: DispatchSourceSignal?
     private var sigintSource:  DispatchSourceSignal?
 
@@ -52,12 +52,12 @@ final class MX68KAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // P53 ablation: master + sigsrc switch. When 0, SIGTERM reverts to
-        // default disposition.
+        // P53 アブレーション: マスター + sigsrc スイッチ。0 のときは SIGTERM が
+        // 既定の処理(default disposition)に戻る。
         guard mx68k_p53_sigsrc_enabled() != 0 else { return }
 
-        // SIGTERM — primary CI-equivalent path (CLAUDE.md launch test).
-        // SIG_IGN first to avoid the default termination racing the source.
+        // SIGTERM — 主経路(CI 相当。CLAUDE.md の起動テストで使用)。
+        // 既定の終了処理がシグナルソースと競合しないよう、先に SIG_IGN を設定する。
         signal(SIGTERM, SIG_IGN)
         let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         term.setEventHandler { [weak self] in
@@ -67,8 +67,8 @@ final class MX68KAppDelegate: NSObject, NSApplicationDelegate {
         term.resume()
         self.sigtermSource = term
 
-        // SIGINT — secondary (Ctrl-C in foreground). Cheap to keep installed
-        // even on nohup paths (R-3 acknowledged).
+        // SIGINT — 副経路(フォアグラウンドでの Ctrl-C)。nohup 経由の起動でも
+        // インストールしたままにしておくコストは小さい(R-3 承知済み)。
         signal(SIGINT, SIG_IGN)
         let intSrc = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         intSrc.setEventHandler { [weak self] in
@@ -82,30 +82,30 @@ final class MX68KAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         WindowScaler.saveFrame()      // P193b: 次回起動でこの枠を復元する
 
-        // P53 ablation: master + appdelegate switch.
+        // P53 アブレーション: マスター + appdelegate スイッチ。
         guard mx68k_p53_appdelegate_enabled() != 0 else { return }
 
-        // (Code Review C-2) Route the marker through the C bridge so the
-        // tag actually lands in ~/Library/Application Support/MX68K/debug.log.
-        // NSLog would only hit Apple Unified Logging.
+        // (Code Review C-2) マーカーを C ブリッジ経由で出力し、タグが確実に
+        // ~/Library/Application Support/MX68K/debug.log へ書き込まれるようにする。
+        // NSLog では Apple Unified Logging にしか出力されない。
         mx68k_log_delegate_fire()
 
-        // (Code Review C-1) Halt the CVDisplayLink thread BEFORE
-        // mx68k_shutdown frees MEM/IPL/FONT. The existing stopEmulation()
-        // sequences engine.stop -> audio teardown -> mx68k_shutdown, so we
-        // re-use it. C-side `s_p53_shutdown_done` + Swift-side `isRunning`
-        // guard absorb duplicate calls from .onDisappear.
+        // (Code Review C-1) mx68k_shutdown が MEM/IPL/FONT を解放する「前に」
+        // CVDisplayLink スレッドを停止させる。既存の stopEmulation() は
+        // engine.stop -> オーディオ解体 -> mx68k_shutdown の順で処理するため、
+        // それを再利用する。C 側の `s_p53_shutdown_done` と Swift 側の `isRunning`
+        // ガードが、.onDisappear からの重複呼び出しを吸収する。
         //
-        // N-1 (P54-tracked): CVDisplayLinkStop is async; an in-flight
-        // callback can race with free(MEM) for ~16 ms. The audio teardown
-        // sandwich (~150 ms) provides incidental delay; formal sync via an
-        // atomic shutdown flag is deferred to P54.
+        // N-1(P54 で追跡): CVDisplayLinkStop は非同期のため、実行中のコールバックが
+        // 約 16 ms の間 free(MEM) と競合しうる。間に挟まるオーディオ解体処理
+        // (約 150 ms)が結果的に遅延として働いている。アトミックな終了フラグによる
+        // 正式な同期は P54 へ先送りした。
         if let vm = EmulatorViewModel.shared {
             vm.stopEmulation()
         } else {
-            // Settings-only path: no engine ever started, MEM/IPL/FONT
-            // were never allocated. free(NULL) is C-spec no-op, so calling
-            // mx68k_shutdown directly here is safe.
+            // 設定画面のみの経路: エンジンは一度も起動しておらず、MEM/IPL/FONT も
+            // 未確保。free(NULL) は C 言語仕様上 no-op なので、ここで
+            // mx68k_shutdown を直接呼んでも安全。
             mx68k_shutdown()
         }
     }
@@ -122,8 +122,8 @@ final class MX68KAppDelegate: NSObject, NSApplicationDelegate {
         InputManager.shared.forceReleaseMouseCaptureIfNeeded()
     }
 
-    /// Internal helper — routes signal-catch markers through the C bridge
-    /// (Code Review C-2). NSLog is intentionally NOT used.
+    /// 内部ヘルパー — シグナル捕捉マーカーを C ブリッジ経由で出力する
+    /// (Code Review C-2)。NSLog は意図的に使わない。
     private func logSig(_ name: String) {
         name.withCString { mx68k_log_sig_catch($0) }
     }

@@ -1,5 +1,5 @@
 import SwiftUI
-import Foundation   // P204: sin() for lamp blink
+import Foundation   // P204: ランプ点滅用の sin()
 
 struct StatusBarView: View {
     @EnvironmentObject var viewModel: EmulatorViewModel
@@ -167,8 +167,8 @@ struct StatusBarView: View {
             Text("●").font(.caption).foregroundColor(.red)
         case .poweringOff:
             let elapsed = date.timeIntervalSince(viewModel.powerOffStart ?? date)
-            // P204-fix: slow 1Hz (first 2s) → fast 12Hz. Accumulated phase keeps
-            // it continuous at the 2s boundary (no opacity jump).
+            // P204-fix: 遅い 1Hz(最初の 2 秒)→ 速い 12Hz。位相を累積しているため
+            // 2 秒の境界でも連続する(不透明度が飛ばない)。
             let phase = elapsed < 2.0
                 ? (2 * .pi * 1.0 * elapsed)
                 : (2 * .pi * 1.0 * 2.0 + 2 * .pi * 12.0 * (elapsed - 2.0))

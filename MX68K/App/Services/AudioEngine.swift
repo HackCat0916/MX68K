@@ -7,9 +7,9 @@ class AudioEngine {
     private var audioUnit: AudioUnit?
     private let runningLock = OSAllocatedUnfairLock(initialState: false)
 
-    /// 0.0–1.0. Read on the CoreAudio I/O thread; a torn read is a benign 1-buffer gain glitch.
+    /// 0.0–1.0。CoreAudio の I/O スレッドから読む。読み取りが途中で割れても(torn read)、1 バッファ分のゲインが乱れるだけで無害。
     var volume: Float = 1.0
-    /// false = mute (the ring is still drained to avoid backpressure).
+    /// false = ミュート(バックプレッシャーを避けるため、リングバッファの読み出しは継続する)。
     var enabled: Bool = true
 
     /// P629 (D-64) — 診断専用ロガー。`initialize()` が投げる各 `OSStatus` と、
@@ -173,7 +173,7 @@ private func audioCallback(
     let frames = Int(buffer.mDataByteSize) / 4
     let ptr = data.assumingMemoryBound(to: Int16.self)
     mx68k_audio_read(ptr, Int32(frames))
-    let n = frames * 2   // stereo: 2 Int16 per frame
+    let n = frames * 2   // ステレオ: 1 フレームあたり Int16 × 2
     if !engine.enabled {
         for i in 0..<n { ptr[i] = 0 }
     } else {
