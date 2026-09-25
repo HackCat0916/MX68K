@@ -2,38 +2,39 @@
 //  SoftKeyboardView.swift
 //  MX68K
 //
-//  P228 — On-screen software keyboard (full JIS replica, independent window,
-//  guest-LED mirror). Phase 2 completion-criterion (6) final item.
+//  P228 — 画面上のソフトウェアキーボード(JIS配列の完全再現、独立ウィンドウ、
+//  ゲストLEDの反映)。Phase 2 完了条件(6)の最終項目。
 //
-//  Design (see .mx68k_cycles/P228_plan.md):
-//  This view is COMPLETELY separate from InputManager's heldKeys/keyboardState
-//  bookkeeping. It talks to the guest exclusively through the C bridge calls
-//  mx68k_key_down / mx68k_key_up / mx68k_get_key_led, so the physical-keyboard
-//  path and the soft-keyboard path never share Swift state.
+//  設計(.mx68k_cycles/P228_plan.md 参照):
+//  このビューは InputManager の heldKeys/keyboardState による状態管理とは
+//  完全に分離されている。ゲストとのやり取りは C ブリッジ呼び出し
+//  mx68k_key_down / mx68k_key_up / mx68k_get_key_led のみを通じて行うため、
+//  物理キーボード経路とソフトキーボード経路が Swift 側の状態を共有することはない。
 //
-//  Three key classifications:
-//   (A) Sticky-momentary — SHIFT/CTRL/OPT.1/OPT.2. Host convenience toggle:
-//       first click = key_down (held), second click = key_up. Local bool state.
-//       (Real hardware has no LED here — this is an intentional, user-approved
-//       non-hardware-accurate convenience. See Docs/05 §2.2.)
-//   (B) Pulse + guest-LED-mirror — かな/ローマ字/コード入力/CAPS/INS/ひらがな/全角.
-//       Every click sends a down+up pulse. NO local toggle state — the visual
-//       LED highlight is driven ENTIRELY by polling mx68k_get_key_led().
-//   Normal keys — momentary press/release via DragGesture (down on first change,
-//       up on end).
+//  キーは次の3種類に分類される:
+//   (A) スティッキー・モーメンタリ — SHIFT/CTRL/OPT.1/OPT.2。ホスト側の利便性トグル:
+//       1回目のクリック = key_down(押下保持)、2回目のクリック = key_up。
+//       ローカルの bool 状態で管理する。
+//       (実機ではこれらのキーに LED は無い——これは意図的かつユーザー承認済みの、
+//       実機に忠実ではない利便機能である。Docs/05 §2.2 参照。)
+//   (B) パルス + ゲストLED反映 — かな/ローマ字/コード入力/CAPS/INS/ひらがな/全角。
+//       クリックのたびに down+up のパルスを送る。ローカルのトグル状態は持たない——
+//       LED 点灯表示は、mx68k_get_key_led() のポーリング結果のみによって決まる。
+//   通常キー — DragGesture によるモーメンタリな押下/解放(最初の変化で down、
+//       終了時に up)。
 //
 
 import SwiftUI
 
 #if os(iOS)
-import UIKit   // P710: UIColor, referenced by Color(uiColor:). Do not rely on
-               // SwiftUI's implicit re-export the way the macOS NSColor use does.
+import UIKit   // P710: Color(uiColor:) が参照する UIColor のため。macOS の NSColor の
+               // 使い方のように SwiftUI の暗黙の再エクスポートに頼らないこと。
 #endif
 
-// MARK: - Layout data model
+// MARK: - レイアウトデータモデル
 
-/// One key on the JIS replica. Coordinates/label/scancode are transcribed
-/// verbatim from px68k's authoritative `x11/keytbl.inc` — do NOT alter them.
+/// JIS配列再現キーボード上の1キー。座標/ラベル/スキャンコードは px68k の
+/// 正式な `x11/keytbl.inc` からそのまま転記したもの——変更しないこと。
 struct SoftKeyDef {
     let x: CGFloat
     let y: CGFloat
@@ -41,20 +42,20 @@ struct SoftKeyDef {
     let h: CGFloat
     let label: String
     let scancode: UInt8
-    /// SF Symbol name to render in place of `label` (RET + cursor keys). Default nil.
-    /// (Swift's synthesized memberwise init keeps this optional's default, so the
-    ///  109 existing entries that omit it continue to compile unchanged.)
+    /// `label` の代わりに描画する SF Symbol 名(RET + カーソルキー)。既定値は nil。
+    /// (Swift が合成するメンバーワイズイニシャライザはこのオプショナルの既定値を
+    ///  保持するため、これを省略している既存の109エントリはそのままコンパイルできる。)
     var iconName: String? = nil
-    /// Explicit override for the 1-line label font size (pt). When non-nil it wins
-    /// over the width/height-derived auto-size, used to visually unify adjacent
-    /// keys with different label lengths (HOME/INS, BREAK/COPY). Default nil.
+    /// 1行ラベルのフォントサイズ(pt)の明示的な上書き指定。nil でない場合は
+    /// 幅/高さから算出される自動サイズより優先され、ラベル長の異なる隣接キー
+    /// (HOME/INS、BREAK/COPY)の見た目を揃えるのに使う。既定値は nil。
     var fixedFontSize: CGFloat? = nil
 }
 
 enum SoftKeyKind {
-    case sticky      // SHIFT / CTRL / OPT.1 / OPT.2 — local held toggle
-    case ledPulse    // 7 lock keys — pulse + guest-LED mirror
-    case normal      // everything else — momentary
+    case sticky      // SHIFT / CTRL / OPT.1 / OPT.2 — ローカルの押下保持トグル
+    case ledPulse    // 7つのロックキー — パルス + ゲストLED反映
+    case normal      // それ以外すべて — モーメンタリ
 }
 
 extension SoftKeyDef {
@@ -69,7 +70,7 @@ extension SoftKeyDef {
         }
     }
 
-    /// LED bit index for the 7 lock keys (negative logic in keyLED byte), else nil.
+    /// 7つのロックキーに対応する LED のビット番号(keyLED バイトは負論理)。それ以外は nil。
     /// bit0=かな bit1=ローマ字 bit2=コード入力 bit3=CAPS bit4=INS bit5=ひらがな bit6=全角
     var ledBit: Int? {
         switch scancode {
@@ -84,9 +85,9 @@ extension SoftKeyDef {
         }
     }
 
-    /// Real-hardware lock-LED colour (spec-confirm gate #4, ユーザー real-machine
-    /// photo 2026-07-18): かな/ローマ字/コード入力/CAPS/INS lit red, ひらがな/全角
-    /// lit green. Only meaningful for `.ledPulse` keys; nil elsewhere.
+    /// 実機のロックLEDの色(spec-confirm ゲート #4、ユーザーによる実機写真
+    /// 2026-07-18): かな/ローマ字/コード入力/CAPS/INS は赤、ひらがな/全角は緑に
+    /// 点灯する。`.ledPulse` キーでのみ意味を持ち、それ以外は nil。
     var ledColor: Color? {
         switch scancode {
         case 0x5a, 0x5b, 0x5c, 0x5d, 0x5e: return .red
@@ -96,10 +97,10 @@ extension SoftKeyDef {
     }
 }
 
-/// Canvas is roughly 766 × 218 pt. Left-top origin; each key is `.position`-ed
-/// at (x + w/2, y + h/2). Values transcribed verbatim from `x11/keytbl.inc`.
-/// (The one `scancode == 0` spacer entry is a layout gap, not a key, and is not
-///  present in this table — a defensive filter also drops any such entry.)
+/// キャンバスは約 766 × 218 pt。原点は左上で、各キーは (x + w/2, y + h/2) に
+/// `.position` で配置する。値は `x11/keytbl.inc` からそのまま転記したもの。
+/// (唯一の `scancode == 0` のスペーサーエントリはキーではなくレイアウト上の隙間で、
+///  この表には含めていない——念のため、防御的フィルタでもそのようなエントリを除外する。)
 let softKeyLayout: [SoftKeyDef] = [
     SoftKeyDef(x:   2, y:   2, w: 32, h: 32, label: "BREAK", scancode: 0x61, fixedFontSize: 9),
     SoftKeyDef(x:  40, y:   2, w: 32, h: 32, label: "COPY",  scancode: 0x62, fixedFontSize: 9),
@@ -133,7 +134,7 @@ let softKeyLayout: [SoftKeyDef] = [
     SoftKeyDef(x: 342, y:  48, w: 32, h: 32, label: "0",     scancode: 0x0b),
     SoftKeyDef(x: 376, y:  48, w: 32, h: 32, label: "-",     scancode: 0x0c),
     SoftKeyDef(x: 410, y:  48, w: 32, h: 32, label: "^",     scancode: 0x0d),
-    SoftKeyDef(x: 444, y:  48, w: 32, h: 32, label: "¥",     scancode: 0x0e),  // ¥ key
+    SoftKeyDef(x: 444, y:  48, w: 32, h: 32, label: "¥",     scancode: 0x0e),  // ¥ キー
     SoftKeyDef(x: 478, y:  48, w: 32, h: 32, label: "BS",    scancode: 0x0f),
     SoftKeyDef(x: 520, y:  48, w: 32, h: 32, label: "HOME",  scancode: 0x36, fixedFontSize: 10),
     SoftKeyDef(x: 554, y:  48, w: 32, h: 32, label: "INS",   scancode: 0x5e, fixedFontSize: 10),
@@ -192,7 +193,7 @@ let softKeyLayout: [SoftKeyDef] = [
     SoftKeyDef(x: 310, y: 150, w: 32, h: 32, label: ",",     scancode: 0x31),
     SoftKeyDef(x: 344, y: 150, w: 32, h: 32, label: ".",     scancode: 0x32),
     SoftKeyDef(x: 378, y: 150, w: 32, h: 32, label: "/",     scancode: 0x33),
-    SoftKeyDef(x: 412, y: 150, w: 32, h: 32, label: " ",     scancode: 0x34),  // ろ / underscore key
+    SoftKeyDef(x: 412, y: 150, w: 32, h: 32, label: " ",     scancode: 0x34),  // ろ / アンダースコアキー
     SoftKeyDef(x: 446, y: 150, w: 64, h: 32, label: "SHIFT", scancode: 0x70),
     SoftKeyDef(x: 520, y: 132, w: 32, h: 32, label: "left",  scancode: 0x3b, iconName: "arrow.left"),
     SoftKeyDef(x: 554, y: 150, w: 32, h: 32, label: "down",  scancode: 0x3e, iconName: "arrow.down"),
@@ -204,7 +205,7 @@ let softKeyLayout: [SoftKeyDef] = [
     SoftKeyDef(x:  60, y: 184, w: 32, h: 32, label: "ひらがな", scancode: 0x5f),
     SoftKeyDef(x:  94, y: 184, w: 38, h: 32, label: "XF1",   scancode: 0x55),
     SoftKeyDef(x: 134, y: 184, w: 38, h: 32, label: "XF2",   scancode: 0x56),
-    SoftKeyDef(x: 174, y: 184, w: 128, h: 32, label: "",     scancode: 0x35),  // space key (blank label, real key)
+    SoftKeyDef(x: 174, y: 184, w: 128, h: 32, label: "",     scancode: 0x35),  // スペースキー(ラベルは空白だが実在するキー)
     SoftKeyDef(x: 304, y: 184, w: 38, h: 32, label: "XF3",   scancode: 0x57),
     SoftKeyDef(x: 344, y: 184, w: 42, h: 32, label: "XF4",   scancode: 0x58),
     SoftKeyDef(x: 388, y: 184, w: 42, h: 32, label: "XF5",   scancode: 0x59),
@@ -216,10 +217,10 @@ let softKeyLayout: [SoftKeyDef] = [
     SoftKeyDef(x: 698, y: 184, w: 32, h: 32, label: ".",     scancode: 0x51),
 ]
 
-/// SHIFT-ON glyph overrides, transcribed verbatim from the plan's shift-glyph
-/// table (21 entries). Keys NOT in this table (letters, function keys, editing
-/// cluster, etc.) keep their fixed label — JIS keycaps don't change letter case
-/// visually. 0x0b (0) is intentionally absent (unchanged under shift).
+/// SHIFT ON 時の表示文字の上書き。計画書の SHIFT 文字表(21エントリ)から
+/// そのまま転記したもの。この表に無いキー(英字、ファンクションキー、編集キー群など)は
+/// 固定ラベルのまま——JIS キートップは見た目上、英字の大文字/小文字を変えない。
+/// 0x0b (0) は意図的に含めていない(SHIFT 時も変化しない)。
 let shiftGlyphs: [UInt8: String] = [
     0x02: "!",
     0x03: "\"",
@@ -244,11 +245,11 @@ let shiftGlyphs: [UInt8: String] = [
     0x34: "_",
 ]
 
-/// かな-ON glyph overrides (standard JIS kana input layout), transcribed verbatim
-/// from the plan's kana table (48 entries: 13 number-row + 12 QWERTY-row +
-/// 12 ASDF-row + 11 ZXCV-row). Shown when the guest's かな lock LED is lit
-/// (guestLED bit0 clear, negative logic) — takes priority over shiftGlyphs.
-/// @/[ display the bare 濁点゛/半濁点゜ marks; actual kana composition is not done.
+/// かな ON 時の表示文字の上書き(標準的な JIS かな入力配列)。計画書のかな表
+/// (48エントリ: 数字段13 + QWERTY段12 + ASDF段12 + ZXCV段11)からそのまま転記したもの。
+/// ゲストの かな ロックLED が点灯している時(guestLED の bit0 がクリア、負論理)に
+/// 表示され、shiftGlyphs より優先される。
+/// @/[ は濁点゛/半濁点゜の記号単体を表示するのみで、実際のかな合成は行わない。
 let kanaGlyphs: [UInt8: String] = [
     // 数字段 (13)
     0x02: "ぬ", 0x03: "ふ", 0x04: "あ", 0x05: "う", 0x06: "え",
@@ -268,24 +269,24 @@ let kanaGlyphs: [UInt8: String] = [
     0x34: "ろ",
 ]
 
-// MARK: - State
+// MARK: - 状態
 
-/// Lightweight state object dedicated to the soft keyboard. Deliberately does NOT
-/// touch InputManager's heldKeys / keyboardState — the physical and soft keyboard
-/// paths are independent (see Docs/05 §2.2 known-limitation note).
+/// ソフトキーボード専用の軽量な状態オブジェクト。InputManager の heldKeys /
+/// keyboardState には意図的に一切触れない——物理キーボードとソフトキーボードの
+/// 経路は独立している(Docs/05 §2.2 の既知の制限事項の注記を参照)。
 final class SoftKeyboardState: ObservableObject {
-    // (A) sticky held state — 4 keys.
+    // (A) スティッキーキーの押下保持状態 — 4キー。
     @Published var shiftHeld = false
     @Published var ctrlHeld  = false
     @Published var opt1Held  = false
     @Published var opt2Held  = false
 
-    // (B) guest LED byte (negative logic; idle 0xFF = all off). Polled while visible.
+    // (B) ゲストの LED バイト(負論理。アイドル時 0xFF = 全消灯)。表示中はポーリングする。
     @Published var guestLED: UInt8 = 0xFF
 
     private var ledTimer: Timer?
 
-    // MARK: sticky
+    // MARK: スティッキー
 
     func isStickyOn(_ scancode: UInt8) -> Bool {
         switch scancode {
@@ -297,7 +298,7 @@ final class SoftKeyboardState: ObservableObject {
         }
     }
 
-    /// First click sends key_down (held), second click sends key_up.
+    /// 1回目のクリックで key_down(押下保持)、2回目のクリックで key_up を送る。
     func toggleSticky(_ scancode: UInt8) {
         let nowOn: Bool
         switch scancode {
@@ -308,26 +309,26 @@ final class SoftKeyboardState: ObservableObject {
         default:   return
         }
         if nowOn {
-            mx68k_key_down(scancode)   // held indefinitely, no matching up yet
+            mx68k_key_down(scancode)   // 押下保持を続ける(対応する up はまだ送らない)
         } else {
             mx68k_key_up(scancode)
         }
     }
 
-    // MARK: pulse (B keys)
+    // MARK: パルス(B 分類のキー)
 
-    /// Every click on a lock key sends a down+up pulse; the guest decides the
-    /// resulting toggle state and reports it back via keyLED.
+    /// ロックキーをクリックするたびに down+up のパルスを送る。結果のトグル状態は
+    /// ゲストが決定し、keyLED を通じて報告してくる。
     func pulse(_ scancode: UInt8) {
         mx68k_key_down(scancode)
         mx68k_key_up(scancode)
     }
 
-    // MARK: LED polling
+    // MARK: LED ポーリング
 
     func startLEDPolling() {
         stopLEDPolling()
-        guestLED = mx68k_get_key_led()   // immediate read so the window opens in-sync
+        guestLED = mx68k_get_key_led()   // ウィンドウを開いた時点で同期しているよう即座に読む
         ledTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.guestLED = mx68k_get_key_led()
         }
@@ -338,11 +339,12 @@ final class SoftKeyboardState: ObservableObject {
         ledTimer = nil
     }
 
-    // MARK: force-release (P228 round-1 required addition)
+    // MARK: 強制解放(P228 レビュー第1ラウンドで必須とされた追加)
 
-    /// Force-release any sticky key still held when the window closes, mirroring
-    /// P227 stopGamepadMonitoring() / P229 releaseAutoPause() idle-release so a
-    /// held SHIFT/CTRL/OPT can't stay latched in the guest after the window is gone.
+    /// ウィンドウを閉じる時点でまだ押下保持中のスティッキーキーを強制解放する。
+    /// P227 stopGamepadMonitoring() / P229 releaseAutoPause() のアイドル時解放と
+    /// 同じ考え方で、ウィンドウが消えた後に SHIFT/CTRL/OPT がゲスト側で押されたまま
+    /// 残らないようにする。
     func releaseAllSticky() {
         if shiftHeld { mx68k_key_up(0x70); shiftHeld = false }
         if ctrlHeld  { mx68k_key_up(0x71); ctrlHeld  = false }
@@ -351,14 +353,14 @@ final class SoftKeyboardState: ObservableObject {
     }
 }
 
-// MARK: - Individual key button
+// MARK: - 個々のキーボタン
 
 private struct SoftKeyButton: View {
     let key: SoftKeyDef
     @ObservedObject var state: SoftKeyboardState
 
-    /// Local per-gesture guard so the DragGesture's repeated `.onChanged` firings
-    /// only send one key_down per press (normal keys only).
+    /// ジェスチャー単位のローカルなガード。DragGesture の `.onChanged` が繰り返し
+    /// 発火しても、1回の押下につき key_down を1回だけ送るようにする(通常キーのみ)。
     @State private var isDown = false
 
     private var highlighted: Bool {
@@ -367,27 +369,27 @@ private struct SoftKeyButton: View {
             return state.isStickyOn(key.scancode)
         case .ledPulse:
             guard let bit = key.ledBit else { return false }
-            return (state.guestLED & (UInt8(1) << bit)) == 0   // negative logic: 0 = lit
+            return (state.guestLED & (UInt8(1) << bit)) == 0   // 負論理: 0 = 点灯
         case .normal:
             return isDown
         }
     }
 
     private var displayLabel: String {
-        // かな-mode glyph takes highest priority: when the guest's かな lock LED is
-        // lit (guestLED bit0 clear, negative logic) show the JIS kana glyph. Runs
-        // BEFORE the shift/lowercase checks so kana display wins while active; when
-        // かな is off (bit0 == 1) this falls through cleanly to the checks below.
+        // かなモードの表示文字が最優先: ゲストの かな ロックLED が点灯している時
+        // (guestLED の bit0 がクリア、負論理)は JIS かな文字を表示する。SHIFT/小文字の
+        // 判定より「前に」実行するため、かな有効中はかな表示が優先される。かな が
+        // オフ(bit0 == 1)の時は、そのまま下の判定へ素直に抜ける。
         if (state.guestLED & 0x01) == 0, let k = kanaGlyphs[key.scancode] {
             return k
         }
-        // Symbol/number keys show their shifted glyph when the local SHIFT is on.
+        // 記号/数字キーは、ローカルの SHIFT が ON の時に SHIFT 時の文字を表示する。
         if state.shiftHeld, let g = shiftGlyphs[key.scancode] {
             return g
         }
-        // Letter keys read lowercase until SHIFT is held (JIS keycaps show upper,
-        // but this matches the actual glyph produced). shiftGlyphs holds only
-        // symbol/number scancodes, so letters never collide with the branch above.
+        // 英字キーは SHIFT を押下保持するまで小文字で表示する(JIS キートップは大文字
+        // 表記だが、実際に入力される文字に合わせている)。shiftGlyphs は記号/数字の
+        // スキャンコードしか持たないので、英字が上の分岐と衝突することはない。
         if !state.shiftHeld,
            key.label.count == 1,
            let c = key.label.first, c.isLetter, c.isUppercase {
@@ -396,20 +398,20 @@ private struct SoftKeyButton: View {
         return key.label
     }
 
-    /// 1-line text label font size. Priority: explicit per-key override >
-    /// 2-line fixed 9pt (P232) > width/height-derived auto-size. The auto-size
-    /// uses min(w, h) so a tall-narrow key (ENTER, 32×66) uses the same baseline
-    /// as a square key of the same width (コード入力, 32×32) instead of a
-    /// height-inflated size that then truncates under .minimumScaleFactor.
+    /// 1行テキストラベルのフォントサイズ。優先順位: キーごとの明示的な上書き指定 >
+    /// 2行ラベル用の固定 9pt(P232)> 幅/高さから算出する自動サイズ。自動サイズは
+    /// min(w, h) を使うため、縦長で幅の狭いキー(ENTER、32×66)も、高さで膨らんだ
+    /// サイズ(その後 .minimumScaleFactor で切り詰められてしまう)ではなく、同じ幅の
+    /// 正方形キー(コード入力、32×32)と同じ基準サイズになる。
     private var fontSize: CGFloat {
         if let fixed = key.fixedFontSize { return fixed }
         if displayLabel.contains("\n") { return 9 }
         return max(8, min(key.w, key.h) * 0.36)
     }
 
-    /// The glyph shown on the keycap: an SF Symbol icon (RET + cursor keys) or the
-    /// text label. Both share the same highlight foreground colour. The icon branch
-    /// keeps its own height-derived size (all icon keys are square, so unchanged).
+    /// キートップに表示する図柄: SF Symbol アイコン(RET + カーソルキー)またはテキスト
+    /// ラベル。どちらも同じハイライト時の前景色を共有する。アイコン側の分岐は高さから
+    /// 算出する独自のサイズを維持する(アイコンキーはすべて正方形なので変化なし)。
     @ViewBuilder private var keyContent: some View {
         if let icon = key.iconName {
             Image(systemName: icon)
@@ -425,8 +427,8 @@ private struct SoftKeyButton: View {
         }
     }
 
-    /// Fill colour when this key is highlighted. Real-hardware lock keys (.ledPulse)
-    /// glow their actual LED colour (red/green); everything else keeps the accent.
+    /// このキーがハイライトされている時の塗り色。実機のロックキー(.ledPulse)は
+    /// 実際の LED の色(赤/緑)で光り、それ以外はアクセントカラーのままとする。
     private var highlightFill: Color {
         if key.kind == .ledPulse {
             return key.ledColor ?? Color.accentColor
@@ -434,11 +436,10 @@ private struct SoftKeyButton: View {
         return Color.accentColor
     }
 
-    /// P710 — keycap base fill. The macOS branch is byte-identical to P228's
-    /// original expression. iOS has no `.controlColor`; the relationship being
-    /// preserved is "keycap sits one step brighter than the panel ground", which
-    /// `.systemBackground` (light = white / dark = black) holds against
-    /// `.secondarySystemBackground` (the panel ground, see `panelBackground`).
+    /// P710 — キートップの下地の塗り色。macOS 側の分岐は P228 当初の式とバイト単位で
+    /// 同一。iOS には `.controlColor` が無いため、維持すべき関係「キートップはパネルの
+    /// 地の色より一段明るい」を、`.systemBackground`(ライト = 白 / ダーク = 黒)と
+    /// `.secondarySystemBackground`(パネルの地の色、`panelBackground` 参照)の組で保つ。
     private var keyCapFill: Color {
         #if os(macOS)
         return Color(nsColor: .controlColor)
@@ -459,10 +460,10 @@ private struct SoftKeyButton: View {
             content.gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
-                        // Fire key_down only on the FIRST change of this gesture.
-                        // SwiftUI keeps tracking the gesture session after
-                        // initiation (not live hit-testing), so onEnded still
-                        // fires reliably even if the cursor leaves the key.
+                        // key_down はこのジェスチャーの「最初の」変化時にのみ発火する。
+                        // SwiftUI は開始後もジェスチャーのセッションを追跡し続ける
+                        // (逐次のヒットテストではない)ため、カーソルがキーの外へ
+                        // 出ても onEnded は確実に発火する。
                         if !isDown {
                             isDown = true
                             mx68k_key_down(key.scancode)
@@ -481,20 +482,20 @@ private struct SoftKeyButton: View {
     }
 }
 
-// MARK: - Root view
+// MARK: - ルートビュー
 
 struct SoftKeyboardView: View {
     @StateObject private var state = SoftKeyboardState()
 
-    // Canvas dimensions per the keytbl.inc layout (~766 × 218).
+    // keytbl.inc のレイアウトに基づくキャンバス寸法(約 766 × 218)。
     private let canvasWidth: CGFloat = 766
     private let canvasHeight: CGFloat = 218
 
-    /// P710 — panel ground colour. The macOS branch is byte-identical to P228's
-    /// original expression. The iOS counterpart is `.secondarySystemBackground`
-    /// (light = pale grey / dark = deep grey), chosen to keep macOS's
-    /// windowBackgroundColor-vs-controlColor brightness relationship
-    /// ("panel ground darker than keycap") in BOTH light and dark appearances.
+    /// P710 — パネルの地の色。macOS 側の分岐は P228 当初の式とバイト単位で同一。
+    /// iOS 側の対応色は `.secondarySystemBackground`(ライト = 淡いグレー /
+    /// ダーク = 濃いグレー)で、macOS の windowBackgroundColor と controlColor の
+    /// 明るさの関係(「パネルの地はキートップより暗い」)を、ライト・ダークの
+    /// 「両方の」外観で保つために選んだ。
     private var panelBackground: Color {
         #if os(macOS)
         return Color(nsColor: .windowBackgroundColor)
@@ -505,7 +506,7 @@ struct SoftKeyboardView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            // Defensive filter: drop any scancode==0 layout spacer (none present).
+            // 防御的フィルタ: scancode==0 のレイアウト用スペーサーを除外する(現状は存在しない)。
             ForEach(Array(softKeyLayout.enumerated()), id: \.offset) { _, key in
                 if key.scancode != 0 {
                     SoftKeyButton(key: key, state: state)
@@ -521,8 +522,9 @@ struct SoftKeyboardView: View {
             state.startLEDPolling()
         }
         .onDisappear {
-            // P228 round-1 required: release any sticky key still held, then
-            // stop the LED poll so nothing keeps firing after the window closes.
+            // P228 レビュー第1ラウンドで必須とされた処理: まだ押下保持中のスティッキー
+            // キーを解放し、続いて LED ポーリングを停止して、ウィンドウを閉じた後に
+            // 何も発火し続けないようにする。
             state.releaseAllSticky()
             state.stopLEDPolling()
         }

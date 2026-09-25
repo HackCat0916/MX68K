@@ -109,9 +109,10 @@ class EmulatorEngine: ObservableObject {
      * 1秒側が参照できるよう直近値をここに保持する。 */
     private var latestActiveSprites: [MX68KSpriteEntry] = []
     private var frameCount = 0
-    // P211: fixed-step wall-clock pacing for mx68k_run_frame(). CVDisplayLink fires at
-    // the display rate; the accumulator gates guest frames to the guest VSYNC rate so
-    // tempo tracks real hardware (and ProMotion 120Hz no longer overruns).
+    // P211: mx68k_run_frame() の実時間に基づく固定ステップのペース制御。CVDisplayLink は
+    // ディスプレイのリフレッシュレートで発火するが、アキュムレータがゲストフレームの進行を
+    // ゲストの VSYNC レートに合わせて絞るため、テンポが実機に追従する(ProMotion 120Hz でも
+    // 進みすぎなくなった)。
     private var accumulator: Double = 0
     private var lastTick: CFAbsoluteTime = 0
     /* P555: ターボ倍率。1 = 通常(既存挙動と完全に同一)、2〜5 = その倍だけ
@@ -321,7 +322,7 @@ class EmulatorEngine: ObservableObject {
         displayLinkProxy = nil
         #endif
         isRunning = false
-        // P211: clear pacing state so the next start() does not see a huge first delta.
+        // P211: 次の start() で最初の差分が巨大にならないよう、ペース制御の状態をクリアする。
         accumulator = 0
         lastTick = 0
     }
@@ -512,18 +513,18 @@ class EmulatorEngine: ObservableObject {
             return
         }
 
-        // P211: fixed-step accumulator. Compute wall-clock delta since the last
-        // callback (pause guard is above so paused time never leaks into delta),
-        // cap it to avoid a catch-up storm after a hitch, and advance one guest
-        // frame per elapsed VSYNC step.
+        // P211: 固定ステップのアキュムレータ。前回のコールバックからの実時間の差分を
+        // 求め(一時停止のガードは上にあるので、一時停止中の時間が差分に紛れ込むことは
+        // ない)、引っかかりの後に追いつき処理が集中しないよう上限を設けたうえで、
+        // 経過した VSYNC ステップ1つにつきゲストを1フレーム進める。
         let now = CFAbsoluteTimeGetCurrent()
         if lastTick == 0 { lastTick = now }
         let delta = min(0.05, now - lastTick)
         lastTick = now
         accumulator += delta
 
-        // Case A: re-read the guest VSYNC rate each tick so 31kHz<->15kHz mode
-        // switches are tracked live (accumulator stays continuous across a switch).
+        // Case A: 毎ティックごとにゲストの VSYNC レートを読み直し、31kHz<->15kHz の
+        // モード切替にリアルタイムで追従する(切替をまたいでもアキュムレータは連続したまま)。
         // P556: 計算式は P555 以前と同一(currentBaseStep へ切り出しただけ)。
         let baseStep = currentBaseStep
         /* P555: ターボは「1 ゲストフレームあたりの実時間予算」を 1/N に縮めることで
@@ -600,8 +601,8 @@ class EmulatorEngine: ObservableObject {
             captureRecordingFrameIfNeeded()
             accumulator -= step
             advanced = true
-            // frameCount / dumpFrames trigger stay inside the loop so each real
-            // emulated frame is counted 1:1 even when catch-up runs several.
+            // frameCount / dumpFrames のトリガーはループ内に置いたままにし、追いつき処理で
+            // 複数フレーム実行する場合でも、実際にエミュレートした各フレームを1対1で数える。
             frameCount += 1
             if dumpFrames.contains(frameCount) {
                 let msg = "[Swift] runFrame dump framebuffer trigger at frame \(frameCount)"
@@ -610,12 +611,12 @@ class EmulatorEngine: ObservableObject {
             }
         }
 
-        // No guest frame advanced this refresh: leave display/status untouched
-        // (the last framebuffer is redisplayed).
+        // このリフレッシュでゲストフレームが1つも進まなかった: 表示/ステータスには
+        // 手を付けない(直前のフレームバッファがそのまま再表示される)。
         guard advanced else { return }
 
-        // Display notify and status refresh happen once per advancing refresh
-        // (display shows the latest framebuffer; the monitor updates ~1/sec).
+        // 表示の通知とステータスの更新は、フレームが進んだリフレッシュごとに1回だけ行う
+        // (表示は最新のフレームバッファを示し、モニタは約1秒ごとに更新される)。
         DispatchQueue.main.async { [weak self] in
             self?.onFrame?()
         }
