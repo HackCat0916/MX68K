@@ -8072,86 +8072,86 @@ static void p97_emit_dump(void) {
  * C68k_Get_* / C68K 直読 / memcpy(C68K.D|A) / p47_read_long_le (dump 時のみ)。
  * P97/P95/P47D state は read-only 流用。per-access は gated memcpy 2 回のみ (cheap)。
  * ============================================================================ */
-#define P98_SNAP_GATE 0x4000u   /* arm full-reg snapshot only when a7 < this */
-#define P98_SNAP_RING 4u        /* rolling depth (armed below gate only; cheap) */
+#define P98_SNAP_GATE 0x4000u   /* a7 < この値のときのみ全レジスタスナップショットを arm */
+#define P98_SNAP_RING 4u        /* 巡回深さ (gate 未満でのみ arm。低コスト) */
 typedef struct {
-    uint32_t valid;             /* 0 until first populated */
-    uint32_t seq;               /* access counter at this snapshot */
-    uint32_t a7;                /* live A7 at this access */
-    uint32_t a[8];              /* A0-A7 live */
-    uint32_t d[8];              /* D0-D7 live */
-    uint32_t access_addr;       /* WriteW/ReadW addr (24-bit) */
-    uint32_t access_val;        /* ReadW value (back-filled by p98_on_readw_value); 0 for WriteW */
-    uint32_t pred_pc;           /* latest s_p47d_pc_ring entry (read-only, forensic) */
+    uint32_t valid;             /* 初回格納まで 0 */
+    uint32_t seq;               /* このスナップショット時点のアクセスカウンタ */
+    uint32_t a7;                /* このアクセス時点の live A7 */
+    uint32_t a[8];              /* A0-A7 の live 値 */
+    uint32_t d[8];              /* D0-D7 の live 値 */
+    uint32_t access_addr;       /* WriteW/ReadW のアドレス (24 ビット) */
+    uint32_t access_val;        /* ReadW の値 (p98_on_readw_value で後埋め)。WriteW では 0 */
+    uint32_t pred_pc;           /* 最新の s_p47d_pc_ring エントリ (read-only、事後解析用) */
     uint16_t sr;
     uint8_t  is_write;
 } p98_snap_t;
-static p98_snap_t s_p98_snap[P98_SNAP_RING];     /* rolling, populated only when a7<gate */
+static p98_snap_t s_p98_snap[P98_SNAP_RING];     /* 巡回、a7<gate のときのみ格納 */
 static uint32_t   s_p98_snap_pos     = 0;
-static uint32_t   s_p98_seq          = 0;        /* monotonic access counter */
-static int        s_p98_seen_healthy = 0;        /* a7>=$2000 once */
+static uint32_t   s_p98_seq          = 0;        /* 単調増加のアクセスカウンタ */
+static int        s_p98_seen_healthy = 0;        /* a7>=$2000 を一度観測済み */
 static uint32_t   s_p98_prev_a7      = 0xFFFFFFFFu;
-/* preceding-ReadW ring (depth 4, cell-source) — captures BOTH longword halves
- * regardless of half-order; updated every ReadW (cheap, ungated) */
+/* 先行 ReadW ring (深さ 4、セル由来) — 半分の順序に関わらずロングワードの
+ * 両半分を捕捉する。ReadW 毎に更新 (低コスト、ゲート無し) */
 #define P98_RW_RING 4u
 typedef struct { uint32_t addr; uint32_t val; uint32_t seq; uint8_t valid; } p98_rw_t;
 static p98_rw_t   s_p98_rw_ring[P98_RW_RING];
 static uint32_t   s_p98_rw_pos = 0;
-static p98_rw_t   s_p98_cross_rw_ring[P98_RW_RING];  /* ring snapshot latched at crossing */
-/* both-cell value-watch ($D4DE/$D4E0 AND $D4E4/$D4E6, mapped to base) — P97 only watched $D4E4 base */
-static uint32_t   s_p98_d4xx_base    = 0xFFFFFFFFu;  /* $D4DE or $D4E4 (base of last $D4xx read) */
-static uint32_t   s_p98_d4xx_hi_val  = 0xFFFFFFFFu;  /* word at base   (sentinel = not seen) */
-static uint32_t   s_p98_d4xx_lo_val  = 0xFFFFFFFFu;  /* word at base+2 (sentinel = not seen) */
-static uint32_t   s_p98_d4xx_seq     = 0xFFFFFFFFu;  /* seq of the most recent $D4xx half read */
-/* SCSI-save witness: WriteW to $D4E4/$D4E6 ($FE5AD2 move.l a7,$D4E4) */
+static p98_rw_t   s_p98_cross_rw_ring[P98_RW_RING];  /* crossing 時点で latch した ring スナップショット */
+/* 両セルの値監視 ($D4DE/$D4E0 と $D4E4/$D4E6、base へ対応付け) — P97 は $D4E4 base のみ監視していた */
+static uint32_t   s_p98_d4xx_base    = 0xFFFFFFFFu;  /* $D4DE または $D4E4 (直近の $D4xx read の base) */
+static uint32_t   s_p98_d4xx_hi_val  = 0xFFFFFFFFu;  /* base のワード (sentinel = 未観測) */
+static uint32_t   s_p98_d4xx_lo_val  = 0xFFFFFFFFu;  /* base+2 のワード (sentinel = 未観測) */
+static uint32_t   s_p98_d4xx_seq     = 0xFFFFFFFFu;  /* 直近の $D4xx 半分 read の seq */
+/* SCSI 退避の証跡: $D4E4/$D4E6 への WriteW ($FE5AD2 move.l a7,$D4E4) */
 static int        s_p98_save_seen = 0;
 static uint32_t   s_p98_save_seq  = 0xFFFFFFFFu;
-/* SCSI setup-write witness: WriteW to $D4DE/$D4E0 ($FE82F8 move.l a0,$D4DE) — Req MINOR-2.
- * distinguishes branch(b) "dispatch never entered" (setup never ran → $D4DE stays $0)
- * from branch(a) "save skipped" ($D4E4 save witness). */
+/* SCSI セットアップ書込の証跡: $D4DE/$D4E0 への WriteW ($FE82F8 move.l a0,$D4DE) — Req MINOR-2。
+ * 分岐(b)「dispatch に一度も入っていない」(セットアップ未実行 → $D4DE は $0 のまま) を
+ * 分岐(a)「退避がスキップされた」($D4E4 退避証跡) と区別する。 */
 static int        s_p98_d4de_wr_seen = 0;
 static uint32_t   s_p98_d4de_wr_seq  = 0xFFFFFFFFu;
-/* crossing latch (P98-own; P97 state read-only) */
+/* crossing latch (P98 独自。P97 の状態は read-only) */
 static int        s_p98_cross_seen      = 0;
-static p98_snap_t s_p98_cross_cur;               /* crossing access snapshot */
-static p98_snap_t s_p98_cross_prev;              /* PRIOR access snapshot (register-source) */
+static p98_snap_t s_p98_cross_cur;               /* crossing アクセスのスナップショット */
+static p98_snap_t s_p98_cross_prev;              /* 直前 (PRIOR) アクセスのスナップショット (レジスタ由来) */
 static uint32_t   s_p98_cross_prev_a7    = 0;
 static int        s_p98_dumped     = 0;
 
-/* per-access hook (EVERY ReadW/WriteW) — cheap; only gated memcpy snapshot.
+/* アクセス毎フック (全 ReadW/WriteW) — 低コスト。ゲート付き memcpy スナップショットのみ。
  * P97/P47D state は一切書かない (read-only 流用)。 */
 static void p98_on_access(uint32_t access_addr, int is_write) {
     if (s_p98_dumped) return;
-    uint32_t a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);   /* live; same cost as P97 */
+    uint32_t a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);   /* live。P97 と同コスト */
     int32_t  delta = (s_p98_prev_a7 == 0xFFFFFFFFu) ? 0 : (int32_t)(a7 - s_p98_prev_a7);
     if (a7 >= 0x2000u) s_p98_seen_healthy = 1;
-    /* SCSI-save witness ($FE5AD2 move.l a7,$D4E4 = WriteW to $D4E4/$D4E6 longword halves) */
+    /* SCSI 退避の証跡 ($FE5AD2 move.l a7,$D4E4 = $D4E4/$D4E6 ロングワード両半分への WriteW) */
     if (is_write && (access_addr == 0x0000D4E4u || access_addr == 0x0000D4E6u) && !s_p98_save_seen) {
         s_p98_save_seen = 1; s_p98_save_seq = s_p98_seq;
     }
-    /* SCSI setup-write witness ($FE82F8 move.l a0,$D4DE = WriteW to $D4DE/$D4E0) — Req MINOR-2 */
+    /* SCSI セットアップ書込の証跡 ($FE82F8 move.l a0,$D4DE = $D4DE/$D4E0 への WriteW) — Req MINOR-2 */
     if (is_write && (access_addr == 0x0000D4DEu || access_addr == 0x0000D4E0u) && !s_p98_d4de_wr_seen) {
         s_p98_d4de_wr_seen = 1; s_p98_d4de_wr_seq = s_p98_seq;
     }
-    /* gate is for pre-SSP false-arm avoidance only (NOT a cost reduction): A7 lives
-     * ~$1FF8-$2000 the whole healthy boot, so this is TRUE on nearly every access.
-     * byte-equivalence holds because the snapshot is observation-only, not because it is rare. */
-    if (s_p98_seen_healthy && a7 < P98_SNAP_GATE) {    /* ARM: full 16-reg snapshot via memcpy */
+    /* gate は SSP 確立前の誤 arm 回避専用 (コスト削減目的ではない): 正常起動中 A7 は
+     * ずっと ~$1FF8-$2000 にあるため、ほぼ全アクセスでこれは真となる。
+     * バイト等価性が保たれるのはスナップショットが観測専用だからであり、稀だからではない。 */
+    if (s_p98_seen_healthy && a7 < P98_SNAP_GATE) {    /* ARM: memcpy による 16 レジスタ全スナップショット */
         uint32_t slot = s_p98_snap_pos;
         p98_snap_t *e = &s_p98_snap[slot];
         e->valid = 1; e->seq = s_p98_seq; e->a7 = a7;
-        memcpy(e->d, C68K.D, sizeof(e->d));            /* 2 memcpys, not 16 Get_* calls */
+        memcpy(e->d, C68K.D, sizeof(e->d));            /* Get_* 16 回ではなく memcpy 2 回 */
         memcpy(e->a, C68K.A, sizeof(e->a));
         e->access_addr = access_addr; e->access_val = 0;
         e->pred_pc = s_p47d_pc_ring[(s_p47d_pc_ring_pos + P47D_PC_RING_SIZE - 1) % P47D_PC_RING_SIZE] & 0x00FFFFFFu;
         e->sr = (uint16_t)C68k_Get_SR(&C68K); e->is_write = (uint8_t)is_write;
         s_p98_snap_pos = (slot + 1u) % P98_SNAP_RING;
-        /* crossing: seen_healthy && a7<$400 && delta<0 (P98-own latch) */
+        /* crossing: seen_healthy && a7<$400 && delta<0 (P98 独自 latch) */
         if (!s_p98_cross_seen && s_p98_seen_healthy && a7 < 0x400u && delta < 0) {
             s_p98_cross_seen = 1;
-            s_p98_cross_cur  = *e;                       /* crossing access regs */
-            s_p98_cross_prev = s_p98_snap[(slot + P98_SNAP_RING - 1u) % P98_SNAP_RING]; /* prior */
-            memcpy(s_p98_cross_rw_ring, s_p98_rw_ring, sizeof(s_p98_rw_ring)); /* preceding ReadW ring (both halves) */
+            s_p98_cross_cur  = *e;                       /* crossing アクセスのレジスタ */
+            s_p98_cross_prev = s_p98_snap[(slot + P98_SNAP_RING - 1u) % P98_SNAP_RING]; /* 直前 */
+            memcpy(s_p98_cross_rw_ring, s_p98_rw_ring, sizeof(s_p98_rw_ring)); /* 先行 ReadW ring (両半分) */
             s_p98_cross_prev_a7 = s_p98_prev_a7;
         }
     }
@@ -8159,39 +8159,39 @@ static void p98_on_access(uint32_t access_addr, int is_write) {
     s_p98_seq++;
 }
 
-/* post-value ReadW hook (runs AFTER p98_on_access(...,0) for this same ReadW) — cheap.
- * captures the cell read VALUE (P97 never had it). longword cell = 2 ReadW halves. */
+/* 値確定後 ReadW フック (同じ ReadW に対する p98_on_access(...,0) の後に走る) — 低コスト。
+ * セルの read 値を捕捉する (P97 には無かった)。ロングワードのセル = ReadW 半分 2 回。 */
 static void p98_on_readw_value(uint32_t addr, uint32_t val) {
     if (s_p98_dumped) return;
-    /* p98_on_access(...,0) already incremented s_p98_seq for THIS ReadW: tie to seq-1 */
+    /* p98_on_access(...,0) がこの ReadW 分の s_p98_seq を既に加算済み: seq-1 に紐付ける */
     uint32_t a = addr & 0x00FFFFFFu;
-    uint32_t v = val & 0xFFFFu;          /* word read; longword cell = 2 ReadW halves */
+    uint32_t v = val & 0xFFFFu;          /* ワード read。ロングワードのセル = ReadW 半分 2 回 */
     uint32_t seq = s_p98_seq - 1u;
-    /* depth-4 ReadW ring (captures both longword halves regardless of order) */
+    /* 深さ 4 の ReadW ring (順序に関わらずロングワード両半分を捕捉) */
     p98_rw_t *r = &s_p98_rw_ring[s_p98_rw_pos];
     r->addr = a; r->val = v; r->seq = seq; r->valid = 1u;
     s_p98_rw_pos = (s_p98_rw_pos + 1u) % P98_RW_RING;
-    /* both-cell watch: map base ($D4DE/$D4E4) and the +2 lo half ($D4E0/$D4E6) to a base.
-     * reset hi/lo when the base changes so stale halves never mix across cells.
-     * (The depth-4 ring above is authoritative for VERDICT; this latch is a convenience read-out.) */
-    if (a == 0x0000D4DEu || a == 0x0000D4E0u) {          /* $D4DE longword (hi=$D4DE, lo=$D4E0) */
+    /* 両セル監視: base ($D4DE/$D4E4) と +2 の lo 半分 ($D4E0/$D4E6) を base に対応付ける。
+     * base が変わったら hi/lo をリセットし、古い半分がセルをまたいで混ざらないようにする。
+     * (VERDICT の正本は上の深さ 4 の ring であり、この latch は参考用の読み出し。) */
+    if (a == 0x0000D4DEu || a == 0x0000D4E0u) {          /* $D4DE ロングワード (hi=$D4DE, lo=$D4E0) */
         if (s_p98_d4xx_base != 0x0000D4DEu) { s_p98_d4xx_hi_val = 0xFFFFFFFFu; s_p98_d4xx_lo_val = 0xFFFFFFFFu; }
         s_p98_d4xx_base = 0x0000D4DEu; s_p98_d4xx_seq = seq;
         if (a == 0x0000D4DEu) s_p98_d4xx_hi_val = v; else s_p98_d4xx_lo_val = v;
-    } else if (a == 0x0000D4E4u || a == 0x0000D4E6u) {   /* $D4E4 longword (hi=$D4E4, lo=$D4E6) */
+    } else if (a == 0x0000D4E4u || a == 0x0000D4E6u) {   /* $D4E4 ロングワード (hi=$D4E4, lo=$D4E6) */
         if (s_p98_d4xx_base != 0x0000D4E4u) { s_p98_d4xx_hi_val = 0xFFFFFFFFu; s_p98_d4xx_lo_val = 0xFFFFFFFFu; }
         s_p98_d4xx_base = 0x0000D4E4u; s_p98_d4xx_seq = seq;
         if (a == 0x0000D4E4u) s_p98_d4xx_hi_val = v; else s_p98_d4xx_lo_val = v;
     }
-    /* back-fill the snapshot just stored (if it was this ReadW) */
+    /* 直前に格納したスナップショットへ後埋め (この ReadW のものであれば) */
     if (P98_SNAP_RING > 0u) {
         p98_snap_t *cur = &s_p98_snap[(s_p98_snap_pos + P98_SNAP_RING - 1u) % P98_SNAP_RING];
         if (cur->valid && cur->seq == seq && !cur->is_write) cur->access_val = v;
     }
 }
 
-/* one-shot panic-terminus dump — heavy work (scans, ring dump, p47_read_long_le) ONLY here.
- * called from chunk hook (M2-loc 罠回避、P88-P97 precedent)。 */
+/* one-shot の panic 終端ダンプ — 重い処理 (走査、ring ダンプ、p47_read_long_le) はここでのみ行う。
+ * chunk フックから呼ばれる (M2-loc 罠回避、P88-P97 の前例)。 */
 static void p98_emit_dump(void) {
     if (s_p98_dumped) return;
     s_p98_dumped = 1;
@@ -8202,7 +8202,7 @@ static void p98_emit_dump(void) {
     debug_log("[P98-A7SRC] NOTE: disasm の $FF1E52 例外 predecessor は disasm 推論・"
               "verdict-independent (probe 未検証、§3 は依存しない)\n");
 
-    /* --- crossing info --- */
+    /* --- crossing 情報 --- */
     if (!s_p98_cross_seen) {
         debug_log("[P98-A7SRC] crossing: NONE (seen_healthy 後 A7<$400 への降下 未観測)\n");
     } else {
@@ -8214,10 +8214,10 @@ static void p98_emit_dump(void) {
                   (unsigned)s_p98_cross_cur.pred_pc, (unsigned)s_p98_cross_cur.sr);
     }
 
-    /* --- preceding ReadW ring (depth 4, oldest-first) = cell-source candidate --- */
+    /* --- 先行 ReadW ring (深さ 4、古い順) = セル由来の候補 --- */
     {
         const p98_rw_t *ring = s_p98_cross_seen ? s_p98_cross_rw_ring : s_p98_rw_ring;
-        uint32_t base = s_p98_cross_seen ? 0u : s_p98_rw_pos; /* cross ring is a frozen copy */
+        uint32_t base = s_p98_cross_seen ? 0u : s_p98_rw_pos; /* cross ring は凍結コピー */
         debug_log("[P98-A7SRC] preceding-ReadW ring (depth %u, oldest-first):\n",
                   (unsigned)P98_RW_RING);
         for (uint32_t i = 0; i < P98_RW_RING; ++i) {
@@ -8227,8 +8227,8 @@ static void p98_emit_dump(void) {
                       (unsigned)i, (unsigned)re->valid, (unsigned)re->seq,
                       (unsigned)re->addr, (unsigned)re->val);
         }
-        /* longword reconstruction: scan the ring for a $D4DE(hi)+$D4E0(lo) or
-         * $D4E4(hi)+$D4E6(lo) pair regardless of half-order. */
+        /* ロングワード再構成: 半分の順序に関わらず ring から $D4DE(hi)+$D4E0(lo) または
+         * $D4E4(hi)+$D4E6(lo) の組を探す。 */
         uint32_t de_hi = 0xFFFFFFFFu, de_lo = 0xFFFFFFFFu;
         uint32_t e4_hi = 0xFFFFFFFFu, e4_lo = 0xFFFFFFFFu;
         for (uint32_t i = 0; i < P98_RW_RING; ++i) {
@@ -8253,7 +8253,7 @@ static void p98_emit_dump(void) {
         }
     }
 
-    /* --- both-cell value-watch latch (convenience read-out) --- */
+    /* --- 両セル値監視 latch (参考用の読み出し) --- */
     {
         uint32_t adj = (s_p98_cross_seen && s_p98_d4xx_seq != 0xFFFFFFFFu)
                        ? (s_p98_cross_cur.seq - s_p98_d4xx_seq) : 0xFFFFFFFFu;
@@ -8263,7 +8263,7 @@ static void p98_emit_dump(void) {
                   (unsigned)s_p98_d4xx_lo_val, (unsigned)s_p98_d4xx_seq, (int)adj);
     }
 
-    /* --- prior-access register snapshot at crossing → $0 register scan (register-source) --- */
+    /* --- crossing 時点の直前アクセスのレジスタスナップショット → $0 レジスタ走査 (レジスタ由来) --- */
     {
         const p98_snap_t *p = &s_p98_cross_prev;
         debug_log("[P98-A7SRC] prior-access reg snapshot: valid=%u seq=%u a7=$%08x "
@@ -8280,13 +8280,13 @@ static void p98_emit_dump(void) {
             for (int i = 0; i < 8; ++i)
                 if (p->d[i] == 0u)
                     debug_log("[P98-A7SRC]   register-source 候補: D%d == $0\n", i);
-            for (int i = 0; i < 7; ++i)   /* A7 excluded (= the loaded reg itself) */
+            for (int i = 0; i < 7; ++i)   /* A7 は除外 (= ロードされたレジスタ自身) */
                 if (p->a[i] == 0u)
                     debug_log("[P98-A7SRC]   register-source 候補: A%d == $0\n", i);
         }
     }
 
-    /* --- crossing access own register file (cross-check) --- */
+    /* --- crossing アクセス自身のレジスタファイル (照合用) --- */
     if (s_p98_cross_seen && s_p98_cross_cur.valid) {
         const p98_snap_t *c = &s_p98_cross_cur;
         debug_log("[P98-A7SRC] crossing-access reg file (cross-check):\n");
@@ -8298,14 +8298,14 @@ static void p98_emit_dump(void) {
                   (unsigned)c->a[4], (unsigned)c->a[5], (unsigned)c->a[6], (unsigned)c->a[7]);
     }
 
-    /* --- SCSI-save witness + $D4DE setup-write witness --- */
+    /* --- SCSI 退避証跡 + $D4DE セットアップ書込証跡 --- */
     debug_log("[P98-A7SRC] SCSI-save witness ($D4E4 longword): seen=%d seq=%u\n",
               s_p98_save_seen, (unsigned)s_p98_save_seq);
     debug_log("[P98-A7SRC] $D4DE setup-write witness: seen=%d seq=%u "
               "(未発火 ∧ $D4DE=$0 → branch(b) dispatch-never-entered)\n",
               s_p98_d4de_wr_seen, (unsigned)s_p98_d4de_wr_seq);
 
-    /* --- re-read current cell longwords (self-bounded, emit-time only) --- */
+    /* --- 現在のセルのロングワードを再読込 (自己完結、出力時のみ) --- */
     {
         uint32_t de = p47_read_long_le(0x0000D4DEu);
         uint32_t e4 = p47_read_long_le(0x0000D4E4u);
@@ -8318,7 +8318,7 @@ static void p98_emit_dump(void) {
      * 直前 snapshot の $0 register、SCSI-save witness。seq gap ≤3 を隣接窓とする。 */
     {
         int    have_cross = s_p98_cross_seen;
-        /* re-scan the (frozen-at-crossing) ring for cell longword == $0 */
+        /* (crossing 時点で凍結した) ring から、セルのロングワード == $0 を再走査する */
         const p98_rw_t *ring = have_cross ? s_p98_cross_rw_ring : s_p98_rw_ring;
         uint32_t de_hi = 0xFFFFFFFFu, de_lo = 0xFFFFFFFFu;
         uint32_t e4_hi = 0xFFFFFFFFu, e4_lo = 0xFFFFFFFFu;
@@ -8332,7 +8332,7 @@ static void p98_emit_dump(void) {
             else if (re->addr == 0x0000D4E6u) e4_lo = re->val & 0xFFFFu;
             else if ((re->val & 0xFFFFu) == 0u) other_zero_addr = re->addr;
         }
-        /* de_zero/e4_zero: both longword halves present and both zero (→ A7:=$0). */
+        /* de_zero/e4_zero: ロングワード両半分が揃い、かつ両方ゼロ (→ A7:=$0)。 */
         int de_zero = (de_hi == 0u && de_lo == 0u);
         int e4_zero = (e4_hi == 0u && e4_lo == 0u);
         int de_seen = (de_hi != 0xFFFFFFFFu || de_lo != 0xFFFFFFFFu);
@@ -8401,43 +8401,43 @@ static void p98_emit_dump(void) {
  * store + memcpy)。非摂動の根拠は observation-only (毎アクセス ungated sampler でも
  * read-only ゆえ cycle-accurate 不変) — 「rarely armed」ではない。
  * ============================================================================ */
-#define P99_STK_LO   0x001FF4u   /* watch window low  (inclusive) */
-#define P99_STK_HI   0x001FFCu   /* watch window high (exclusive): $1FF4/$1FF6/$1FF8/$1FFA */
-#define P99_W_RING   8u          /* write-history ring depth */
+#define P99_STK_LO   0x001FF4u   /* 監視窓の下限 (含む) */
+#define P99_STK_HI   0x001FFCu   /* 監視窓の上限 (含まない): $1FF4/$1FF6/$1FF8/$1FFA */
+#define P99_W_RING   8u          /* 書込履歴 ring の深さ */
 typedef struct {
     uint8_t  valid;
-    uint8_t  is_hi;              /* display hint only ($1FF6/$1FF4); reassembly is addr-based */
-    uint32_t seq;                /* monotonic access counter (= s_p99_seq-1 of this access) */
-    uint32_t addr;               /* masked 24-bit in-window write target */
-    uint16_t val;                /* WORD written (trace_Memory_WriteW val) */
-    uint32_t a7;                 /* live A7 at this write */
-    uint32_t pred_pc;            /* latest s_p47d_pc_ring entry (chunk-stale, +/-1000 insn) */
-    uint32_t d[8]; uint32_t a[8];/* live reg file snapshot (value-match source inference) */
+    uint8_t  is_hi;              /* 表示用ヒントのみ ($1FF6/$1FF4)。再構成はアドレスベース */
+    uint32_t seq;                /* 単調増加のアクセスカウンタ (= このアクセスの s_p99_seq-1) */
+    uint32_t addr;               /* マスク済み 24 ビットの窓内書込先 */
+    uint16_t val;                /* 書き込まれたワード (trace_Memory_WriteW の val) */
+    uint32_t a7;                 /* この書込時点の live A7 */
+    uint32_t pred_pc;            /* 最新の s_p47d_pc_ring エントリ (chunk 単位で古い、+/-1000 命令) */
+    uint32_t d[8]; uint32_t a[8];/* live レジスタファイルのスナップショット (値一致による書込元推定用) */
 } p99_wr_t;
 static p99_wr_t  s_p99_wr_ring[P99_W_RING];  static uint32_t s_p99_wr_pos = 0;
 static uint32_t  s_p99_seq = 0;
-static int       s_p99_seen_healthy = 0;     /* a7>=$2000 once seen */
+static int       s_p99_seen_healthy = 0;     /* a7>=$2000 を一度観測済み */
 static uint32_t  s_p99_prev_a7 = 0xFFFFFFFFu;
-/* crossing latch (P99-own; mirrors P98: seen_healthy && a7<$400 && delta<0) — H1/H3 detector */
+/* crossing latch (P99 独自。P98 と同じ条件: seen_healthy && a7<$400 && delta<0) — H1/H3 検出器 */
 static int       s_p99_cross_seen = 0;
 static uint32_t  s_p99_cross_a7 = 0, s_p99_cross_prev_a7 = 0, s_p99_cross_seq = 0, s_p99_cross_pred_pc = 0;
-static uint32_t  s_p99_cross_read_addr = 0;  /* access_addr of crossing access (= popped slot) */
-static p99_wr_t  s_p99_cross_wr_ring[P99_W_RING];   /* frozen write ring at crossing */
+static uint32_t  s_p99_cross_read_addr = 0;  /* crossing アクセスの access_addr (= pop されたスロット) */
+static p99_wr_t  s_p99_cross_wr_ring[P99_W_RING];   /* crossing 時点で凍結した書込 ring */
 static uint32_t  s_p99_cross_prev_d[8], s_p99_cross_prev_a[8]; static int s_p99_cross_prev_valid = 0;
-/* read-in-window latch (H2 discriminator — LAST-WINS: overwrite on every in-window READ so the
-   emit holds the read CLOSEST to the terminus, NOT a benign early read). corroboration only. */
-static int       s_p99_rdw_seen = 0;         /* sticky: 1 once any in-window read seen */
+/* 窓内 read の latch (H2 判別用 — LAST-WINS: 窓内 READ のたびに上書きし、出力時には
+   終端に最も近い read を保持する。無害な初期 read ではない)。裏付け専用。 */
+static int       s_p99_rdw_seen = 0;         /* sticky: 窓内 read を一度でも観測したら 1 */
 static uint32_t  s_p99_rdw_addr = 0, s_p99_rdw_a7 = 0, s_p99_rdw_seq = 0, s_p99_rdw_pred_pc = 0;
 static int       s_p99_dumped = 0;
 
-/* (a) WriteW value-watch hook — latches in-window writes with the written WORD val. */
+/* (a) WriteW 値監視フック — 窓内書込を書込ワード val とともに latch する。 */
 static void p99_on_writew_value(uint32_t addr, uint16_t val) {
     if (s_p99_dumped) return;
     if (addr >= P99_STK_LO && addr < P99_STK_HI) {
         p99_wr_t *e = &s_p99_wr_ring[s_p99_wr_pos];
         e->valid = 1;
-        e->is_hi = (uint8_t)(addr == 0x1FF6u || addr == 0x1FF4u);  /* display hint only */
-        e->seq   = s_p99_seq - 1u;   /* p99_on_access already did s_p99_seq++ this access */
+        e->is_hi = (uint8_t)(addr == 0x1FF6u || addr == 0x1FF4u);  /* 表示用ヒントのみ */
+        e->seq   = s_p99_seq - 1u;   /* p99_on_access がこのアクセス分の s_p99_seq++ を実施済み */
         e->addr  = addr; e->val = val;
         e->a7    = (uint32_t)C68k_Get_AReg(&C68K, 7);
         e->pred_pc = s_p47d_pc_ring[(s_p47d_pc_ring_pos + P47D_PC_RING_SIZE - 1)
@@ -8448,15 +8448,15 @@ static void p99_on_writew_value(uint32_t addr, uint16_t val) {
     }
 }
 
-/* (b)+(c) per-access A7 sampler + crossing latch (H1/H3) + read-in-window latch (H2). */
+/* (b)+(c) アクセス毎の A7 サンプラ + crossing latch (H1/H3) + 窓内 read latch (H2)。 */
 static void p99_on_access(uint32_t access_addr, int is_write) {
     if (s_p99_dumped) return;
     uint32_t a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);
     int32_t  delta = (s_p99_prev_a7 == 0xFFFFFFFFu) ? 0 : (int32_t)(a7 - s_p99_prev_a7);
     if (a7 >= 0x2000u) s_p99_seen_healthy = 1;
 
-    /* (H2 discriminator) in-window READ — LAST-WINS. Records live A7 AT the read so the
-       latched read is the one closest to the terminus, not a benign early balanced-rts read. */
+    /* (H2 判別用) 窓内 READ — LAST-WINS。read 時点の live A7 を記録し、latch される read が
+       終端に最も近いものとなるようにする (無害な初期の対応取れた rts の read ではなく)。 */
     if (!is_write && access_addr >= P99_STK_LO && access_addr < P99_STK_HI) {
         s_p99_rdw_seen = 1;
         s_p99_rdw_addr = access_addr; s_p99_rdw_a7 = a7; s_p99_rdw_seq = s_p99_seq;
@@ -8464,7 +8464,7 @@ static void p99_on_access(uint32_t access_addr, int is_write) {
                                            % P47D_PC_RING_SIZE] & 0x00FFFFFFu;
     }
 
-    /* (H1/H3 detector) crossing latch — A7 descent into near-zero (mirrors P98). */
+    /* (H1/H3 検出器) crossing latch — A7 がゼロ近傍へ降下 (P98 と同じ)。 */
     if (!s_p99_cross_seen && s_p99_seen_healthy && a7 < 0x400u && delta < 0) {
         s_p99_cross_seen = 1;
         s_p99_cross_a7 = a7; s_p99_cross_prev_a7 = s_p99_prev_a7; s_p99_cross_seq = s_p99_seq;
@@ -8479,14 +8479,14 @@ static void p99_on_access(uint32_t access_addr, int is_write) {
     s_p99_prev_a7 = a7; s_p99_seq++;
 }
 
-/* one-shot panic-terminus dump — all heavy work (reassembly / classify / VERDICT) here. */
+/* one-shot の panic 終端ダンプ — 重い処理 (再構成 / 分類 / VERDICT) はすべてここで行う。 */
 static void p99_emit_dump(void) {
     if (s_p99_dumped) return;
     s_p99_dumped = 1;
 
     debug_log("[P99-STACKWRITE] ==== begin (supervisor-stack $1FF6 source) ====\n");
 
-    /* crossing summary */
+    /* crossing の要約 */
     const char *cross_band =
         (!s_p99_cross_seen) ? "none"
         : (s_p99_cross_pred_pc >= 0xFE0000u) ? "ROM(FE/FFxxxx)"
@@ -8497,7 +8497,7 @@ static void p99_emit_dump(void) {
               s_p99_cross_seen, s_p99_cross_a7, s_p99_cross_prev_a7, s_p99_cross_read_addr,
               s_p99_cross_seq, s_p99_cross_pred_pc, cross_band);
 
-    /* read-in-window latch (H2 discriminator, last-wins) */
+    /* 窓内 read latch (H2 判別用、last-wins) */
     const char *rdw_band =
         (!s_p99_rdw_seen) ? "none"
         : (s_p99_rdw_pred_pc >= 0xFE0000u) ? "ROM(FE/FFxxxx)"
@@ -8507,19 +8507,19 @@ static void p99_emit_dump(void) {
               s_p99_rdw_seen, s_p99_rdw_addr, s_p99_rdw_a7, s_p99_rdw_seq, s_p99_rdw_pred_pc,
               rdw_band);
 
-    /* frozen write ring at crossing (oldest-first), and longword reassembly by ADDRESS */
+    /* crossing 時点で凍結した書込 ring (古い順) と、アドレス基準のロングワード再構成 */
     const p99_wr_t *ring = s_p99_cross_seen ? s_p99_cross_wr_ring : s_p99_wr_ring;
-    int     have_hi6 = 0, have_lo8 = 0;   /* $1FF6 hi-half / $1FF8 lo-half of the $1FF6 longword */
+    int     have_hi6 = 0, have_lo8 = 0;   /* $1FF6 ロングワードの $1FF6 hi 半分 / $1FF8 lo 半分 */
     uint16_t hi6 = 0, lo8 = 0;
     uint32_t hi6_seq = 0, lo8_seq = 0;
-    const p99_wr_t *zero_src = NULL;      /* latest in-window write whose val is 0 */
+    const p99_wr_t *zero_src = NULL;      /* val が 0 である最新の窓内書込 */
     for (uint32_t i = 0; i < P99_W_RING; i++) {
         const p99_wr_t *e = &ring[i];
         if (!e->valid) continue;
         debug_log("[P99-STACKWRITE] wr[%u] addr=0x%06x val=0x%04x is_hi=%u a7=0x%08x "
                   "seq=%u pred_pc=0x%06x\n",
                   i, e->addr, e->val, e->is_hi, e->a7, e->seq, e->pred_pc);
-        /* $1FF6 longword = hi-half@$1FF6, lo-half@$1FF8 — latest-by-seq wins per address */
+        /* $1FF6 ロングワード = hi 半分@$1FF6、lo 半分@$1FF8 — アドレス毎に seq 最新のものを採用 */
         if (e->addr == 0x1FF6u && (!have_hi6 || e->seq >= hi6_seq)) { hi6 = e->val; hi6_seq = e->seq; have_hi6 = 1; }
         if (e->addr == 0x1FF8u && (!have_lo8 || e->seq >= lo8_seq)) { lo8 = e->val; lo8_seq = e->seq; have_lo8 = 1; }
         if (e->val == 0u && (!zero_src || e->seq >= zero_src->seq)) zero_src = e;
@@ -8530,14 +8530,14 @@ static void p99_emit_dump(void) {
               have_hi6, hi6, have_lo8, lo8, combined,
               (have_hi6 && have_lo8 && combined == 0u) ? 1 : 0);
 
-    /* emit-time re-read of $1FF4..$1FFA (current stack contents, corroborating snapshot) */
+    /* 出力時の $1FF4..$1FFA 再読込 (現在のスタック内容、裏付け用スナップショット) */
     uint32_t rr_1ff4 = p47_read_long_le(0x1FF4u);
     uint32_t rr_1ff6 = p47_read_long_le(0x1FF6u);
     uint32_t rr_1ff8 = p47_read_long_le(0x1FF8u);
     debug_log("[P99-STACKWRITE] emit-reread $1FF4=0x%08x $1FF6=0x%08x $1FF8=0x%08x\n",
               rr_1ff4, rr_1ff6, rr_1ff8);
 
-    /* $0-value write register-source scan — enumerate ALL Dn/An holding $0 (ambiguous, honest) */
+    /* $0 値書込のレジスタ由来走査 — $0 を保持する Dn/An を全列挙 (曖昧だが正直に) */
     int any_zero_reg = 0;
     if (zero_src) {
         char buf[256]; size_t off = 0; buf[0] = '\0';
@@ -8560,8 +8560,8 @@ static void p99_emit_dump(void) {
         debug_log("[P99-STACKWRITE] zero-write src: NONE (no in-window write with val==0)\n");
     }
 
-    /* VERDICT taxonomy (mutually exclusive; fall-through to UNCLASSIFIED so raw data never dropped) */
-    int wrote_1ff6 = have_hi6 || have_lo8;   /* $1FF6 longword half written in-window */
+    /* VERDICT 分類 (相互排他。生データを決して捨てないよう UNCLASSIFIED へフォールスルー) */
+    int wrote_1ff6 = have_hi6 || have_lo8;   /* 窓内で $1FF6 ロングワードの半分が書き込まれた */
     const char *verdict, *hdisp;
     if (s_p99_cross_seen && wrote_1ff6 && combined == 0u && zero_src && any_zero_reg) {
         verdict = "W0-REG-SOURCE";  hdisp = "H1 (port-difference: pushed register was $0)";
@@ -8617,56 +8617,56 @@ static void p99_emit_dump(void) {
  * 非摂動の根拠は observation-only ⇒ cycle-accurate 不変 (read-only ゆえ毎アクセス
  * sample でも不摂動 — 「rarely armed」ではない)。
  * ============================================================================ */
-#define P100_STK_LO   0x001FF0u   /* watch window low  (inclusive) */
-#define P100_STK_HI   0x002000u   /* watch window high (exclusive): $1FF0..$1FFE */
+#define P100_STK_LO   0x001FF0u   /* 監視窓の下限 (含む) */
+#define P100_STK_HI   0x002000u   /* 監視窓の上限 (含まない): $1FF0..$1FFE */
 #define P100_W_RING   16u         /* write-history ring depth (window 拡幅で age-out 回避) */
 typedef struct {
     uint8_t   valid;
-    uint32_t  seq;                /* monotonic access counter (= s_p100_seq-1 of this access) */
-    uint32_t  addr;               /* masked 24-bit in-window write target */
-    uint16_t  val;                /* WORD written (trace_Memory_WriteW val) */
-    uint16_t  prior_val;          /* WORD at addr BEFORE this write (re-read at latch time) */
-    uint32_t  a7;                 /* live A7 at this write */
-    uintptr_t basepc;             /* live C68K.BasePC at this write (region oracle, read-only) */
-    uint32_t  pred_pc;            /* latest s_p47d_pc_ring entry (chunk-stale corroboration) */
-    uint32_t  d[8]; uint32_t a[8];/* live reg file snapshot (value-match source inference) */
+    uint32_t  seq;                /* 単調増加のアクセスカウンタ (= このアクセスの s_p100_seq-1) */
+    uint32_t  addr;               /* マスク済み 24 ビットの窓内書込先 */
+    uint16_t  val;                /* 書き込まれたワード (trace_Memory_WriteW の val) */
+    uint16_t  prior_val;          /* この書込の前の addr のワード (latch 時に再読込) */
+    uint32_t  a7;                 /* この書込時点の live A7 */
+    uintptr_t basepc;             /* この書込時点の live C68K.BasePC (領域 oracle、read-only) */
+    uint32_t  pred_pc;            /* 最新の s_p47d_pc_ring エントリ (chunk 単位で古い、裏付け用) */
+    uint32_t  d[8]; uint32_t a[8];/* live レジスタファイルのスナップショット (値一致による書込元推定用) */
 } p100_wr_t;
 static p100_wr_t s_p100_wr_ring[P100_W_RING]; static uint32_t s_p100_wr_pos = 0;
 static uint32_t  s_p100_seq = 0;
-static int       s_p100_seen_healthy = 0;     /* a7>=$2000 once seen */
+static int       s_p100_seen_healthy = 0;     /* a7>=$2000 を一度観測済み */
 static uint32_t  s_p100_prev_a7 = 0xFFFFFFFFu;
-/* prior-access latch (P100-own; capture-then-update). The crossing fires when A7 has
-   ALREADY descended, so the TRUE pop source-read is the PRIOR access — captured before
-   it is overwritten with the current one. */
+/* 直前アクセスの latch (P100 独自。capture-then-update)。crossing が発火する時点で A7 は
+   既に降下済みのため、真の pop 元 read は直前 (PRIOR) のアクセスである — 現在のアクセスで
+   上書きされる前に捕捉する。 */
 static uint32_t  s_p100_prev_access_addr = 0xFFFFFFFFu;
 static uintptr_t s_p100_prev_access_basepc = 0;
 static int       s_p100_prev_access_valid = 0;
-/* crossing latch (P100-own; mirrors P98/P99 logic, does NOT touch P99 state) */
+/* crossing latch (P100 独自。P98/P99 のロジックと同じだが、P99 の状態には触れない) */
 static int       s_p100_cross_seen = 0;
 static uint32_t  s_p100_cross_a7 = 0, s_p100_cross_prev_a7 = 0, s_p100_cross_seq = 0;
-static uint32_t  s_p100_cross_read_addr = 0; /* access_addr of crossing access (A7 already $0) */
-static uintptr_t s_p100_cross_basepc = 0;    /* live BasePC at crossing access */
+static uint32_t  s_p100_cross_read_addr = 0; /* crossing アクセスの access_addr (A7 は既に $0) */
+static uintptr_t s_p100_cross_basepc = 0;    /* crossing アクセス時点の live BasePC */
 static uint32_t  s_p100_cross_pred_pc = 0;
-/* prior-access values frozen AT the crossing (= the TRUE pop source-read) */
+/* crossing 時点で凍結した直前アクセスの値 (= 真の pop 元 read) */
 static uint32_t  s_p100_cross_prior_addr = 0xFFFFFFFFu;
 static uintptr_t s_p100_cross_prior_basepc = 0;
 static int       s_p100_cross_prior_valid = 0;
-static p100_wr_t s_p100_cross_wr_ring[P100_W_RING];  /* frozen write ring at crossing */
+static p100_wr_t s_p100_cross_wr_ring[P100_W_RING];  /* crossing 時点で凍結した書込 ring */
 static int       s_p100_dumped = 0;
 
-/* (a) WriteW value-watch hook — latches in-window writes with the written WORD val,
-   the prior value at the slot, live A7, live BasePC, and the register-file snapshot. */
+/* (a) WriteW 値監視フック — 窓内書込を、書込ワード val、スロットの書込前の値、
+   live A7、live BasePC、レジスタファイルのスナップショットとともに latch する。 */
 static void p100_on_writew_value(uint32_t addr, uint16_t val) {
     if (s_p100_dumped) return;
     if (addr >= P100_STK_LO && addr < P100_STK_HI) {
         p100_wr_t *e = &s_p100_wr_ring[s_p100_wr_pos];
         e->valid = 1;
-        e->seq   = s_p100_seq - 1u;   /* p100_on_access already did s_p100_seq++ this access */
+        e->seq   = s_p100_seq - 1u;   /* p100_on_access がこのアクセス分の s_p100_seq++ を実施済み */
         e->addr  = addr; e->val = val;
-        /* prior value: the WORD at addr re-read here (host-LE16). p47_read_long_le(addr)
-           returns (hi<<16)|lo where the word AT addr is the HIGH half (word at addr+2 is
-           the low half). The guest write has not yet hit MEM at this hook point (actual
-           Memory_WriteW commits later), so this reads the value present BEFORE the write. */
+        /* 書込前の値: addr のワードをここで再読込する (ホスト LE16)。p47_read_long_le(addr) は
+           (hi<<16)|lo を返し、addr のワードが HIGH 半分となる (addr+2 のワードが
+           low 半分)。このフック時点ではゲストの書込はまだ MEM に反映されていない (実際の
+           Memory_WriteW の確定は後) ため、書込前に存在した値を読むことになる。 */
         e->prior_val = (uint16_t)((p47_read_long_le(addr) >> 16) & 0xFFFFu);
         e->a7    = (uint32_t)C68k_Get_AReg(&C68K, 7);
         e->basepc = (uintptr_t)C68K.BasePC;
@@ -8678,7 +8678,7 @@ static void p100_on_writew_value(uint32_t addr, uint16_t val) {
     }
 }
 
-/* (b) per-access A7 sampler + crossing latch + prior-access (capture-then-update). */
+/* (b) アクセス毎の A7 サンプラ + crossing latch + 直前アクセス (capture-then-update)。 */
 static void p100_on_access(uint32_t access_addr, int is_write) {
     if (s_p100_dumped) return;
     uint32_t  a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);
@@ -8686,9 +8686,9 @@ static void p100_on_access(uint32_t access_addr, int is_write) {
     int32_t   delta = (s_p100_prev_a7 == 0xFFFFFFFFu) ? 0 : (int32_t)(a7 - s_p100_prev_a7);
     if (a7 >= 0x2000u) s_p100_seen_healthy = 1;
 
-    /* crossing latch — A7 descent into near-zero (mirrors P98/P99). When this fires A7 is
-       ALREADY $0, so the captured access_addr may be the P96 transfer-read; the TRUE pop
-       source-read is the PRIOR access, frozen here from the capture-then-update state. */
+    /* crossing latch — A7 がゼロ近傍へ降下 (P98/P99 と同じ)。これが発火する時点で A7 は
+       既に $0 のため、捕捉した access_addr は P96 の転送 read である可能性がある。真の pop
+       元 read は直前 (PRIOR) のアクセスであり、capture-then-update の状態からここで凍結する。 */
     if (!s_p100_cross_seen && s_p100_seen_healthy && a7 < 0x400u && delta < 0) {
         s_p100_cross_seen = 1;
         s_p100_cross_a7 = a7; s_p100_cross_prev_a7 = s_p100_prev_a7; s_p100_cross_seq = s_p100_seq;
@@ -8696,14 +8696,14 @@ static void p100_on_access(uint32_t access_addr, int is_write) {
         s_p100_cross_basepc = bp;
         s_p100_cross_pred_pc = s_p47d_pc_ring[(s_p47d_pc_ring_pos + P47D_PC_RING_SIZE - 1)
                                               % P47D_PC_RING_SIZE] & 0x00FFFFFFu;
-        /* freeze the PRIOR access (= the consumed slot read) BEFORE it is updated below */
+        /* 直前 (PRIOR) のアクセス (= 消費されたスロットの read) を、下で更新される前に凍結する */
         s_p100_cross_prior_addr   = s_p100_prev_access_addr;
         s_p100_cross_prior_basepc = s_p100_prev_access_basepc;
         s_p100_cross_prior_valid  = s_p100_prev_access_valid;
         memcpy(s_p100_cross_wr_ring, s_p100_wr_ring, sizeof s_p100_cross_wr_ring);
     }
 
-    /* capture-then-update: record this access as the prior-access for the NEXT call. */
+    /* capture-then-update: このアクセスを次回呼出し用の直前アクセスとして記録する。 */
     s_p100_prev_access_addr   = access_addr;
     s_p100_prev_access_basepc = bp;
     s_p100_prev_access_valid  = 1;
@@ -8711,19 +8711,19 @@ static void p100_on_access(uint32_t access_addr, int is_write) {
     (void)is_write;
 }
 
-/* P100-own region oracle: equality walk over C68K.Fetch[0..255] for the bank b where
-   Fetch[b] == latched_BasePC (the 24-bit-PC c68k invariant). The matched bank is the
-   START bank of its range. Region label is derived data-driven by reconstructing the
-   region host base = (b<<16) + Fetch[b] and comparing against the registered arrays
-   (no hard-coded bank numbers). No-match -> UNKNOWN sentinel. */
+/* P100 独自の領域 oracle: C68K.Fetch[0..255] を等値走査し、Fetch[b] == latch 済み BasePC と
+   なるバンク b を探す (24 ビット PC の c68k 不変条件)。一致したバンクはその範囲の
+   先頭 (START) バンクである。領域ラベルは、領域のホスト base = (b<<16) + Fetch[b] を
+   再構成して登録済み配列と比較することでデータ駆動で導出する (バンク番号の
+   ハードコード無し)。一致無し -> UNKNOWN sentinel。 */
 static const char *p100_region_of_basepc(uintptr_t bp, int *out_bank) {
     for (uint32_t b = 0; b < 256u; b++) {
         if ((uintptr_t)C68K.Fetch[b] == bp) {
             uintptr_t host = ((uintptr_t)b << 16) + (uintptr_t)C68K.Fetch[b];
             if (out_bank) *out_bank = (int)b;
             if (host == (uintptr_t)MEM) {
-                /* MEM covers $000000-$BFFFFF (RAM incl. low + $D0xxxx loaded code).
-                   START bank is 0x00, so sub-classify by guest band for the label. */
+                /* MEM は $000000-$BFFFFF をカバーする (下位 RAM + ロード済み $D0xxxx コードを含む)。
+                   先頭バンクは 0x00 なので、ラベル用にゲスト帯域で細分類する。 */
                 return "RAM(MEM)";
             }
             if (host == (uintptr_t)s_ipl_fetch)  return "ROM(IPL s_ipl_fetch)";
@@ -8739,15 +8739,15 @@ static const char *p100_region_of_basepc(uintptr_t bp, int *out_bank) {
     return "UNKNOWN(no Fetch match)";
 }
 
-/* one-shot panic-terminus dump — all heavy work (reassembly / Fetch-walk / classify /
-   VERDICT) deferred here. per-access stays O(1). */
+/* one-shot の panic 終端ダンプ — 重い処理 (再構成 / Fetch 走査 / 分類 /
+   VERDICT) はすべてここへ先送りする。アクセス毎の処理は O(1) のまま。 */
 static void p100_emit_dump(void) {
     if (s_p100_dumped) return;
     s_p100_dumped = 1;
 
     debug_log("[P100-STACK1FF8] ==== begin ($1FF8 $0-write source + true pop) ====\n");
 
-    /* crossing summary (3-bucket classify of the crossing access_addr) */
+    /* crossing の要約 (crossing の access_addr を 3 区分に分類) */
     int    cross_bank = -1;
     const char *cross_region = s_p100_cross_seen
         ? p100_region_of_basepc(s_p100_cross_basepc, &cross_bank)
@@ -8763,7 +8763,7 @@ static void p100_emit_dump(void) {
               s_p100_cross_seen, s_p100_cross_a7, s_p100_cross_prev_a7, s_p100_cross_read_addr,
               s_p100_cross_seq, cross_bucket, cross_bank, cross_region);
 
-    /* PRIOR access at crossing = the TRUE pop source-read */
+    /* crossing 時点の直前 (PRIOR) アクセス = 真の pop 元 read */
     int    prior_bank = -1;
     const char *prior_region = (s_p100_cross_seen && s_p100_cross_prior_valid)
         ? p100_region_of_basepc(s_p100_cross_prior_basepc, &prior_bank)
@@ -8776,7 +8776,7 @@ static void p100_emit_dump(void) {
               s_p100_cross_prior_valid, s_p100_cross_prior_addr, prior_in_window,
               prior_bank, prior_region);
 
-    /* chunk-stale pred_pc band for the crossing (corroboration only) */
+    /* crossing 時点の chunk 単位で古い pred_pc 帯 (裏付け専用) */
     const char *pred_band =
         (!s_p100_cross_seen) ? "none"
         : (s_p100_cross_pred_pc >= 0xFE0000u) ? "ROM(FE/FFxxxx)"
@@ -8785,13 +8785,13 @@ static void p100_emit_dump(void) {
     debug_log("[P100-STACK1FF8] crossing pred_pc=0x%06x band=%s (chunk-stale, corroboration)\n",
               s_p100_cross_pred_pc, pred_band);
 
-    /* frozen write ring (oldest-first), $1FF8 longword reassembly by ADDRESS, prior-value */
+    /* 凍結した書込 ring (古い順)、アドレス基準の $1FF8 ロングワード再構成、書込前の値 */
     const p100_wr_t *ring = s_p100_cross_seen ? s_p100_cross_wr_ring : s_p100_wr_ring;
-    int      have_hi8 = 0, have_lo10 = 0;  /* $1FF8 hi-half / $1FFA lo-half of $1FF8 longword */
+    int      have_hi8 = 0, have_lo10 = 0;  /* $1FF8 ロングワードの $1FF8 hi 半分 / $1FFA lo 半分 */
     uint16_t hi8 = 0, lo10 = 0;
     uint32_t hi8_seq = 0, lo10_seq = 0;
     uint16_t hi8_prior = 0; int hi8_prior_valid = 0;
-    const p100_wr_t *zero_src = NULL;      /* latest in-window write whose val is 0 */
+    const p100_wr_t *zero_src = NULL;      /* val が 0 である最新の窓内書込 */
     for (uint32_t i = 0; i < P100_W_RING; i++) {
         const p100_wr_t *e = &ring[i];
         if (!e->valid) continue;
@@ -8800,7 +8800,7 @@ static void p100_emit_dump(void) {
         debug_log("[P100-STACK1FF8] wr[%u] addr=0x%06x val=0x%04x prior=0x%04x a7=0x%08x "
                   "seq=%u writer_bank=%d writer_region=%s pred_pc=0x%06x\n",
                   i, e->addr, e->val, e->prior_val, e->a7, e->seq, wbank, wregion, e->pred_pc);
-        /* $1FF8 longword = hi-half@$1FF8, lo-half@$1FFA — latest-by-seq wins per address */
+        /* $1FF8 ロングワード = hi 半分@$1FF8、lo 半分@$1FFA — アドレス毎に seq 最新のものを採用 */
         if (e->addr == 0x1FF8u && (!have_hi8 || e->seq >= hi8_seq)) {
             hi8 = e->val; hi8_seq = e->seq; have_hi8 = 1;
             hi8_prior = e->prior_val; hi8_prior_valid = 1;
@@ -8814,15 +8814,15 @@ static void p100_emit_dump(void) {
               have_hi8, hi8, have_lo10, lo10, combined,
               (have_hi8 && have_lo10 && combined == 0u) ? 1 : 0, hi8_prior, hi8_prior_valid);
 
-    /* emit-time re-read of $1FF0..$1FFA (current stack contents) */
+    /* 出力時の $1FF0..$1FFA 再読込 (現在のスタック内容) */
     uint32_t rr_1ff0 = p47_read_long_le(0x1FF0u);
     uint32_t rr_1ff4 = p47_read_long_le(0x1FF4u);
     uint32_t rr_1ff8 = p47_read_long_le(0x1FF8u);
     debug_log("[P100-STACK1FF8] emit-reread $1FF0=0x%08x $1FF4=0x%08x $1FF8=0x%08x\n",
               rr_1ff0, rr_1ff4, rr_1ff8);
 
-    /* $0-value write register-source candidate set — enumerate ALL Dn/An holding $0
-       (value $0 is ambiguous across zero registers; honest candidate set, not a unique src) */
+    /* $0 値書込のレジスタ由来候補集合 — $0 を保持する Dn/An を全列挙
+       (値 $0 はゼロのレジスタ間で曖昧。一意の書込元ではなく正直な候補集合) */
     int any_zero_reg = 0; int writer_bank = -1; const char *writer_region = "none";
     if (zero_src) {
         writer_region = p100_region_of_basepc(zero_src->basepc, &writer_bank);
@@ -8847,7 +8847,7 @@ static void p100_emit_dump(void) {
         debug_log("[P100-STACK1FF8] zero-write src: NONE (no in-window write with val==0)\n");
     }
 
-    /* region-disagreement (V6 material): BasePC region vs chunk-stale pred_pc band */
+    /* 領域の不一致 (V6 の材料): BasePC の領域 vs chunk 単位で古い pred_pc 帯 */
     int region_disagree = 0;
     if (s_p100_cross_seen && cross_bank >= 0) {
         const char *bp_band =
@@ -8859,7 +8859,7 @@ static void p100_emit_dump(void) {
                   bp_band, pred_band, region_disagree);
     }
 
-    /* VERDICT taxonomy V1-V8 (mutually exclusive; fall-through to UNCLASSIFIED) */
+    /* VERDICT 分類 V1-V8 (相互排他。UNCLASSIFIED へフォールスルー) */
     int wrote_1ff8 = have_hi8 || have_lo10;
     int pop_reads_1ff8  = (s_p100_cross_prior_valid && s_p100_cross_prior_addr == 0x1FF8u) ? 1 : 0;
     int pop_reads_inwin = prior_in_window;
@@ -8919,47 +8919,47 @@ static void p100_emit_dump(void) {
  * P98/P99/P100/P47D state は read-only 流用、改変しない。per-access は O(1)。非摂動の根拠は
  * observation-only ⇒ cycle-accurate 不変 (read-only ゆえ毎アクセス sample でも不摂動)。
  * ============================================================================ */
-#define P101_STK_LO   0x001FE0u   /* widened window low  (inclusive): $1FE0..$1FFE */
-#define P101_STK_HI   0x002000u   /* widened window high (exclusive): 8 longwords / 16 words */
-#define P101_RD_RING  16u         /* last-N raw reads (any addr) frozen at crossing */
-#define P101_WR_RING  24u         /* writer-witness depth (4x-wider window, no early age-out) */
+#define P101_STK_LO   0x001FE0u   /* 拡幅した窓の下限 (含む): $1FE0..$1FFE */
+#define P101_STK_HI   0x002000u   /* 拡幅した窓の上限 (含まない): 8 ロングワード / 16 ワード */
+#define P101_RD_RING  16u         /* crossing 時点で凍結する直近 N 件の生 read (任意アドレス) */
+#define P101_WR_RING  24u         /* 書込証跡の深さ (窓が 4 倍広いので早期に押し出されない) */
 
 typedef struct {
     uint8_t   valid;
-    uint32_t  seq;        /* monotonic access counter (= s_p101_seq-1 at this access) */
-    uint32_t  addr;       /* masked 24-bit read addr */
-    uint16_t  val;        /* WORD read value (split-hook backfilled at post-value callsite) */
-    uint32_t  a7;         /* live A7 at this read */
-    uintptr_t basepc;     /* live C68K.BasePC at this read (region oracle, read-only) */
-    uint32_t  pred_pc;    /* latest s_p47d_pc_ring entry (chunk-stale corroboration) */
+    uint32_t  seq;        /* 単調増加のアクセスカウンタ (= このアクセス時点の s_p101_seq-1) */
+    uint32_t  addr;       /* マスク済み 24 ビットの read アドレス */
+    uint16_t  val;        /* read したワード値 (値確定後の呼出し箇所で分割フックにより後埋め) */
+    uint32_t  a7;         /* この read 時点の live A7 */
+    uintptr_t basepc;     /* この read 時点の live C68K.BasePC (領域 oracle、read-only) */
+    uint32_t  pred_pc;    /* 最新の s_p47d_pc_ring エントリ (chunk 単位で古い、裏付け用) */
 } p101_rd_t;
 typedef struct {
     uint8_t   valid;
-    uint32_t  seq;        /* monotonic access counter (= s_p101_seq-1 at this access) */
-    uint32_t  addr;       /* masked 24-bit in-window write target */
-    uint16_t  val;        /* WORD written */
-    uint16_t  prior;      /* WORD at addr BEFORE this write (re-read here, pre-store) */
-    uintptr_t basepc;     /* live C68K.BasePC at this write */
-    uint32_t  pred_pc;    /* latest s_p47d_pc_ring entry */
+    uint32_t  seq;        /* 単調増加のアクセスカウンタ (= このアクセス時点の s_p101_seq-1) */
+    uint32_t  addr;       /* マスク済み 24 ビットの窓内書込先 */
+    uint16_t  val;        /* 書き込まれたワード */
+    uint16_t  prior;      /* この書込の前の addr のワード (格納前にここで再読込) */
+    uintptr_t basepc;     /* この書込時点の live C68K.BasePC */
+    uint32_t  pred_pc;    /* 最新の s_p47d_pc_ring エントリ */
 } p101_wr_t;
 
 static p101_rd_t s_p101_rd_ring[P101_RD_RING]; static uint32_t s_p101_rd_pos = 0;
 static p101_wr_t s_p101_wr_ring[P101_WR_RING]; static uint32_t s_p101_wr_pos = 0;
 static uint32_t  s_p101_seq = 0;
-static int       s_p101_seen_healthy = 0;          /* a7>=$2000 once seen */
+static int       s_p101_seen_healthy = 0;          /* a7>=$2000 を一度観測済み */
 static uint32_t  s_p101_prev_a7 = 0xFFFFFFFFu;
-/* P101-own crossing latch (mirror P100, read-only trigger; does NOT touch P98/P99/P100 state) */
+/* P101 独自の crossing latch (P100 と同じ、read-only トリガ。P98/P99/P100 の状態には触れない) */
 static int       s_p101_cross_seen = 0;
 static uint32_t  s_p101_cross_a7 = 0, s_p101_cross_prev_a7 = 0, s_p101_cross_seq = 0;
-static uint32_t  s_p101_cross_read_addr = 0;       /* access_addr of crossing access (A7 already $0) */
+static uint32_t  s_p101_cross_read_addr = 0;       /* crossing アクセスの access_addr (A7 は既に $0) */
 static uintptr_t s_p101_cross_basepc = 0;
 static uint32_t  s_p101_cross_pred_pc = 0;
-static p101_rd_t s_p101_cross_rd_ring[P101_RD_RING];  /* frozen read-ring at crossing */
+static p101_rd_t s_p101_cross_rd_ring[P101_RD_RING];  /* crossing 時点で凍結した read ring */
 static int       s_p101_dumped = 0;
 
-/* P101-own region oracle (m4: do NOT call p100_region_of_basepc — keeps P101 independent of
-   P100_ENABLE). Pure read-only equality walk over C68K.Fetch[0..255]; matched bank is the
-   START bank of its range; no-match -> UNKNOWN sentinel. Copy of P100's walk, verbatim logic. */
+/* P101 独自の領域 oracle (m4: p100_region_of_basepc は呼ばない — P101 を P100_ENABLE から
+   独立に保つため)。C68K.Fetch[0..255] に対する純粋な read-only の等値走査。一致したバンクは
+   その範囲の先頭 (START) バンク。一致無し -> UNKNOWN sentinel。P100 の走査のコピーで、ロジックは逐語同一。 */
 static const char *p101_region_of_basepc(uintptr_t bp, int *out_bank) {
     for (uint32_t b = 0; b < 256u; b++) {
         if ((uintptr_t)C68K.Fetch[b] == bp) {
@@ -8979,9 +8979,9 @@ static const char *p101_region_of_basepc(uintptr_t bp, int *out_bank) {
     return "UNKNOWN(no Fetch match)";
 }
 
-/* (a) per-access A7 sampler + crossing latch + raw read-ring push (PRE-value).
-   seq is incremented ONCE PER ACCESS here (both ReadW pre-value callsite and WriteW callsite).
-   The post-value backfill does NOT increment seq — it locates the entry via seq==s_p101_seq-1. */
+/* (a) アクセス毎の A7 サンプラ + crossing latch + 生 read ring への push (値確定前)。
+   seq はここで 1 アクセスにつき 1 回だけ加算する (ReadW の値確定前呼出し箇所と WriteW 呼出し箇所の両方)。
+   値確定後の後埋めは seq を加算しない — seq==s_p101_seq-1 でエントリを特定する。 */
 static void p101_on_access(uint32_t access_addr, int is_write) {
     if (s_p101_dumped) return;
     uint32_t  a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);
@@ -8991,9 +8991,9 @@ static void p101_on_access(uint32_t access_addr, int is_write) {
     int32_t   delta = (s_p101_prev_a7 == 0xFFFFFFFFu) ? 0 : (int32_t)(a7 - s_p101_prev_a7);
     if (a7 >= 0x2000u) s_p101_seen_healthy = 1;
 
-    /* crossing latch — mirror P100's predicate exactly (read-only trigger). Freeze the
-       read-ring at the moment A7 descends near zero. Capturing cross_a7 AND cross_prev_a7
-       separates A7=$0-then-rts (H-A) from rte-PC=$0 with A7+=6 (H-B). */
+    /* crossing latch — P100 の述語と完全に同じ (read-only トリガ)。A7 がゼロ近傍へ
+       降下した瞬間に read ring を凍結する。cross_a7 と cross_prev_a7 の両方を捕捉することで、
+       A7=$0 の後の rts (H-A) と、A7+=6 を伴う rte-PC=$0 (H-B) を区別する。 */
     if (!s_p101_cross_seen && s_p101_seen_healthy && a7 < 0x400u && delta < 0) {
         s_p101_cross_seen = 1;
         s_p101_cross_a7 = a7; s_p101_cross_prev_a7 = s_p101_prev_a7; s_p101_cross_seq = s_p101_seq;
@@ -9003,8 +9003,8 @@ static void p101_on_access(uint32_t access_addr, int is_write) {
         memcpy(s_p101_cross_rd_ring, s_p101_rd_ring, sizeof s_p101_cross_rd_ring);
     }
 
-    /* push this access into the raw read-ring (val backfilled later for reads; writes leave
-       val=0 placeholder — writer-witness ring is the authoritative write record). */
+    /* このアクセスを生 read ring へ push する (read の val は後で後埋め。write では
+       val=0 の仮値のまま — 書込の正本は書込証跡 ring)。 */
     {
         p101_rd_t *e = &s_p101_rd_ring[s_p101_rd_pos];
         e->valid = 1; e->seq = s_p101_seq; e->addr = access_addr; e->val = 0;
@@ -9016,9 +9016,9 @@ static void p101_on_access(uint32_t access_addr, int is_write) {
     (void)is_write;
 }
 
-/* (a-post) split-hook value backfill (M1) — at the ReadW POST-value callsite. The just-pushed
-   read-ring entry has seq == s_p101_seq-1 (p101_on_access already did seq++). Backfill its true
-   bus val. One pre-value push per ReadW makes the seq match unambiguous. */
+/* (a-post) 分割フックによる値の後埋め (M1) — ReadW の値確定後の呼出し箇所で行う。直前に push
+   した read ring エントリは seq == s_p101_seq-1 を持つ (p101_on_access が seq++ を実施済み)。
+   その真のバス val を後埋めする。ReadW 1 回につき値確定前の push は 1 回なので seq の一致は一意。 */
 static void p101_on_readw_value(uint32_t addr, uint16_t val) {
     if (s_p101_dumped) return;
     uint32_t want = s_p101_seq - 1u;
@@ -9028,16 +9028,16 @@ static void p101_on_readw_value(uint32_t addr, uint16_t val) {
     }
 }
 
-/* (b) WriteW value-watch hook — latches in-window writes with the written WORD val, the prior
-   value at the slot (re-read here, pre-store), live BasePC, pred_pc. m3: prior via P100's exact
-   one-liner (word@addr IS the MS half of p47_read_long_le(addr)). The guest store has not yet
-   hit MEM at this hook point, so this reads the pre-write value. */
+/* (b) WriteW 値監視フック — 窓内書込を、書込ワード val、スロットの書込前の値 (格納前に
+   ここで再読込)、live BasePC、pred_pc とともに latch する。m3: 書込前の値は P100 と全く同じ
+   1 行で取得 (addr のワードが p47_read_long_le(addr) の上位 (MS) 半分)。このフック時点では
+   ゲストの格納はまだ MEM に反映されていないため、書込前の値を読むことになる。 */
 static void p101_on_writew_value(uint32_t addr, uint16_t val) {
     if (s_p101_dumped) return;
     if (addr >= P101_STK_LO && addr < P101_STK_HI) {
         p101_wr_t *e = &s_p101_wr_ring[s_p101_wr_pos];
         e->valid = 1;
-        e->seq   = s_p101_seq - 1u;   /* p101_on_access already did s_p101_seq++ this access */
+        e->seq   = s_p101_seq - 1u;   /* p101_on_access がこのアクセス分の s_p101_seq++ を実施済み */
         e->addr  = addr; e->val = val;
         e->prior = (uint16_t)((p47_read_long_le(addr) >> 16) & 0xFFFFu);
         e->basepc = (uintptr_t)C68K.BasePC;
@@ -9047,16 +9047,16 @@ static void p101_on_writew_value(uint32_t addr, uint16_t val) {
     }
 }
 
-/* one-shot panic-terminus dump — all heavy work (layout reconstruction via p47_read_long_le,
-   Fetch-walk region resolution, base-from-pair inference, classification, logging) deferred here.
-   per-access stays O(1). */
+/* one-shot の panic 終端ダンプ — 重い処理 (p47_read_long_le によるレイアウト再構成、
+   Fetch 走査による領域解決、組からの base 推定、分類、ログ出力) はすべてここへ先送りする。
+   アクセス毎の処理は O(1) のまま。 */
 static void p101_emit_dump(void) {
     if (s_p101_dumped) return;
     s_p101_dumped = 1;
 
     debug_log("[P101-STACK1FFA] ==== begin ($1FFA pop + full top-of-stack longword layout) ====\n");
 
-    /* crossing summary: cross_prev_a7 -> cross_a7 (H-A: A7=$0-then-rts vs H-B: rte+6). */
+    /* crossing の要約: cross_prev_a7 -> cross_a7 (H-A: A7=$0 の後の rts vs H-B: rte+6)。 */
     int    cross_bank = -1;
     const char *cross_region = s_p101_cross_seen
         ? p101_region_of_basepc(s_p101_cross_basepc, &cross_bank) : "none";
@@ -9071,7 +9071,7 @@ static void p101_emit_dump(void) {
         debug_log("[P101-STACK1FFA] H-A-vs-H-B: %s\n", ha_hb);
     }
 
-    /* (1) full per-WORD layout table [$1FE0,$2000) — TWO ways, labelled separately. */
+    /* (1) [$1FE0,$2000) のワード単位の完全なレイアウト表 — 2 通りの見方を別ラベルで出す。 */
     const p101_rd_t *rdring = s_p101_cross_seen ? s_p101_cross_rd_ring : s_p101_rd_ring;
     const p101_wr_t *wrring = s_p101_wr_ring;
 
@@ -9081,8 +9081,8 @@ static void p101_emit_dump(void) {
         uint16_t w = (uint16_t)((p47_read_long_le(a) >> 16) & 0xFFFFu);
         debug_log("[P101-STACK1FFA]   word[0x%06x] = 0x%04x\n", a, w);
     }
-    /* as-written: for each even addr in window, the LAST-written word (latest seq) from the
-       writer ring, with writer region. Addrs never written show "(no write seen)". */
+    /* 書込ベース: 窓内の各偶数アドレスについて、書込 ring 中で最後に書かれたワード (seq 最新) を
+       書込元領域とともに示す。一度も書かれていないアドレスは "(no write seen)" と表示する。 */
     debug_log("[P101-STACK1FFA] layout as-written (from writer-witness ring, latest-by-seq):\n");
     for (uint32_t a = P101_STK_LO; a < P101_STK_HI; a += 2u) {
         const p101_wr_t *best = NULL;
@@ -9098,20 +9098,20 @@ static void p101_emit_dump(void) {
             debug_log("[P101-STACK1FFA]   word[0x%06x] = (no write seen)\n", a);
         }
     }
-    /* convenience longword-view (grouping ASSUMED — corroboration only). */
+    /* 参考用のロングワード表示 (組分けは仮定 — 裏付け専用)。 */
     debug_log("[P101-STACK1FFA] longword-view (grouping assumed): $1FE0=0x%08x $1FE4=0x%08x "
               "$1FE8=0x%08x $1FEC=0x%08x $1FF0=0x%08x $1FF4=0x%08x $1FF8=0x%08x $1FFC=0x%08x\n",
               p47_read_long_le(0x1FE0u), p47_read_long_le(0x1FE4u), p47_read_long_le(0x1FE8u),
               p47_read_long_le(0x1FECu), p47_read_long_le(0x1FF0u), p47_read_long_le(0x1FF4u),
               p47_read_long_le(0x1FF8u), p47_read_long_le(0x1FFCu));
 
-    /* (2) raw read-sequence ring oldest->newest. EXCLUDE addr<$10 from base inference (P96
-       vector[0]=$0 transfer-read) but STILL print, labelled. Track in-window consecutive pairs. */
+    /* (2) 生 read 系列 ring (古い順 -> 新しい順)。addr<$10 は base 推定から除外する (P96 の
+       vector[0]=$0 転送 read) が、ラベル付きで出力はする。窓内の連続する組を追跡する。 */
     debug_log("[P101-STACK1FFA] raw read-sequence ring (frozen=%d, oldest->newest):\n",
               s_p101_cross_seen);
     for (uint32_t k = 0; k < P101_RD_RING; k++) {
-        /* iterate oldest->newest: ring is circular, oldest is at s_p101_rd_pos when not frozen;
-           frozen copy preserves the same layout, so walk from rd_pos. */
+        /* 古い順 -> 新しい順に走査: ring は循環しており、凍結前は s_p101_rd_pos が最古。
+           凍結コピーも同じレイアウトを保つので rd_pos から辿る。 */
         uint32_t i = (s_p101_rd_pos + k) % P101_RD_RING;
         const p101_rd_t *e = &rdring[i];
         if (!e->valid) continue;
@@ -9123,9 +9123,9 @@ static void p101_emit_dump(void) {
                   e->seq, e->addr, e->val, e->a7, rb, rr, e->pred_pc, note);
     }
 
-    /* base-from-pairs: scan the ring (oldest->newest) for consecutive (addr, addr+2) pairs with
-       A7 unchanged, both in-window, addr>=$10. The crossing-ADJACENT pair (highest seq / last in
-       ring order) is the inferred pop base (M2). Print ALL pairs, mark the crossing-adjacent one. */
+    /* 組からの base 推定: ring を (古い順 -> 新しい順に) 走査し、A7 不変かつ両方窓内・addr>=$10 の
+       連続する (addr, addr+2) の組を探す。crossing に隣接する組 (seq 最大 / ring 順で最後) を
+       推定 pop base とする (M2)。全組を出力し、crossing 隣接の組に印を付ける。 */
     {
         uint32_t inferred_base = 0xFFFFFFFFu; uint32_t inferred_base_seq = 0;
         int      any_pair = 0;
@@ -9135,10 +9135,10 @@ static void p101_emit_dump(void) {
             const p101_rd_t *e0 = &rdring[i0];
             const p101_rd_t *e1 = &rdring[i1];
             if (!e0->valid || !e1->valid) continue;
-            if (e0->addr < 0x10u || e1->addr < 0x10u) continue;        /* exclude P96 transfer-read */
+            if (e0->addr < 0x10u || e1->addr < 0x10u) continue;        /* P96 転送 read を除外 */
             if (e0->addr < P101_STK_LO || e0->addr >= P101_STK_HI) continue;
             if (e1->addr != e0->addr + 2u) continue;
-            if (e0->a7 != e1->a7) continue;                            /* A7 unchanged across pair */
+            if (e0->a7 != e1->a7) continue;                            /* 組の間で A7 不変 */
             any_pair = 1;
             debug_log("[P101-STACK1FFA] consecutive-pair base=0x%06x (seq %u,%u a7=0x%08x) "
                       "-> longword 0x%04x%04x\n",
@@ -9157,7 +9157,7 @@ static void p101_emit_dump(void) {
         }
     }
 
-    /* (3) writer-witness set — all in-window writes with region + prior. Highlight val==0. */
+    /* (3) 書込証跡の集合 — 窓内の全書込を領域 + 書込前の値とともに示す。val==0 を強調表示。 */
     debug_log("[P101-STACK1FFA] writer-witness set (all in-window writes):\n");
     {
         int zero_writes = 0;
@@ -9175,7 +9175,7 @@ static void p101_emit_dump(void) {
                   "(a $0 longword needs both halves written $0)\n", zero_writes);
     }
 
-    /* (4) per-read BasePC banks across the in-window read sequence (bank-$FE fork arbiter). */
+    /* (4) 窓内 read 系列にわたる read 毎の BasePC バンク (バンク $FE 分岐の判定材料)。 */
     {
         char buf[512]; size_t off = 0; buf[0] = '\0';
         int  n_inwin = 0; int first_bank = -2; int last_inwin_bank = -2; int changed = 0;
@@ -9198,9 +9198,9 @@ static void p101_emit_dump(void) {
                   (n_inwin ? buf : "(none)"), n_inwin, first_bank, last_inwin_bank, changed);
     }
 
-    /* register honesty: enumerate ALL Dn/An == 0 at the crossing (the $0 source is ambiguous
-       across zero registers; for the POP the load-bearing fact is the ADDRESS sequence, not a
-       register). */
+    /* レジスタの正直な列挙: crossing 時点で 0 の Dn/An を全列挙する ($0 の出所はゼロの
+       レジスタ間で曖昧。POP にとって決め手となるのはレジスタではなくアドレス系列で
+       ある)。 */
     {
         char buf[256]; size_t off = 0; buf[0] = '\0'; int any_zero = 0;
         for (int r = 0; r < 8; r++) {
@@ -9216,8 +9216,8 @@ static void p101_emit_dump(void) {
                   buf, any_zero);
     }
 
-    /* (7) TWO orthogonal VERDICT families + shared escapes. Read off the raw data, no slot assume.
-       Recompute the discriminators from the read-ring (same scan as base-from-pairs). */
+    /* (7) 直交する 2 系統の VERDICT + 共通の逃げ道。スロットを仮定せず生データから読み取る。
+       判別材料は read ring から再計算する (組からの base 推定と同じ走査)。 */
     {
         uint32_t base = 0xFFFFFFFFu; uint32_t base_seq = 0; int n_pairs = 0;
         int      distinct_bases = 0; uint32_t seen_bases[P101_RD_RING]; uint32_t n_seen = 0;
@@ -9256,7 +9256,7 @@ static void p101_emit_dump(void) {
         int have_base = (base != 0xFFFFFFFFu);
         uint32_t lw = have_base ? p47_read_long_le(base) : 0xFFFFFFFFu;
 
-        /* IDENTITY family */
+        /* IDENTITY 系統 */
         const char *vid, *vid_disp;
         if (!s_p101_cross_seen || !have_base) {
             vid = "N/A — no crossing or no in-window pop-read (see VERDICT-ESCAPE)"; vid_disp = "";
@@ -9277,7 +9277,7 @@ static void p101_emit_dump(void) {
                   "distinct_bases=%d  disp=%s\n",
                   vid, have_base ? base : 0xFFFFFFFFu, lw, n_pairs, distinct_bases, vid_disp);
 
-        /* REGION family (at the inferred A7-load / pop read) */
+        /* REGION 系統 (推定した A7 ロード / pop read 時点) */
         const char *vreg, *vreg_disp; int rom = 0, ram = 0;
         if (pop_bank >= 0) {
             rom = (pop_basepc == (uintptr_t)s_ipl_fetch) ? 1 : 0;
@@ -9309,7 +9309,7 @@ static void p101_emit_dump(void) {
                   "last_inwin_bank=%d  disp=%s\n",
                   vreg, pop_bank, first_inwin_bank, last_inwin_bank, vreg_disp);
 
-        /* shared escapes */
+        /* 共通の逃げ道 */
         if (!s_p101_cross_seen) {
             debug_log("[P101-STACK1FFA] VERDICT-ESCAPE=V8 NO-CROSSING -> both IDENTITY and REGION "
                       "N/A; widen ring / revisit gate in P102\n");
@@ -9319,7 +9319,7 @@ static void p101_emit_dump(void) {
                       P101_RD_RING);
         }
 
-        /* W-1 supplementary: value provenance of the $0 longword's writer(s). */
+        /* W-1 補足: $0 ロングワードの書込元の値の出所。 */
         {
             const p101_wr_t *zw = NULL;
             for (uint32_t i = 0; i < P101_WR_RING; i++) {
@@ -9339,7 +9339,7 @@ static void p101_emit_dump(void) {
         }
     }
 
-    /* HONEST LIMIT */
+    /* 正直な限界 (HONEST LIMIT) */
     debug_log("[P101-STACK1FFA] HONEST-LIMIT: exact within-bank PC is infeasible "
               "(C68K.PC/MX68KQ_GUEST_PC chunk-stale; BasePC gives only bank base). The SEQUENCE "
               "of BasePC banks is the sharpest localizer; exact pop instr deferred to SPEC disasm.\n");
@@ -9354,7 +9354,7 @@ static void p101_emit_dump(void) {
  * P101 が「$0 longword を stack から pop して A7=$0」モデルを反証。P102 は A7 を $0 に
  * する命令そのものの source を同定する。bank $FE 全 disasm では self-zeroing/stack-pop な
  * A7-write 命令は不在。register/memory-sourced A7-write は 3 site のみ:
- *   SITE C (primary suspect) $FE6BBC movea.l $40(a0),a7 — TCB context-restore。A7<-[a0+$40]。
+ *   SITE C (第一候補) $FE6BBC movea.l $40(a0),a7 — TCB コンテキスト復元。A7<-[a0+$40]。
  *           memory load ゆえ (a0+$40) で値 $0 の ReadW を発する -> probe で捕捉可能。
  *   SITE A/B $FE8238/$FE8264 movea.l d0,a7 — A7<-D0、D0==$0 必要。
  *
@@ -9372,20 +9372,20 @@ static void p101_emit_dump(void) {
  * ⇒ cycle-accurate 不変 (read-only ゆえ毎アクセス sample でも不摂動)。
  * pred_pc / BasePC-bank は corroboration のみ — primary arbiter は register file + source-read。
  * ============================================================================ */
-#define P102_SNAP_RING 8u   /* per-access full register-file snapshot ring */
+#define P102_SNAP_RING 8u   /* アクセス毎のレジスタファイル全体スナップショット ring */
 
 typedef struct {
     int       valid;
-    uint32_t  seq;            /* = s_p102_seq at this access */
+    uint32_t  seq;            /* = このアクセス時点の s_p102_seq */
     uint32_t  access_addr;
-    uint32_t  access_value;   /* ReadW/WriteW value at this access (backfilled for reads) */
+    uint32_t  access_value;   /* このアクセスの ReadW/WriteW 値 (read は後埋め) */
     int       is_write;
-    int       has_value;      /* value backfilled (read post-hook) or set (write) */
-    uint32_t  a7;             /* C68k_Get_AReg(&C68K,7) at this access (== A[7]) */
-    uint32_t  D[8];           /* memcpy of C68K.D[0..7] */
-    uint32_t  A[8];           /* memcpy of C68K.A[0..7] */
-    uintptr_t basepc;         /* C68K.BasePC (corroboration only) */
-    uint32_t  pred_pc;        /* chunk-stale band (corroboration only) */
+    int       has_value;      /* 値を後埋め済み (read の値確定後フック) または設定済み (write) */
+    uint32_t  a7;             /* このアクセス時点の C68k_Get_AReg(&C68K,7) (== A[7]) */
+    uint32_t  D[8];           /* C68K.D[0..7] の memcpy */
+    uint32_t  A[8];           /* C68K.A[0..7] の memcpy */
+    uintptr_t basepc;         /* C68K.BasePC (裏付け専用) */
+    uint32_t  pred_pc;        /* chunk 単位で古い帯 (裏付け専用) */
 } p102_snap_t;
 
 static p102_snap_t s_p102_snap_ring[P102_SNAP_RING];
@@ -9394,21 +9394,21 @@ static uint32_t    s_p102_seq        = 0;
 static int         s_p102_seen_healthy = 0;
 static uint32_t    s_p102_prev_a7    = 0xFFFFFFFFu;
 
-/* dedicated prior-access snapshot (immune to ring wrap; updated at END of each access) */
+/* 専用の直前アクセスのスナップショット (ring の一周に影響されない。各アクセスの最後に更新) */
 static p102_snap_t s_p102_prev_snap;
 static int         s_p102_prev_valid = 0;
 
-/* crossing capture (own latch; mirrors P101 predicate EXACTLY; touches NO other probe state) */
+/* crossing 捕捉 (独自 latch。P101 の述語と完全に同じ。他のプローブ状態には一切触れない) */
 static int         s_p102_cross_seen = 0;
 static uint32_t    s_p102_cross_seq  = 0;
 static int         s_p102_cross_have_prior = 0;
-static p102_snap_t s_p102_flip_snap;     /* snapshot AT the flip-detecting access (a7 == $0) */
-static p102_snap_t s_p102_prior_snap;    /* snapshot of the access IMMEDIATELY BEFORE the flip */
+static p102_snap_t s_p102_flip_snap;     /* flip を検出したアクセス時点のスナップショット (a7 == $0) */
+static p102_snap_t s_p102_prior_snap;    /* flip の直前 (IMMEDIATELY BEFORE) のアクセスのスナップショット */
 static int         s_p102_dumped   = 0;
 
-/* P102-own region oracle — verbatim copy of p101_region_of_basepc (P100->P101 precedent: keep
-   P102 independent of P101_ENABLE; do NOT reuse a helper with a different formula). Pure
-   read-only equality walk over C68K.Fetch[0..255]; matched bank is the START bank of its range. */
+/* P102 独自の領域 oracle — p101_region_of_basepc の逐語コピー (P100->P101 の前例: P102 を
+   P101_ENABLE から独立に保つ。式の異なるヘルパを再利用しない)。C68K.Fetch[0..255] に対する
+   純粋な read-only の等値走査。一致したバンクはその範囲の先頭 (START) バンク。 */
 static const char *p102_region_of_basepc(uintptr_t bp, int *out_bank) {
     for (uint32_t b = 0; b < 256u; b++) {
         if ((uintptr_t)C68K.Fetch[b] == bp) {
@@ -9428,9 +9428,9 @@ static const char *p102_region_of_basepc(uintptr_t bp, int *out_bank) {
     return "UNKNOWN(no Fetch match)";
 }
 
-/* per-access full register snapshot + crossing latch (PRE-value). seq incremented ONCE PER
-   ACCESS here (both ReadW pre-value callsite and WriteW callsite). post-value backfill does NOT
-   increment seq — it locates the entry via seq==s_p102_seq-1. */
+/* アクセス毎のレジスタ全体スナップショット + crossing latch (値確定前)。seq はここで 1 アクセス
+   につき 1 回だけ加算する (ReadW の値確定前呼出し箇所と WriteW 呼出し箇所の両方)。値確定後の後埋めは
+   seq を加算しない — seq==s_p102_seq-1 でエントリを特定する。 */
 static void p102_on_access(uint32_t access_addr, int is_write) {
     if (s_p102_dumped) return;
     uint32_t  a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);
@@ -9440,7 +9440,7 @@ static void p102_on_access(uint32_t access_addr, int is_write) {
     int32_t   delta = (s_p102_prev_a7 == 0xFFFFFFFFu) ? 0 : (int32_t)(a7 - s_p102_prev_a7);
     if (a7 >= 0x2000u) s_p102_seen_healthy = 1;
 
-    /* build this access's snapshot in the ring slot (O(1), read-only). */
+    /* このアクセスのスナップショットを ring スロットに構築する (O(1)、read-only)。 */
     p102_snap_t *e = &s_p102_snap_ring[s_p102_snap_pos];
     e->valid = 1; e->seq = s_p102_seq; e->access_addr = access_addr; e->access_value = 0;
     e->has_value = 0; e->is_write = is_write; e->a7 = a7;
@@ -9448,24 +9448,24 @@ static void p102_on_access(uint32_t access_addr, int is_write) {
     memcpy(e->A, C68K.A, sizeof e->A);
     e->basepc = bp; e->pred_pc = pred;
 
-    /* crossing latch — mirror P101's predicate EXACTLY (read-only trigger). P102-own state. */
+    /* crossing latch — P101 の述語と完全に同じ (read-only トリガ)。状態は P102 独自。 */
     if (!s_p102_cross_seen && s_p102_seen_healthy && a7 < 0x400u && delta < 0) {
         s_p102_cross_seen = 1;
         s_p102_cross_seq = s_p102_seq;
-        s_p102_flip_snap = *e;                 /* this access — A7 already $0 here */
+        s_p102_flip_snap = *e;                 /* このアクセス — ここでは A7 は既に $0 */
         if (s_p102_prev_valid) {
-            s_p102_prior_snap = s_p102_prev_snap;  /* access IMMEDIATELY BEFORE the flip */
+            s_p102_prior_snap = s_p102_prev_snap;  /* flip の直前 (IMMEDIATELY BEFORE) のアクセス */
             s_p102_cross_have_prior = 1;
         }
     }
 
     s_p102_snap_pos = (s_p102_snap_pos + 1u) % P102_SNAP_RING;
-    /* make this access the next prior (dedicated, ring-wrap immune). */
+    /* このアクセスを次回の直前アクセスとする (専用、ring の一周に影響されない)。 */
     s_p102_prev_snap = *e; s_p102_prev_valid = 1; s_p102_prev_a7 = a7; s_p102_seq++;
 }
 
-/* ReadW POST-value backfill — the just-pushed snapshot has seq==s_p102_seq-1. Backfill its true
-   bus half-word val into BOTH the ring slot and the dedicated prev_snap (keep them consistent). */
+/* ReadW の値確定後の後埋め — 直前に push したスナップショットは seq==s_p102_seq-1。その真の
+   バス半ワード val を ring スロットと専用 prev_snap の両方へ後埋めする (両者の整合を保つ)。 */
 static void p102_on_readw_value(uint32_t addr, uint16_t val) {
     if (s_p102_dumped) return;
     uint32_t want = s_p102_seq - 1u;
@@ -9480,8 +9480,8 @@ static void p102_on_readw_value(uint32_t addr, uint16_t val) {
     }
 }
 
-/* one-shot panic-terminus dump — all heavy work (longword reassembly, SITE-C check, zero-reg
-   enumeration, classification, logging) deferred here. per-access stays O(1). */
+/* one-shot の panic 終端ダンプ — 重い処理 (ロングワード再構成、SITE-C 検査、ゼロレジスタ
+   列挙、分類、ログ出力) はすべてここへ先送りする。アクセス毎の処理は O(1) のまま。 */
 static void p102_emit_dump(void) {
     if (s_p102_dumped) return;
     s_p102_dumped = 1;
@@ -9513,16 +9513,16 @@ static void p102_emit_dump(void) {
         return;
     }
 
-    /* A7-before / A7-after. */
+    /* A7 の変化前 / 変化後。 */
     uint32_t a7_before = prior->a7;
     uint32_t a7_after  = flip->a7;
     debug_log("[P102-REGFLIP] A7-before=0x%08x A7-after=0x%08x (flip should be $0)\n",
               a7_before, a7_after);
 
-    /* SITE C decisive source longword. PRIMARY: reassemble from the snap ring by architectural
-       address — hi-word @flip.A[0]+$40, lo-word @flip.A[0]+$42 (READ_LONG_F order). FALLBACK:
-       longword-boundary-fixed p47_read_long_le(flip.A[0]+$40) (dump-time re-read; TCB slot may
-       have changed since the flip, so this is fallback only). */
+    /* SITE C の決め手となる元ロングワード。PRIMARY: スナップショット ring からアーキテクチャ上の
+       アドレスで再構成する — hi ワード @flip.A[0]+$40、lo ワード @flip.A[0]+$42 (READ_LONG_F の順)。
+       FALLBACK: ロングワード境界固定の p47_read_long_le(flip.A[0]+$40) (ダンプ時の再読込。flip 以降に
+       TCB スロットが変わっている可能性があるため、あくまで予備)。 */
     uint32_t a0 = flip->A[0];
     uint32_t hi_addr = a0 + 0x40u;
     uint32_t lo_addr = a0 + 0x42u;
@@ -9546,19 +9546,19 @@ static void p102_emit_dump(void) {
         src_long = ((uint32_t)hi_w << 16) | (uint32_t)lo_w;
         used_fallback = 0;
     } else {
-        src_long = p47_read_long_le(hi_addr);   /* longword-boundary-fixed re-read */
+        src_long = p47_read_long_le(hi_addr);   /* ロングワード境界固定の再読込 */
         used_fallback = 1;
     }
     int src_is_zero = (src_long == 0u);
 
-    /* A7-SOURCE READ row (prior access = LOW half @A0+$42 expected). */
+    /* A7 元 read の行 (直前アクセス = LOW 半分 @A0+$42 を想定)。 */
     debug_log("[P102-REGFLIP] A7-SOURCE-READ prior.access_addr=0x%06x is_write=%d has_value=%d "
               "raw_half=0x%04x | decisive src_long(@A0+$40..+$42)=0x%08x is_zero=%d source=%s\n",
               prior->access_addr, prior->is_write, prior->has_value,
               (unsigned)(prior->access_value & 0xFFFFu), src_long, src_is_zero,
               used_fallback ? "p47_read_long_le-fallback" : "ring-reassembled");
 
-    /* SITE-C-CHECK (either-half, 3 conditions printed individually). */
+    /* SITE-C-CHECK (どちらの半分でも可、3 条件を個別に出力)。 */
     int addr_hit_hi = (prior->access_addr == hi_addr);
     int addr_hit_lo = (prior->access_addr == lo_addr);
     int addr_hit_either = addr_hit_hi || addr_hit_lo;
@@ -9569,7 +9569,7 @@ static void p102_emit_dump(void) {
               addr_hit_hi, addr_hit_lo, addr_hit_either, saw_hi_access, saw_lo_access,
               src_is_zero, a0, a0_low_ram, prior->A[0], (prior->A[0] == a0));
 
-    /* PRE-FLIP zero-register enumeration (SITE A/B D0==$0 test + SITE C corroboration). */
+    /* flip 前のゼロレジスタ列挙 (SITE A/B の D0==$0 検査 + SITE C の裏付け)。 */
     int zcount = 0;
     char zbuf[256]; size_t zoff = 0; zbuf[0] = '\0';
     for (int r = 0; r < 8; r++) {
@@ -9590,7 +9590,7 @@ static void p102_emit_dump(void) {
     debug_log("[P102-REGFLIP] PRE-FLIP zero-regs count=%d [%s] D0==$0=%d (SITE-A/B test)\n",
               zcount, zbuf, d0_zero);
 
-    /* full register dump — prior (pre-flip) and flip. */
+    /* レジスタ全体のダンプ — 直前 (flip 前) と flip 時点。 */
     debug_log("[P102-REGFLIP] PRIOR  D0-7=%08x %08x %08x %08x %08x %08x %08x %08x\n",
               prior->D[0], prior->D[1], prior->D[2], prior->D[3],
               prior->D[4], prior->D[5], prior->D[6], prior->D[7]);
@@ -9604,7 +9604,7 @@ static void p102_emit_dump(void) {
               flip->A[0], flip->A[1], flip->A[2], flip->A[3],
               flip->A[4], flip->A[5], flip->A[6], flip->A[7]);
 
-    /* per-access BasePC + bank walk (corroboration only). */
+    /* アクセス毎の BasePC + バンク走査 (裏付け専用)。 */
     int prior_bank = -1, flip_bank2 = -1;
     (void)p102_region_of_basepc(prior->basepc, &prior_bank);
     (void)p102_region_of_basepc(flip->basepc, &flip_bank2);
@@ -9613,7 +9613,7 @@ static void p102_emit_dump(void) {
               "(pred_pc/bank are stale-prone; NOT the arbiter)\n",
               prior_bank, flip_bank2, basepc_changed);
     for (uint32_t i = 0; i < P102_SNAP_RING; i++) {
-        uint32_t idx = (s_p102_snap_pos + i) % P102_SNAP_RING;   /* oldest->newest */
+        uint32_t idx = (s_p102_snap_pos + i) % P102_SNAP_RING;   /* 古い順 -> 新しい順 */
         p102_snap_t *s = &s_p102_snap_ring[idx];
         if (!s->valid) continue;
         int b = -1; const char *rg = p102_region_of_basepc(s->basepc, &b);
@@ -9623,19 +9623,19 @@ static void p102_emit_dump(void) {
                   s->has_value, (unsigned)(s->access_value & 0xFFFFu), b, rg);
     }
 
-    /* VERDICT taxonomy (first-match, ordered). primary arbiter = register file + source read.
-       flip_bank/basepc_changed are corroboration only and do NOT override the primary verdict;
-       FLIP-NOT-IN-FE is emitted as a separate labelled note below. */
+    /* VERDICT 分類 (最初に一致したもの、順序付き)。主判定材料 = レジスタファイル + 元 read。
+       flip_bank/basepc_changed は裏付け専用で主判定を覆さない。
+       FLIP-NOT-IN-FE は下で別ラベルの注記として出力する。 */
     const char *verdict;
     if (addr_hit_either && src_is_zero && a0_low_ram) {
         verdict = "SITE-C-CONFIRMED";
     } else if (d0_zero) {
         verdict = "SITE-AB-D0-ZERO";
     } else {
-        /* find a single non-A7 zero register other than D0 that could be a movea source. */
+        /* movea の元になり得る、A7 以外かつ D0 以外のゼロレジスタを 1 つ探す。 */
         int other_zero_reg = 0;
         for (int r = 1; r < 8; r++) if (prior->D[r] == 0u) other_zero_reg = 1;
-        for (int r = 0; r < 7; r++) if (prior->A[r] == 0u) other_zero_reg = 1; /* exclude A7 */
+        for (int r = 0; r < 7; r++) if (prior->A[r] == 0u) other_zero_reg = 1; /* A7 を除外 */
         int src_read_zero = (prior->has_value && (prior->access_value == 0u)) || src_is_zero;
         if (src_read_zero && addr_hit_either && !a0_low_ram) {
             verdict = "SOURCE-READ-ZERO-BUT-NOT-A0";
@@ -9649,7 +9649,7 @@ static void p102_emit_dump(void) {
             verdict = "UNCLASSIFIED";
         }
     }
-    /* FLIP-NOT-IN-FE is a corroboration note; emit it separately but keep the primary verdict. */
+    /* FLIP-NOT-IN-FE は裏付けの注記。主判定は維持したまま別途出力する。 */
     if (flip_bank != 0xFE) {
         debug_log("[P102-REGFLIP] NOTE FLIP-NOT-IN-FE (flip_bank=%d) — corroboration mismatch, "
                   "primary verdict stands.\n", flip_bank);
@@ -9668,7 +9668,7 @@ static void p102_emit_dump(void) {
 
 #if P103_ENABLE
 /* ============================================================================
- * P103-A7TRANS: UNGATED A7-change transition probe.
+ * P103-A7TRANS: ゲート無し (UNGATED) の A7 変化遷移プローブ。
  *
  * P101 反証 (stack-pop モデル)、P102 は gated (seen_healthy && a7<$400 && delta<0) crossing。
  * Codex P103 診断: BasePC+Fetch oracle は「data-access callback 時点の last SET_PC translation
@@ -9694,22 +9694,22 @@ static void p102_emit_dump(void) {
  * per-access は O(1) (memcpy 2 本 + 2 p47_read_long_le stack latch + ring store + a7 read)。
  * 非摂動の根拠 = observation-only ⇒ cycle-accurate 不変 (rarely armed でない)。
  * ============================================================================ */
-#define P103_TR_RING   24u   /* A7-change transition records (>= $1FF8..$0 path depth) */
+#define P103_TR_RING   24u   /* A7 変化の遷移レコード (>= $1FF8..$0 経路の深さ) */
 
 typedef struct {
     int       valid;
-    uint32_t  seq;            /* = s_p103_seq at this access */
+    uint32_t  seq;            /* = このアクセス時点の s_p103_seq */
     uint32_t  access_addr;
-    uint32_t  access_value;   /* ReadW/WriteW value (backfilled for reads) */
+    uint32_t  access_value;   /* ReadW/WriteW の値 (read は後埋め) */
     int       is_write;
-    int       has_value;      /* value backfilled (read post-hook) or set (write) */
-    uint32_t  a7;             /* C68k_Get_AReg(&C68K,7) at this access (== A[7]) */
-    uint32_t  D[8];           /* memcpy of C68K.D[0..7] */
-    uint32_t  A[8];           /* memcpy of C68K.A[0..7] */
-    uintptr_t basepc;         /* C68K.BasePC (last-branch-target, corroboration only) */
-    uint32_t  pred_pc;        /* chunk-stale band (corroboration only) */
-    uint32_t  stack_1ff8;     /* p47_read_long_le(0x1FF8) measured AT this access (pre-panic) */
-    uint32_t  stack_1ffa;     /* p47_read_long_le(0x1FFA) measured AT this access (pre-panic) */
+    int       has_value;      /* 値を後埋め済み (read の値確定後フック) または設定済み (write) */
+    uint32_t  a7;             /* このアクセス時点の C68k_Get_AReg(&C68K,7) (== A[7]) */
+    uint32_t  D[8];           /* C68K.D[0..7] の memcpy */
+    uint32_t  A[8];           /* C68K.A[0..7] の memcpy */
+    uintptr_t basepc;         /* C68K.BasePC (最終分岐先、裏付け専用) */
+    uint32_t  pred_pc;        /* chunk 単位で古い帯 (裏付け専用) */
+    uint32_t  stack_1ff8;     /* このアクセス時点で実測した p47_read_long_le(0x1FF8) (panic 前) */
+    uint32_t  stack_1ffa;     /* このアクセス時点で実測した p47_read_long_le(0x1FFA) (panic 前) */
 } p103_snap_t;
 
 typedef struct {
@@ -9724,40 +9724,40 @@ typedef struct {
     int       has_value;
     uintptr_t basepc;
     uint32_t  pred_pc;
-    uint32_t  D[8];           /* full reg file at the new_a7 access */
+    uint32_t  D[8];           /* new_a7 アクセス時点のレジスタファイル全体 */
     uint32_t  A[8];
 } p103_tr_t;
 
 static p103_tr_t   s_p103_tr_ring[P103_TR_RING];
 static uint32_t    s_p103_tr_pos     = 0;
 
-static p103_snap_t s_p103_snap_ring[P103_TR_RING];   /* per-access snapshots for value backfill */
+static p103_snap_t s_p103_snap_ring[P103_TR_RING];   /* 値の後埋め用のアクセス毎スナップショット */
 static uint32_t    s_p103_snap_pos   = 0;
 static uint32_t    s_p103_seq        = 0;
-static uint32_t    s_p103_prev_a7    = 0xFFFFFFFFu;   /* sentinel: no prior access yet */
+static uint32_t    s_p103_prev_a7    = 0xFFFFFFFFu;   /* sentinel: 直前アクセスはまだ無い */
 
-/* dedicated prior / pre-prior snapshots (immune to ring wrap; shifted at END of each access). */
+/* 専用の直前 / 2 つ前のスナップショット (ring の一周に影響されない。各アクセスの最後にシフト)。 */
 static p103_snap_t s_p103_prev_snap;
 static int         s_p103_prev_valid  = 0;
 static p103_snap_t s_p103_prev2_snap;
 static int         s_p103_prev2_valid = 0;
 
-/* ->$0 latch + source-$0-read discriminator (frozen-snapshot arbiter, NOT a forward window). */
-static int         s_p103_zero_seen = 0;          /* latched at first new_a7==$0 */
+/* ->$0 latch + $0 元 read 判別器 (凍結スナップショットで判定。前方窓ではない)。 */
+static int         s_p103_zero_seen = 0;          /* 最初の new_a7==$0 で latch */
 static uint32_t    s_p103_zero_seq = 0;
-static p103_snap_t s_p103_zero_prior;             /* prior = access IMMEDIATELY BEFORE the flip */
-static p103_snap_t s_p103_zero_preprior;          /* pre-prior = the access before prior */
-static p103_snap_t s_p103_zero_flip;              /* access AT which a7==$0 first observed */
+static p103_snap_t s_p103_zero_prior;             /* prior = flip の直前 (IMMEDIATELY BEFORE) のアクセス */
+static p103_snap_t s_p103_zero_preprior;          /* pre-prior = prior のさらに 1 つ前のアクセス */
+static p103_snap_t s_p103_zero_flip;              /* a7==$0 を初めて観測したアクセス */
 static int         s_p103_zero_have_prior = 0;
 static int         s_p103_zero_have_preprior = 0;
 static uint32_t    s_p103_zero_a7_before = 0;     /* == prior.a7 */
-static int         s_p103_memsrc = 0;             /* 1 = A7 source was a $0 memory READ (prior/pre-prior) */
-static uint32_t    s_p103_memsrc_addr = 0xFFFFFFFFu; /* the source cell holding $0 */
+static int         s_p103_memsrc = 0;             /* 1 = A7 の出所が $0 のメモリ READ だった (prior/pre-prior) */
+static uint32_t    s_p103_memsrc_addr = 0xFFFFFFFFu; /* $0 を保持していた元セル */
 static int         s_p103_dumped = 0;
 
-/* P103-own region oracle — verbatim copy of p102_region_of_basepc (P100->P101->P102 precedent:
-   keep P103 independent of P102_ENABLE; do NOT reuse a helper across Pxx_ENABLE). Pure read-only
-   equality walk over C68K.Fetch[0..255]; matched bank is the START bank of its range. */
+/* P103 独自の領域 oracle — p102_region_of_basepc の逐語コピー (P100->P101->P102 の前例:
+   P103 を P102_ENABLE から独立に保つ。Pxx_ENABLE をまたいでヘルパを再利用しない)。C68K.Fetch[0..255]
+   に対する純粋な read-only の等値走査。一致したバンクはその範囲の先頭 (START) バンク。 */
 static const char *p103_region_of_basepc(uintptr_t bp, int *out_bank) {
     for (uint32_t b = 0; b < 256u; b++) {
         if ((uintptr_t)C68K.Fetch[b] == bp) {
@@ -9777,8 +9777,8 @@ static const char *p103_region_of_basepc(uintptr_t bp, int *out_bank) {
     return "UNKNOWN(no Fetch match)";
 }
 
-/* per-access full register snapshot + UNGATED A7-change transition latch + ->$0 latch (PRE-value).
-   seq incremented ONCE PER ACCESS here. post-value backfill does NOT increment seq. */
+/* アクセス毎のレジスタ全体スナップショット + ゲート無しの A7 変化遷移 latch + ->$0 latch (値確定前)。
+   seq はここで 1 アクセスにつき 1 回だけ加算する。値確定後の後埋めは seq を加算しない。 */
 static void p103_on_access(uint32_t access_addr, int is_write) {
     if (s_p103_dumped) return;
     uint32_t  a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);
@@ -9786,8 +9786,8 @@ static void p103_on_access(uint32_t access_addr, int is_write) {
     uint32_t  pred = s_p47d_pc_ring[(s_p47d_pc_ring_pos + P47D_PC_RING_SIZE - 1)
                                     % P47D_PC_RING_SIZE] & 0x00FFFFFFu;
 
-    /* build this access's snapshot in the ring slot (O(1), read-only). stack tops measured AT
-       this access (pre-panic value latch; addr-based longword reassembly, self-bounded read-only). */
+    /* このアクセスのスナップショットを ring スロットに構築する (O(1)、read-only)。スタック先頭は
+       このアクセス時点で実測 (panic 前の値の latch。アドレスベースのロングワード再構成、自己完結の read-only)。 */
     p103_snap_t *e = &s_p103_snap_ring[s_p103_snap_pos];
     e->valid = 1; e->seq = s_p103_seq; e->access_addr = access_addr; e->access_value = 0;
     e->has_value = 0; e->is_write = is_write; e->a7 = a7;
@@ -9797,7 +9797,7 @@ static void p103_on_access(uint32_t access_addr, int is_write) {
     e->stack_1ff8 = p47_read_long_le(0x1FF8u);
     e->stack_1ffa = p47_read_long_le(0x1FFAu);
 
-    /* UNGATED A7-change transition test (NO a7<$400, NO delta<0, NO seen_healthy gate). */
+    /* ゲート無しの A7 変化遷移判定 (a7<$400 無し、delta<0 無し、seen_healthy ゲート無し)。 */
     if (s_p103_prev_a7 != 0xFFFFFFFFu && a7 != s_p103_prev_a7) {
         int32_t   delta = (int32_t)(a7 - s_p103_prev_a7);
         p103_tr_t *t = &s_p103_tr_ring[s_p103_tr_pos];
@@ -9810,24 +9810,24 @@ static void p103_on_access(uint32_t access_addr, int is_write) {
         memcpy(t->A, C68K.A, sizeof t->A);
         s_p103_tr_pos = (s_p103_tr_pos + 1u) % P103_TR_RING;
 
-        /* ->$0 latch: FIRST new_a7==$0. arbiter = frozen prior (lo half) / pre-prior (hi half)
-           snapshots' OWN values, NOT a forward (prior.seq, flip.seq] window (which degenerates to
-           {flip.seq} and can never see the source read). prev_snap/prev2_snap are POST-value
-           backfilled and ring-wrap immune. */
+        /* ->$0 latch: 最初の new_a7==$0。判定材料 = 凍結した prior (lo 半分) / pre-prior (hi 半分)
+           スナップショット自身の値であり、前方の (prior.seq, flip.seq] 窓ではない (その窓は
+           {flip.seq} に退化し元 read を決して捉えられない)。prev_snap/prev2_snap は値確定後に
+           後埋めされ、ring の一周に影響されない。 */
         if (!s_p103_zero_seen && a7 == 0u) {
             s_p103_zero_seen = 1;
             s_p103_zero_seq  = s_p103_seq;
-            s_p103_zero_flip = *e;                      /* flip access — A7 already $0 here (pre-panic) */
+            s_p103_zero_flip = *e;                      /* flip アクセス — ここでは A7 は既に $0 (panic 前) */
             if (s_p103_prev_valid) {
-                s_p103_zero_prior = s_p103_prev_snap;   /* access IMMEDIATELY BEFORE the flip (lo half) */
+                s_p103_zero_prior = s_p103_prev_snap;   /* flip の直前 (IMMEDIATELY BEFORE) のアクセス (lo 半分) */
                 s_p103_zero_have_prior = 1;
                 s_p103_zero_a7_before = s_p103_prev_snap.a7;
             }
             if (s_p103_prev2_valid) {
-                s_p103_zero_preprior = s_p103_prev2_snap; /* the access before prior (hi half) */
+                s_p103_zero_preprior = s_p103_prev2_snap; /* prior のさらに 1 つ前のアクセス (hi 半分) */
                 s_p103_zero_have_preprior = 1;
             }
-            /* source-$0-read discriminator — AT/BEFORE prior (frozen), never flip-onward. */
+            /* $0 元 read の判別器 — prior 時点またはそれ以前 (凍結済み) のみ。flip 以降は見ない。 */
             if (s_p103_zero_have_prior && !s_p103_zero_prior.is_write
                 && s_p103_zero_prior.has_value && s_p103_zero_prior.access_value == 0u) {
                 s_p103_memsrc = 1; s_p103_memsrc_addr = s_p103_zero_prior.access_addr;
@@ -9838,15 +9838,15 @@ static void p103_on_access(uint32_t access_addr, int is_write) {
         }
     }
 
-    /* shift prev->prev2 BEFORE overwriting prev (correct ordering, ring-wrap immune). */
+    /* prev を上書きする前に prev->prev2 をシフト (正しい順序、ring の一周に影響されない)。 */
     s_p103_prev2_snap = s_p103_prev_snap; s_p103_prev2_valid = s_p103_prev_valid;
     s_p103_snap_pos = (s_p103_snap_pos + 1u) % P103_TR_RING;
     s_p103_prev_snap = *e; s_p103_prev_valid = 1; s_p103_prev_a7 = a7; s_p103_seq++;
 }
 
-/* ReadW POST-value backfill — the just-pushed snapshot has seq==s_p103_seq-1. Backfill the true
-   bus half-word into BOTH the ring slot and the dedicated prev_snap (MAJOR-1b: without prev_snap
-   backfill, zero_prior.has_value==0 and the discriminator never fires). READ only. */
+/* ReadW の値確定後の後埋め — 直前に push したスナップショットは seq==s_p103_seq-1。真の
+   バス半ワードを ring スロットと専用 prev_snap の両方へ後埋めする (MAJOR-1b: prev_snap を
+   後埋めしないと zero_prior.has_value==0 となり判別器が決して発火しない)。READ のみ。 */
 static void p103_on_readw_value(uint32_t addr, uint16_t val) {
     if (s_p103_dumped) return;
     uint32_t want = s_p103_seq - 1u;
@@ -9861,15 +9861,15 @@ static void p103_on_readw_value(uint32_t addr, uint16_t val) {
     }
 }
 
-/* one-shot panic-terminus dump — all heavy work (region walk, ring re-scan corroborator,
-   classification, logging) deferred here. per-access stays O(1). */
+/* one-shot の panic 終端ダンプ — 重い処理 (領域走査、ring 再走査による裏付け、
+   分類、ログ出力) はすべてここへ先送りする。アクセス毎の処理は O(1) のまま。 */
 static void p103_emit_dump(void) {
     if (s_p103_dumped) return;
     s_p103_dumped = 1;
 
     debug_log("[P103-A7TRANS] ==== begin (UNGATED A7-change transition probe) ====\n");
 
-    /* (2) full A7 trajectory ring (oldest->newest). literal $1FF8->...->$0 visualization. */
+    /* (2) A7 軌跡 ring 全体 (古い順 -> 新しい順)。$1FF8->...->$0 をそのまま可視化。 */
     debug_log("[P103-A7TRANS] --- A7 trajectory (transition ring, oldest->newest) ---\n");
     {
         int any = 0;
@@ -9913,7 +9913,7 @@ static void p103_emit_dump(void) {
         return;
     }
 
-    /* (3) ->$0 record: prior / pre-prior / flip full register + measured stack tops. */
+    /* (3) ->$0 の記録: prior / pre-prior / flip のレジスタ全体 + 実測したスタック先頭。 */
     debug_log("[P103-A7TRANS] PRIOR  seq=%u addr=0x%06x is_write=%d has_value=%d val=0x%04x "
               "a7=0x%08x stack_1ff8=0x%08x stack_1ffa=0x%08x\n",
               (unsigned)prior->seq, prior->access_addr, prior->is_write, prior->has_value,
@@ -9942,7 +9942,7 @@ static void p103_emit_dump(void) {
               flip->A[0], flip->A[1], flip->A[2], flip->A[3],
               flip->A[4], flip->A[5], flip->A[6], flip->A[7]);
 
-    /* (4) source-$0-read discriminator result (ARBITER = frozen prior/pre-prior, computed at flip). */
+    /* (4) $0 元 read 判別器の結果 (判定材料 = 凍結した prior/pre-prior、flip 時点で計算)。 */
     debug_log("[P103-A7TRANS] MEMSRC memsrc=%d memsrc_addr=%s "
               "| prior: is_write=%d has_value=%d access_value=0x%08x access_addr=0x%06x "
               "| preprior: have=%d is_write=%d has_value=%d access_value=0x%08x access_addr=0x%06x\n",
@@ -9954,8 +9954,8 @@ static void p103_emit_dump(void) {
         debug_log("[P103-A7TRANS] MEMSRC memsrc_addr=0x%06x (frozen-snapshot arbiter)\n",
                   s_p103_memsrc_addr);
     }
-    /* best-effort DUMP-time ring re-scan corroborator — ring may have WRAPPED (flip->panic can be
-       >24 access) so this is NOT the arbiter, only a hint alongside the frozen-snapshot verdict. */
+    /* ベストエフォートのダンプ時 ring 再走査による裏付け — ring は一周している可能性がある
+       (flip->panic は 24 アクセスを超え得る) ため判定材料ではなく、凍結スナップショットの判定に添えるヒントに過ぎない。 */
     {
         int rescan_zero = 0; uint32_t rescan_addr = 0xFFFFFFFFu;
         for (uint32_t i = 0; i < P103_TR_RING; i++) {
@@ -9969,7 +9969,7 @@ static void p103_emit_dump(void) {
                   "NOT arbiter) prior-slot-zero=%d addr=0x%06x\n", rescan_zero, rescan_addr);
     }
 
-    /* (5) PRE-FLIP zero-register enumeration at prior (D0 highlight = SP-source candidate). */
+    /* (5) prior 時点の flip 前ゼロレジスタ列挙 (D0 強調 = SP の出所候補)。 */
     {
         int zcount = 0;
         char zbuf[256]; size_t zoff = 0; zbuf[0] = '\0';
@@ -9993,7 +9993,7 @@ static void p103_emit_dump(void) {
                   zcount, zbuf, d0_zero);
     }
 
-    /* (6) last-branch-target region (honestly labelled, NOT executing-instruction PC). */
+    /* (6) 最終分岐先の領域 (正直にラベル付け。実行中の命令の PC ではない)。 */
     {
         int flip_bank = -1;
         const char *flip_region = p103_region_of_basepc(flip->basepc, &flip_bank);
@@ -10002,11 +10002,11 @@ static void p103_emit_dump(void) {
                   "diagnosis; corroboration/hint only)\n", flip_region, flip_bank);
     }
 
-    /* (7) post-panic ordering report — arbiter = flip-latch MEASURED stack_1ff8 (pre-panic),
-       NOT a dump-time re-read (which would be post-panic TRAP#14 frame). */
+    /* (7) panic 後の順序レポート — 判定材料 = flip-latch で実測した stack_1ff8 (panic 前) であり、
+       ダンプ時の再読込 (panic 後の TRAP#14 フレームになってしまう) ではない。 */
     int stack_is_post_panic = 0;
     {
-        uint32_t dump_1ff8 = p47_read_long_le(0x1FF8u);   /* dump-time = post-panic, label as such */
+        uint32_t dump_1ff8 = p47_read_long_le(0x1FF8u);   /* ダンプ時 = panic 後。その旨ラベル付けする */
         debug_log("[P103-A7TRANS] ORDERING flip-time stack_1ff8=0x%08x (pre-panic measured AT flip) "
                   "prior-time stack_1ff8=0x%08x | dump-time stack_1ff8=0x%08x (POST-PANIC re-read, "
                   "not pre-flip)\n",
@@ -10021,7 +10021,7 @@ static void p103_emit_dump(void) {
         }
     }
 
-    /* (8) VERDICT (first-match, ordered) + HONEST-LIMIT. */
+    /* (8) VERDICT (最初に一致したもの、順序付き) + HONEST-LIMIT。 */
     int any_zero_reg = 0;
     for (int r = 0; r < 8; r++) if (prior->D[r] == 0u) any_zero_reg = 1;
     for (int r = 0; r < 8; r++) if (prior->A[r] == 0u) any_zero_reg = 1;
@@ -10052,7 +10052,7 @@ static void p103_emit_dump(void) {
 
 #if P104_ENABLE
 /* ============================================================================
- * P104-CLEANDISC: clean A7=$0 source discriminator (memory-sourced vs register-to-SP).
+ * P104-CLEANDISC: A7=$0 の出所をきれいに切り分ける判別器 (memory-sourced vs register-to-SP)。
  *
  * boot-stall 機序: supervisor stack pointer A7 が $00001FF8 -> $00000000 へ flip し、その後
  * rts が vector[0]@$0=$00FF05E4 を読み PC->$FF05E4 trampoline -> $FF0628 literal TRAP#14 ->
@@ -10081,22 +10081,22 @@ static void p103_emit_dump(void) {
  * (BasePC/D/A/Fetch) / memcpy / p47_read_long_le のみ。per-access は O(1)。heavy work (再構成・
  * 分類・logging) は panic-terminus dump へ defer。非摂動の根拠 = observation-only ⇒ cycle-accurate 不変。
  * ============================================================================ */
-#define P104_TR_RING   24u   /* A7-change transition records (>= $1FF8..$0 path depth) */
+#define P104_TR_RING   24u   /* A7 変化の遷移レコード (>= $1FF8..$0 経路の深さ) */
 
 typedef struct {
     int       valid;
-    uint32_t  seq;            /* = s_p104_seq at this access */
+    uint32_t  seq;            /* = このアクセス時点の s_p104_seq */
     uint32_t  access_addr;
-    uint32_t  access_value;   /* ReadW/WriteW value (backfilled for reads) */
+    uint32_t  access_value;   /* ReadW/WriteW の値 (read は後埋め) */
     int       is_write;
-    int       has_value;      /* value backfilled (read post-hook) or set (write) */
-    uint32_t  a7;             /* C68k_Get_AReg(&C68K,7) at this access (== A[7]) */
-    uint32_t  D[8];           /* memcpy of C68K.D[0..7] */
-    uint32_t  A[8];           /* memcpy of C68K.A[0..7] */
-    uintptr_t basepc;         /* C68K.BasePC (last-branch-target, corroboration only) */
-    uint32_t  pred_pc;        /* chunk-stale band (corroboration only) */
-    uint32_t  stack_1ff8;     /* p47_read_long_le(0x1FF8) measured AT this access (pre-panic) */
-    uint32_t  stack_1ffa;     /* p47_read_long_le(0x1FFA) measured AT this access (pre-panic) */
+    int       has_value;      /* 値を後埋め済み (read の値確定後フック) または設定済み (write) */
+    uint32_t  a7;             /* このアクセス時点の C68k_Get_AReg(&C68K,7) (== A[7]) */
+    uint32_t  D[8];           /* C68K.D[0..7] の memcpy */
+    uint32_t  A[8];           /* C68K.A[0..7] の memcpy */
+    uintptr_t basepc;         /* C68K.BasePC (最終分岐先、裏付け専用) */
+    uint32_t  pred_pc;        /* chunk 単位で古い帯 (裏付け専用) */
+    uint32_t  stack_1ff8;     /* このアクセス時点で実測した p47_read_long_le(0x1FF8) (panic 前) */
+    uint32_t  stack_1ffa;     /* このアクセス時点で実測した p47_read_long_le(0x1FFA) (panic 前) */
 } p104_snap_t;
 
 typedef struct {
@@ -10111,49 +10111,49 @@ typedef struct {
     int       has_value;
     uintptr_t basepc;
     uint32_t  pred_pc;
-    uint32_t  D[8];           /* full reg file at the new_a7 access */
+    uint32_t  D[8];           /* new_a7 アクセス時点のレジスタファイル全体 */
     uint32_t  A[8];
 } p104_tr_t;
 
 static p104_tr_t   s_p104_tr_ring[P104_TR_RING];
 static uint32_t    s_p104_tr_pos     = 0;
 
-static p104_snap_t s_p104_snap_ring[P104_TR_RING];   /* per-access snapshots for value backfill */
+static p104_snap_t s_p104_snap_ring[P104_TR_RING];   /* 値の後埋め用のアクセス毎スナップショット */
 static uint32_t    s_p104_snap_pos   = 0;
 static uint32_t    s_p104_seq        = 0;
-static uint32_t    s_p104_prev_a7    = 0xFFFFFFFFu;   /* sentinel: no prior access yet */
+static uint32_t    s_p104_prev_a7    = 0xFFFFFFFFu;   /* sentinel: 直前アクセスはまだ無い */
 
-/* dedicated prior / pre-prior snapshots (immune to ring wrap; shifted at END of each access). */
+/* 専用の直前 / 2 つ前のスナップショット (ring の一周に影響されない。各アクセスの最後にシフト)。 */
 static p104_snap_t s_p104_prev_snap;
 static int         s_p104_prev_valid  = 0;
 static p104_snap_t s_p104_prev2_snap;
 static int         s_p104_prev2_valid = 0;
 
-/* ->$0 latch + A7==value gate state (frozen-snapshot arbiter, NOT a forward window). */
-static int         s_p104_zero_seen = 0;          /* latched at first new_a7==$0 */
+/* ->$0 latch + A7==value ゲートの状態 (凍結スナップショットで判定。前方窓ではない)。 */
+static int         s_p104_zero_seen = 0;          /* 最初の new_a7==$0 で latch */
 static uint32_t    s_p104_zero_seq = 0;
-static p104_snap_t s_p104_zero_prior;             /* prior = access IMMEDIATELY BEFORE the flip */
-static p104_snap_t s_p104_zero_preprior;          /* pre-prior = the access before prior */
-static p104_snap_t s_p104_zero_flip;              /* access AT which a7==$0 first observed */
+static p104_snap_t s_p104_zero_prior;             /* prior = flip の直前 (IMMEDIATELY BEFORE) のアクセス */
+static p104_snap_t s_p104_zero_preprior;          /* pre-prior = prior のさらに 1 つ前のアクセス */
+static p104_snap_t s_p104_zero_flip;              /* a7==$0 を初めて観測したアクセス */
 static int         s_p104_zero_have_prior = 0;
 static int         s_p104_zero_have_preprior = 0;
-static uint32_t    s_p104_zero_a7_before = 0;     /* == prior.a7 (A7-after for the flip) */
+static uint32_t    s_p104_zero_a7_before = 0;     /* == prior.a7 (flip の A7 変化後の値) */
 
-/* A7==value gate (MAIN discriminator): addr-based longword reconstruction from latched half-word
-   pair, gated by reconstructed == A7-after. computed at flip-instant from frozen prior/pre-prior. */
-static int         s_p104_pre_read_fired = 0;     /* read pair present (best-effort same-instr) */
-static uint32_t    s_p104_recon_long = 0xFFFFFFFFu; /* reconstructed longword (hi<<16 | lo), addr-based */
-static int         s_p104_recon_valid = 0;        /* recon constructed (addr-contiguous read pair) */
-static uint32_t    s_p104_recon_ea = 0xFFFFFFFFu; /* HI half addr = candidate source EA */
+/* A7==value ゲート (主判別器): latch した半ワード対からアドレスベースでロングワードを再構成し、
+   再構成値 == A7 変化後の値 でゲートする。凍結した prior/pre-prior から flip の瞬間に計算する。 */
+static int         s_p104_pre_read_fired = 0;     /* read 対が存在 (ベストエフォートで同一命令) */
+static uint32_t    s_p104_recon_long = 0xFFFFFFFFu; /* 再構成したロングワード (hi<<16 | lo)、アドレスベース */
+static int         s_p104_recon_valid = 0;        /* 再構成済み (アドレスが連続する read 対) */
+static uint32_t    s_p104_recon_ea = 0xFFFFFFFFu; /* HI 半分のアドレス = 元 EA の候補 */
 
-static uint32_t    s_p104_boot_gen = 0;           /* INCREMENT-ONLY across reset_hard (NOT memset) */
-static uint32_t    s_p104_latch_gen = 0xFFFFFFFFu;/* boot_gen at which the flip was latched */
-static int         s_p104_frozen = 0;             /* set after first flip latched (block updates) */
+static uint32_t    s_p104_boot_gen = 0;           /* reset_hard をまたいで加算のみ (memset しない) */
+static uint32_t    s_p104_latch_gen = 0xFFFFFFFFu;/* flip を latch した時点の boot_gen */
+static int         s_p104_frozen = 0;             /* 最初の flip を latch した後に設定 (以後の更新を止める) */
 static int         s_p104_dumped = 0;
 
-/* P104-own region oracle — verbatim copy of p103_region_of_basepc (P100->P103 precedent: keep
-   P104 independent of other Pxx_ENABLE; do NOT reuse a helper across Pxx_ENABLE). Pure read-only
-   equality walk over C68K.Fetch[0..255]; matched bank is the START bank of its range. */
+/* P104 独自の領域 oracle — p103_region_of_basepc の逐語コピー (P100->P103 の前例: P104 を
+   他の Pxx_ENABLE から独立に保つ。Pxx_ENABLE をまたいでヘルパを再利用しない)。C68K.Fetch[0..255]
+   に対する純粋な read-only の等値走査。一致したバンクはその範囲の先頭 (START) バンク。 */
 static const char *p104_region_of_basepc(uintptr_t bp, int *out_bank) {
     for (uint32_t b = 0; b < 256u; b++) {
         if ((uintptr_t)C68K.Fetch[b] == bp) {
@@ -10173,10 +10173,10 @@ static const char *p104_region_of_basepc(uintptr_t bp, int *out_bank) {
     return "UNKNOWN(no Fetch match)";
 }
 
-/* per-access full register snapshot + UNGATED A7-change transition latch + ->$0 latch (PRE-value).
-   seq incremented ONCE PER ACCESS here. post-value backfill does NOT increment seq.
-   single-clean-boot: once s_p104_frozen, the flip latch is NOT updated (the trajectory ring still
-   records, which is fine — only the flip latch and recon are frozen to the first armed generation). */
+/* アクセス毎のレジスタ全体スナップショット + ゲート無しの A7 変化遷移 latch + ->$0 latch (値確定前)。
+   seq はここで 1 アクセスにつき 1 回だけ加算する。値確定後の後埋めは seq を加算しない。
+   single-clean-boot: s_p104_frozen になった後は flip latch を更新しない (軌跡 ring は記録を続けるが
+   問題無い — 最初に arm された世代へ凍結されるのは flip latch と再構成値のみ)。 */
 static void p104_on_access(uint32_t access_addr, int is_write) {
     if (s_p104_dumped) return;
     uint32_t  a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);
@@ -10184,8 +10184,8 @@ static void p104_on_access(uint32_t access_addr, int is_write) {
     uint32_t  pred = s_p47d_pc_ring[(s_p47d_pc_ring_pos + P47D_PC_RING_SIZE - 1)
                                     % P47D_PC_RING_SIZE] & 0x00FFFFFFu;
 
-    /* build this access's snapshot in the ring slot (O(1), read-only). stack tops measured AT
-       this access (pre-panic value latch; addr-based longword reassembly, self-bounded read-only). */
+    /* このアクセスのスナップショットを ring スロットに構築する (O(1)、read-only)。スタック先頭は
+       このアクセス時点で実測 (panic 前の値の latch。アドレスベースのロングワード再構成、自己完結の read-only)。 */
     p104_snap_t *e = &s_p104_snap_ring[s_p104_snap_pos];
     e->valid = 1; e->seq = s_p104_seq; e->access_addr = access_addr; e->access_value = 0;
     e->has_value = 0; e->is_write = is_write; e->a7 = a7;
@@ -10195,7 +10195,7 @@ static void p104_on_access(uint32_t access_addr, int is_write) {
     e->stack_1ff8 = p47_read_long_le(0x1FF8u);
     e->stack_1ffa = p47_read_long_le(0x1FFAu);
 
-    /* UNGATED A7-change transition test (NO a7<$400, NO delta<0, NO seen_healthy gate). */
+    /* ゲート無しの A7 変化遷移判定 (a7<$400 無し、delta<0 無し、seen_healthy ゲート無し)。 */
     if (s_p104_prev_a7 != 0xFFFFFFFFu && a7 != s_p104_prev_a7) {
         int32_t   delta = (int32_t)(a7 - s_p104_prev_a7);
         p104_tr_t *t = &s_p104_tr_ring[s_p104_tr_pos];
@@ -10208,32 +10208,32 @@ static void p104_on_access(uint32_t access_addr, int is_write) {
         memcpy(t->A, C68K.A, sizeof t->A);
         s_p104_tr_pos = (s_p104_tr_pos + 1u) % P104_TR_RING;
 
-        /* ->$0 latch: FIRST new_a7==$0 in the FIRST armed generation. single-clean-boot freeze:
-           once latched (s_p104_frozen), subsequent generations / later flips do NOT overwrite.
-           arbiter = frozen prior/pre-prior snapshots' OWN values (NOT a forward window). */
+        /* ->$0 latch: 最初に arm された世代での最初の new_a7==$0。single-clean-boot の凍結:
+           一度 latch したら (s_p104_frozen)、以後の世代 / 後続の flip では上書きしない。
+           判定材料 = 凍結した prior/pre-prior スナップショット自身の値 (前方窓ではない)。 */
         if (!s_p104_zero_seen && !s_p104_frozen && a7 == 0u) {
             s_p104_zero_seen = 1;
-            s_p104_frozen    = 1;                       /* freeze: protect this generation's flip latch */
+            s_p104_frozen    = 1;                       /* 凍結: この世代の flip latch を保護 */
             s_p104_latch_gen = s_p104_boot_gen;
             s_p104_zero_seq  = s_p104_seq;
-            s_p104_zero_flip = *e;                      /* flip access — A7 already $0 here (pre-panic) */
+            s_p104_zero_flip = *e;                      /* flip アクセス — ここでは A7 は既に $0 (panic 前) */
             if (s_p104_prev_valid) {
-                s_p104_zero_prior = s_p104_prev_snap;   /* access IMMEDIATELY BEFORE the flip (lo half) */
+                s_p104_zero_prior = s_p104_prev_snap;   /* flip の直前 (IMMEDIATELY BEFORE) のアクセス (lo 半分) */
                 s_p104_zero_have_prior = 1;
-                s_p104_zero_a7_before = s_p104_prev_snap.a7;  /* A7-after for the flip = $0 */
+                s_p104_zero_a7_before = s_p104_prev_snap.a7;  /* flip の A7 変化後の値 = $0 */
             }
             if (s_p104_prev2_valid) {
-                s_p104_zero_preprior = s_p104_prev2_snap; /* the access before prior (hi half) */
+                s_p104_zero_preprior = s_p104_prev2_snap; /* prior のさらに 1 つ前のアクセス (hi 半分) */
                 s_p104_zero_have_preprior = 1;
             }
 
-            /* (II) A7==value gate — addr-based longword reconstruction from the latched half-word
-               pair, frozen at flip-instant. c68k longword read order is HI@addr -> LO@addr+2, so the
-               two reads land in consecutive accesses; the LOWER addr carries the HI word. We do NOT
-               assume which of prior/pre-prior is lower — we sort by addr so the reconstruction is
-               swap-immune (e.g. READ_LONG_DEC_F predecrement reverses the access order). A read pair
-               is recognized when BOTH snapshots are non-write reads WITH backfilled values whose addrs
-               are contiguous (lo_addr, lo_addr+2). The A7-after ($0) gate then decides MEMORY vs not. */
+            /* (II) A7==value ゲート — latch した半ワード対から、flip の瞬間に凍結した状態でアドレスベースの
+               ロングワード再構成を行う。c68k のロングワード read 順序は HI@addr -> LO@addr+2 なので、
+               2 回の read は連続するアクセスに入り、LOWER のアドレス側が HI ワードを持つ。prior/pre-prior の
+               どちらが低いかは仮定せず、アドレスでソートするので再構成は入れ替わりの影響を受けない
+               (例: READ_LONG_DEC_F の predecrement ではアクセス順が逆になる)。両スナップショットが共に
+               後埋め値付きの非書込 read で、アドレスが連続 (lo_addr, lo_addr+2) している場合に read 対と
+               認識する。その上で A7 変化後の値 ($0) のゲートが MEMORY か否かを決める。 */
             s_p104_pre_read_fired = 0;
             s_p104_recon_valid = 0;
             s_p104_recon_long = 0xFFFFFFFFu;
@@ -10246,9 +10246,9 @@ static void p104_on_access(uint32_t access_addr, int is_write) {
                 uint16_t v_pr = (uint16_t)(s_p104_zero_prior.access_value & 0xFFFFu);
                 uint16_t v_pp = (uint16_t)(s_p104_zero_preprior.access_value & 0xFFFFu);
                 uint32_t lo_addr, hi_word, lo_word;
-                if (a_pp + 2u == a_pr) {            /* pre-prior is lower addr = HI word */
+                if (a_pp + 2u == a_pr) {            /* pre-prior の方が低いアドレス = HI ワード */
                     lo_addr = a_pp; hi_word = v_pp; lo_word = v_pr;
-                } else if (a_pr + 2u == a_pp) {     /* prior is lower addr = HI word */
+                } else if (a_pr + 2u == a_pp) {     /* prior の方が低いアドレス = HI ワード */
                     lo_addr = a_pr; hi_word = v_pr; lo_word = v_pp;
                 } else {
                     lo_addr = 0xFFFFFFFFu; hi_word = 0; lo_word = 0;
@@ -10263,15 +10263,15 @@ static void p104_on_access(uint32_t access_addr, int is_write) {
         }
     }
 
-    /* shift prev->prev2 BEFORE overwriting prev (correct ordering, ring-wrap immune). */
+    /* prev を上書きする前に prev->prev2 をシフト (正しい順序、ring の一周に影響されない)。 */
     s_p104_prev2_snap = s_p104_prev_snap; s_p104_prev2_valid = s_p104_prev_valid;
     s_p104_snap_pos = (s_p104_snap_pos + 1u) % P104_TR_RING;
     s_p104_prev_snap = *e; s_p104_prev_valid = 1; s_p104_prev_a7 = a7; s_p104_seq++;
 }
 
-/* ReadW POST-value backfill — the just-pushed snapshot has seq==s_p104_seq-1. Backfill the true
-   bus half-word into BOTH the ring slot and the dedicated prev_snap (prev_snap backfill is required
-   so frozen prior.has_value==1 and the recon gate can fire). READ only. */
+/* ReadW の値確定後の後埋め — 直前に push したスナップショットは seq==s_p104_seq-1。真の
+   バス半ワードを ring スロットと専用 prev_snap の両方へ後埋めする (凍結した prior.has_value==1 と
+   なって再構成ゲートが発火できるよう、prev_snap の後埋めは必須)。READ のみ。 */
 static void p104_on_readw_value(uint32_t addr, uint16_t val) {
     if (s_p104_dumped) return;
     uint32_t want = s_p104_seq - 1u;
@@ -10286,7 +10286,7 @@ static void p104_on_readw_value(uint32_t addr, uint16_t val) {
     }
 }
 
-/* helper: enumerate registers equal to $0 (the A7-after value) into buf, count returned. */
+/* ヘルパ: $0 (A7 変化後の値) に等しいレジスタを buf へ列挙し、個数を返す。 */
 static int p104_enum_zero_regs(const uint32_t *D, const uint32_t *A, char *buf, size_t buflen) {
     int zcount = 0; size_t off = 0; if (buflen) buf[0] = '\0';
     for (int r = 0; r < 8; r++) {
@@ -10306,8 +10306,8 @@ static int p104_enum_zero_regs(const uint32_t *D, const uint32_t *A, char *buf, 
     return zcount;
 }
 
-/* one-shot panic-terminus dump — all heavy work (region walk, reconstruction, classification,
-   logging) deferred here. per-access stays O(1). */
+/* one-shot の panic 終端ダンプ — 重い処理 (領域走査、再構成、分類、
+   ログ出力) はすべてここへ先送りする。アクセス毎の処理は O(1) のまま。 */
 static void p104_emit_dump(void) {
     if (s_p104_dumped) return;
     s_p104_dumped = 1;
@@ -10317,7 +10317,7 @@ static void p104_emit_dump(void) {
               "latch_gen==2 = reset#2 post-mount boot; analyst takes the dump with the max boot_gen)\n",
               (unsigned)s_p104_boot_gen, (unsigned)s_p104_latch_gen, s_p104_frozen);
 
-    /* (2) full A7 trajectory ring (oldest->newest). literal $1FF8->...->$0 visualization. */
+    /* (2) A7 軌跡 ring 全体 (古い順 -> 新しい順)。$1FF8->...->$0 をそのまま可視化。 */
     debug_log("[P104-CLEANDISC] --- A7 trajectory (transition ring, oldest->newest) ---\n");
     {
         int any = 0;
@@ -10350,7 +10350,7 @@ static void p104_emit_dump(void) {
     p104_snap_t *prep  = &s_p104_zero_preprior;
     int have_prior    = s_p104_zero_have_prior;
     int have_preprior = s_p104_zero_have_preprior;
-    uint32_t a7_after = 0u;   /* A7-after the flip is, by definition of the latch, $0 */
+    uint32_t a7_after = 0u;   /* flip の A7 変化後の値は、latch の定義上 $0 */
 
     debug_log("[P104-CLEANDISC] zero_seen=1 zero_seq=%u a7_before=0x%08x a7_after=0x%08x "
               "flip.access_addr=0x%06x flip.access_val=0x%04x flip.is_write=%d\n",
@@ -10365,7 +10365,7 @@ static void p104_emit_dump(void) {
         return;
     }
 
-    /* (3) ->$0 record: prior / pre-prior / flip full register + measured stack tops. */
+    /* (3) ->$0 の記録: prior / pre-prior / flip のレジスタ全体 + 実測したスタック先頭。 */
     debug_log("[P104-CLEANDISC] PRIOR  seq=%u addr=0x%06x is_write=%d has_value=%d val=0x%04x "
               "a7=0x%08x stack_1ff8=0x%08x stack_1ffa=0x%08x\n",
               (unsigned)prior->seq, prior->access_addr, prior->is_write, prior->has_value,
@@ -10394,7 +10394,7 @@ static void p104_emit_dump(void) {
               flip->A[0], flip->A[1], flip->A[2], flip->A[3],
               flip->A[4], flip->A[5], flip->A[6], flip->A[7]);
 
-    /* (4) A7==value gate (MAIN A7-SOURCE evidence) — addr-based recon vs A7-after, frozen at flip. */
+    /* (4) A7==value ゲート (A7-SOURCE の主証拠) — アドレスベースの再構成値 vs A7 変化後の値、flip 時点で凍結。 */
     int recon_eq_a7after = (s_p104_recon_valid && s_p104_recon_long == a7_after);
     debug_log("[P104-CLEANDISC] A7==VALUE-GATE pre_read_fired=%d recon_valid=%d recon_long=0x%08x "
               "recon_ea=0x%06x a7_after=0x%08x recon_eq_a7after=%d\n",
@@ -10406,9 +10406,9 @@ static void p104_emit_dump(void) {
               prior->is_write, prior->has_value, prior->access_value, prior->access_addr,
               have_preprior, prep->is_write, prep->has_value, prep->access_value, prep->access_addr);
 
-    /* (5) zero-register enumeration at BOTH prior and flip (D0 highlight = SP-source candidate).
-       M5: register-movea source operand is most reliably captured at the access bracketing the movea,
-       so report both PRIOR-time and FLIP-time zero-reg sets and corroborate. */
+    /* (5) prior と flip の両時点でのゼロレジスタ列挙 (D0 強調 = SP の出所候補)。
+       M5: レジスタ movea の元オペランドは movea を挟むアクセスで最も確実に捕捉できるため、
+       PRIOR 時点と FLIP 時点の両方のゼロレジスタ集合を報告して照合する。 */
     char zbuf_prior[256]; int zcount_prior = p104_enum_zero_regs(prior->D, prior->A,
                                                                  zbuf_prior, sizeof zbuf_prior);
     char zbuf_flip[256];  int zcount_flip  = p104_enum_zero_regs(flip->D, flip->A,
@@ -10421,10 +10421,10 @@ static void p104_emit_dump(void) {
               "(D0 = SP-source candidate: movea.l d0,a7 family + IOCS return reg)\n",
               zcount_flip, zbuf_flip, d0_zero_flip);
 
-    /* zero-reg corroboration (REGISTER evidence): a register equal to A7-after ($0) exists at prior. */
+    /* ゼロレジスタによる裏付け (REGISTER 証拠): prior 時点で A7 変化後の値 ($0) に等しいレジスタが存在する。 */
     int any_zero_reg = (zcount_prior > 0);
 
-    /* (6) last-branch-target region (honestly labelled, NOT executing-instruction PC). */
+    /* (6) 最終分岐先の領域 (正直にラベル付け。実行中の命令の PC ではない)。 */
     {
         int flip_bank = -1;
         const char *flip_region = p104_region_of_basepc(flip->basepc, &flip_bank);
@@ -10433,11 +10433,11 @@ static void p104_emit_dump(void) {
                   "diagnosis; corroboration/hint only)\n", flip_region, flip_bank);
     }
 
-    /* (I) STACK-ORDERING field — INDEPENDENTLY computed (NOT short-circuiting the A7-SOURCE field).
-       arbiter = flip-latch MEASURED stack_1ff8 (pre-panic), NOT a dump-time re-read (post-panic frame). */
+    /* (I) STACK-ORDERING フィールド — 独立に計算する (A7-SOURCE フィールドを短絡しない)。
+       判定材料 = flip-latch で実測した stack_1ff8 (panic 前) であり、ダンプ時の再読込 (panic 後のフレーム) ではない。 */
     int stack_is_post_panic = 0;
     {
-        uint32_t dump_1ff8 = p47_read_long_le(0x1FF8u);   /* dump-time = post-panic, label as such */
+        uint32_t dump_1ff8 = p47_read_long_le(0x1FF8u);   /* ダンプ時 = panic 後。その旨ラベル付けする */
         debug_log("[P104-CLEANDISC] STACK-ORDERING flip-time stack_1ff8=0x%08x (pre-panic measured AT "
                   "flip) prior-time stack_1ff8=0x%08x | dump-time stack_1ff8=0x%08x (POST-PANIC re-read, "
                   "not pre-flip)\n",
@@ -10455,20 +10455,20 @@ static void p104_emit_dump(void) {
     debug_log("[P104-CLEANDISC] STACK-ORDERING-FIELD: %s\n",
               stack_is_post_panic ? "STACK-IMAGE-IS-POST-PANIC" : "STACK-IMAGE-PRE-FLIP");
 
-    /* (II)+(VERDICT) A7-SOURCE field — INDEPENDENTLY computed (truth table, §2). recon-gate (MEMORY
-       evidence) and zero-reg corroboration (REGISTER evidence) are BOTH always reported; recon==$0
-       overlap with a zero-reg match is NOT short-circuited to MEMORY — it falls to AMBIGUOUS so a
-       genuine register-source is not silently overwritten by a coincidental read (falsifiability). */
+    /* (II)+(VERDICT) A7-SOURCE フィールド — 独立に計算する (真理値表、§2)。再構成ゲート (MEMORY
+       証拠) とゼロレジスタによる裏付け (REGISTER 証拠) は常に両方報告する。recon==$0 とゼロレジスタ
+       一致が重なっても MEMORY へ短絡せず AMBIGUOUS に倒す。偶然の read によって真のレジスタ由来が
+       黙って上書きされないようにするため (反証可能性)。 */
     const char *a7_source;
-    int mem_evidence = (s_p104_pre_read_fired && recon_eq_a7after);   /* read pair fired ∧ recon==$0 */
+    int mem_evidence = (s_p104_pre_read_fired && recon_eq_a7after);   /* read 対が発火 ∧ recon==$0 */
     if (!mem_evidence && any_zero_reg) {
-        a7_source = "REGISTER-TO-SP-CONFIRMED";          /* this run's prediction (D0 highlight) */
+        a7_source = "REGISTER-TO-SP-CONFIRMED";          /* 本実行の予測 (D0 強調) */
     } else if (mem_evidence && !any_zero_reg) {
-        a7_source = "MEMORY-SOURCED-CONFIRMED";          /* source addr = recon_ea */
+        a7_source = "MEMORY-SOURCED-CONFIRMED";          /* 元アドレス = recon_ea */
     } else if (mem_evidence && any_zero_reg) {
-        a7_source = "AMBIGUOUS";                          /* both evidences present — analyst arbitrates */
+        a7_source = "AMBIGUOUS";                          /* 両証拠とも存在 — 解析者が判断する */
     } else {
-        a7_source = "AMBIGUOUS";                          /* neither necessary condition met */
+        a7_source = "AMBIGUOUS";                          /* どちらの必要条件も満たさない */
     }
     debug_log("[P104-CLEANDISC] A7-SOURCE-FIELD: %s (mem_evidence=%d [pre_read_fired=%d ∧ "
               "recon_eq_a7after=%d] | reg_evidence any_zero_reg=%d D0==$0(prior)=%d) source_ea=0x%06x\n",
@@ -10476,7 +10476,7 @@ static void p104_emit_dump(void) {
               any_zero_reg, d0_zero_prior,
               mem_evidence ? s_p104_recon_ea : 0xFFFFFFu);
 
-    /* final VERDICT = A7-SOURCE field (primary); STACK-ORDERING reported alongside (corroboration). */
+    /* 最終 VERDICT = A7-SOURCE フィールド (主)。STACK-ORDERING は並べて報告 (裏付け)。 */
     debug_log("[P104-CLEANDISC] VERDICT=%s (STACK-ORDERING=%s, boot_gen=%u latch_gen=%u)\n",
               a7_source,
               stack_is_post_panic ? "STACK-IMAGE-IS-POST-PANIC" : "STACK-IMAGE-PRE-FLIP",
@@ -10550,24 +10550,24 @@ typedef struct {
     uint32_t  access_addr;
     int       is_write;
     uint32_t  a7;
-    uint32_t  D[8];          /* memcpy of C68K.D[0..7] */
-    uint32_t  A[8];          /* memcpy of C68K.A[0..7] */
-    uintptr_t basepc;        /* C68K.BasePC (last-branch-target, corroboration only) */
-    int       region_bank;   /* p105_region_of_basepc bank (corroboration) */
+    uint32_t  D[8];          /* C68K.D[0..7] の memcpy */
+    uint32_t  A[8];          /* C68K.A[0..7] の memcpy */
+    uintptr_t basepc;        /* C68K.BasePC (最終分岐先、裏付け専用) */
+    int       region_bank;   /* p105_region_of_basepc のバンク (裏付け) */
     int       region_id;     /* 0=IPL ROM, 1=RAM(MEM), 2=other/unknown (走査しない) */
-    uint32_t  pred_pc;       /* chunk-stale band (corroboration only) */
-    uint32_t  live_pc;       /* C68k_Get_PC at this access (chunk-stale corroboration) */
+    uint32_t  pred_pc;       /* chunk 単位で古い帯 (裏付け専用) */
+    uint32_t  live_pc;       /* このアクセス時点の C68k_Get_PC (chunk 単位で古い、裏付け) */
 } p105_snap_t;
 
 /* opword scan hit record (heavy work、panic dump 内で frozen prior に対し走査して埋める)。 */
 typedef struct {
     int       valid;
-    uint32_t  addr;          /* guest address of the candidate movea opword */
+    uint32_t  addr;          /* movea opword 候補のゲストアドレス */
     uint16_t  opword;        /* 0x2E40..0x2E4F */
     int       src;           /* opword & 7 */
     int       is_An;         /* (opword & 8) != 0 */
-    uint32_t  regval;        /* frozen prior snapshot register value (is_An ? A[src] : D[src]) */
-    int       zero;          /* regval == 0 (necessary condition i) */
+    uint32_t  regval;        /* 凍結した prior スナップショットのレジスタ値 (is_An ? A[src] : D[src]) */
+    int       zero;          /* regval == 0 (必要条件 i) */
     int       rts_follows;   /* 後続窓に 0x4E75 が存在 (necessary condition ii) */
     uint32_t  helper_match;  /* matched helper addr / 0xFFFFFFFF=NONE (RAM hit は NONE 固定) */
 } p105_hit_t;
@@ -10575,20 +10575,20 @@ typedef struct {
 static p105_snap_t s_p105_ring[P105_RING];
 static uint32_t    s_p105_ring_pos = 0;
 static uint32_t    s_p105_seq      = 0;
-static uint32_t    s_p105_prev_a7  = 0xFFFFFFFFu;   /* sentinel: no prior access yet */
+static uint32_t    s_p105_prev_a7  = 0xFFFFFFFFu;   /* sentinel: 直前アクセスはまだ無い */
 
-/* flip latch (single-clean-boot freeze): own prior snapshot at the FIRST a7==$0 transition. */
+/* flip latch (single-clean-boot の凍結): 最初の a7==$0 遷移時点の独自 prior スナップショット。 */
 static int         s_p105_zero_seen   = 0;
 static uint32_t    s_p105_zero_seq    = 0;
-static p105_snap_t s_p105_prior;                    /* access IMMEDIATELY BEFORE the flip (anchor) */
+static p105_snap_t s_p105_prior;                    /* flip の直前 (IMMEDIATELY BEFORE) のアクセス (anchor) */
 static int         s_p105_have_prior  = 0;
-static p105_snap_t s_p105_flip;                     /* access AT which a7==$0 first observed */
-static uint32_t    s_p105_a7_before   = 0;          /* == prior.a7 (A7-after for the flip = $0) */
+static p105_snap_t s_p105_flip;                     /* a7==$0 を初めて観測したアクセス */
+static uint32_t    s_p105_a7_before   = 0;          /* == prior.a7 (flip の A7 変化後の値 = $0) */
 
 /* (B) D0=$0 源流 latch (flip-instant、観測のみ・結論 bake-in しない)。 */
 static uint8_t     s_p105_v9df        = 0;
 static uint8_t     s_p105_v9e0        = 0;
-static uint32_t    s_p105_ramsize     = 0xFFFFFFFFu; /* $ED0008-B (RAM Size longword) */
+static uint32_t    s_p105_ramsize     = 0xFFFFFFFFu; /* $ED0008-B (RAM サイズのロングワード) */
 static uint32_t    s_p105_ed000c      = 0xFFFFFFFFu;
 static uint32_t    s_p105_ed0010      = 0xFFFFFFFFu;
 static uint32_t    s_p105_pred_at_flip = 0xFFFFFFFFu;
@@ -10597,14 +10597,14 @@ static uint32_t    s_p105_pred_at_flip = 0xFFFFFFFFu;
 static uint32_t    s_p105_livepc_flip  = 0xFFFFFFFFu;
 static uint32_t    s_p105_livepc_prior = 0xFFFFFFFFu;
 
-static uint32_t    s_p105_boot_gen = 0;             /* INCREMENT-ONLY across reset_hard (NOT memset) */
-static uint32_t    s_p105_latch_gen = 0xFFFFFFFFu;  /* boot_gen at which the flip was latched */
-static int         s_p105_frozen = 0;               /* set after first flip latched (block updates) */
+static uint32_t    s_p105_boot_gen = 0;             /* reset_hard をまたいで加算のみ (memset しない) */
+static uint32_t    s_p105_latch_gen = 0xFFFFFFFFu;  /* flip を latch した時点の boot_gen */
+static int         s_p105_frozen = 0;               /* 最初の flip を latch した後に設定 (以後の更新を止める) */
 static int         s_p105_dumped = 0;
 
-/* P105-own region oracle — verbatim copy of p104_region_of_basepc (P100->P104 precedent: keep
-   P105 independent of other Pxx_ENABLE; do NOT reuse a helper across Pxx_ENABLE). Pure read-only
-   equality walk over C68K.Fetch[0..255]; matched bank is the START bank of its range. */
+/* P105 独自の領域 oracle — p104_region_of_basepc の逐語コピー (P100->P104 の前例: P105 を
+   他の Pxx_ENABLE から独立に保つ。Pxx_ENABLE をまたいでヘルパを再利用しない)。C68K.Fetch[0..255]
+   に対する純粋な read-only の等値走査。一致したバンクはその範囲の先頭 (START) バンク。 */
 static const char *p105_region_of_basepc(uintptr_t bp, int *out_bank) {
     for (uint32_t b = 0; b < 256u; b++) {
         if ((uintptr_t)C68K.Fetch[b] == bp) {
@@ -10624,7 +10624,7 @@ static const char *p105_region_of_basepc(uintptr_t bp, int *out_bank) {
     return "UNKNOWN(no Fetch match)";
 }
 
-/* classify region into a scan-id: 0=IPL ROM (s_ipl_fetch), 1=RAM(MEM), 2=other (do NOT scan). */
+/* 領域を走査 ID に分類する: 0=IPL ROM (s_ipl_fetch)、1=RAM(MEM)、2=その他 (走査しない)。 */
 static int p105_region_id(uintptr_t bp) {
     for (uint32_t b = 0; b < 256u; b++) {
         if ((uintptr_t)C68K.Fetch[b] == bp) {
@@ -10637,14 +10637,14 @@ static int p105_region_id(uintptr_t bp) {
     return 2;
 }
 
-/* read one big-endian opword at guest_addr in the given region (region_id 0=IPL,1=RAM).
-   IPL idiom: s_ipl_fetch is byte-pair-swapped IPL copy (m68000_bridge.c:20195 verbatim),
-   recover BE word via s_ipl_fetch[off^1]<<8 | s_ipl_fetch[(off+1)^1], off = guest - $FE0000.
-   RAM idiom: MEM holds BE words as host-LE u16 (P50 block :2512-2518), *(uint16_t*)&MEM[i] BE-direct.
-   returns 1 and writes *out on success (in-bounds); 0 otherwise (out of array). read-only. */
+/* 指定領域 (region_id 0=IPL、1=RAM) の guest_addr からビッグエンディアンの opword を 1 つ読む。
+   IPL の手法: s_ipl_fetch はバイト対を入れ替えた IPL のコピー (m68000_bridge.c:20195 の逐語)。
+   s_ipl_fetch[off^1]<<8 | s_ipl_fetch[(off+1)^1] で BE ワードを復元する。off = guest - $FE0000。
+   RAM の手法: MEM は BE ワードをホスト LE の u16 として保持する (P50 ブロック :2512-2518)。*(uint16_t*)&MEM[i] で BE を直接得る。
+   成功時 (範囲内) は 1 を返して *out に書く。それ以外 (配列範囲外) は 0。read-only。 */
 static int p105_read_opword(int region_id, uint32_t guest_addr, uint16_t *out) {
     if (region_id == 0) {
-        /* IPL ROM mapped $FE0000..$FFFFFF -> s_ipl_fetch (0x20000 bytes). */
+        /* IPL ROM は $FE0000..$FFFFFF に割り当て -> s_ipl_fetch (0x20000 バイト)。 */
         if (guest_addr < 0x00FE0000u || guest_addr > 0x00FFFFFFu) return 0;
         uint32_t off = guest_addr - 0x00FE0000u;
         if (off + 1u >= 0x20000u) return 0;
@@ -10660,14 +10660,14 @@ static int p105_read_opword(int region_id, uint32_t guest_addr, uint16_t *out) {
     return 0;
 }
 
-/* helper: is guest_addr in the addressable band for region_id? (anchor-consistency gate). */
+/* ヘルパ: guest_addr は region_id のアドレス可能帯域内か? (anchor 整合性ゲート)。 */
 static int p105_addr_in_region(int region_id, uint32_t guest_addr) {
     if (region_id == 0) return (guest_addr >= 0x00FE0000u && guest_addr <= 0x00FFFFFFu);
     if (region_id == 1) return (guest_addr < 0x00C00000u);
     return 0;
 }
 
-/* helper: enumerate registers equal to $0 into buf, count returned (D0-7 then A0-7). */
+/* ヘルパ: $0 に等しいレジスタを buf へ列挙し、個数を返す (D0-7、次に A0-7)。 */
 static int p105_enum_zero_regs(const uint32_t *D, const uint32_t *A, char *buf, size_t buflen) {
     int zcount = 0; size_t off = 0; if (buflen) buf[0] = '\0';
     for (int r = 0; r < 8; r++) {
@@ -10687,11 +10687,11 @@ static int p105_enum_zero_regs(const uint32_t *D, const uint32_t *A, char *buf, 
     return zcount;
 }
 
-/* per-access prior-snapshot ring update + ->$0 flip latch (PRE-value, O(1) read-only).
+/* アクセス毎の prior スナップショット ring 更新 + ->$0 flip latch (値確定前、O(1) read-only)。
    flip 述語は P104 verbatim (m68000_bridge.c:8041): A7 を sample -> 前回 sample 値と異なる ->
    新値が strict a7==0u。flip 検出時は O(1) latch のみ (anchor + 源流 latch + live PC capture);
-   opword scan 本体は走らせない (panic-terminus dump へ defer)。single-clean-boot: once frozen,
-   subsequent generations / later flips do NOT overwrite the latched anchor. */
+   opword scan 本体は走らせない (panic-terminus dump へ defer)。single-clean-boot: 一度凍結したら、
+   以後の世代 / 後続の flip は latch 済みの anchor を上書きしない。 */
 static void p105_on_access(uint32_t access_addr, int is_write) {
     if (s_p105_dumped) return;
     uint32_t  a7 = (uint32_t)C68k_Get_AReg(&C68K, 7);
@@ -10699,7 +10699,7 @@ static void p105_on_access(uint32_t access_addr, int is_write) {
     uint32_t  pred = s_p47d_pc_ring[(s_p47d_pc_ring_pos + P47D_PC_RING_SIZE - 1)
                                     % P47D_PC_RING_SIZE] & 0x00FFFFFFu;
 
-    /* build this access's snapshot in the ring slot (O(1), read-only). */
+    /* このアクセスのスナップショットを ring スロットに構築する (O(1)、read-only)。 */
     p105_snap_t *e = &s_p105_ring[s_p105_ring_pos];
     e->valid = 1; e->seq = s_p105_seq; e->access_addr = access_addr;
     e->is_write = is_write; e->a7 = a7;
@@ -10710,7 +10710,7 @@ static void p105_on_access(uint32_t access_addr, int is_write) {
     (void)p105_region_of_basepc(bp, &e->region_bank);
     e->region_id = p105_region_id(bp);
     e->pred_pc = pred;
-    e->live_pc = C68k_Get_PC(&C68K) & 0x00FFFFFFu;   /* chunk-stale corroboration */
+    e->live_pc = C68k_Get_PC(&C68K) & 0x00FFFFFFu;   /* chunk 単位で古い、裏付け */
 
     /* flip 述語 (P104 verbatim): prior sample 有り ∧ a7 が変化 ∧ 新値 strict a7==0u。
        register-to-SP movea (memory-invisible) は flip を NEXT access で観測するので、prior が
@@ -10718,14 +10718,14 @@ static void p105_on_access(uint32_t access_addr, int is_write) {
     if (s_p105_prev_a7 != 0xFFFFFFFFu && a7 != s_p105_prev_a7) {
         if (!s_p105_zero_seen && !s_p105_frozen && a7 == 0u) {
             s_p105_zero_seen = 1;
-            s_p105_frozen    = 1;                    /* freeze: protect this generation's anchor */
+            s_p105_frozen    = 1;                    /* 凍結: この世代の anchor を保護 */
             s_p105_latch_gen = s_p105_boot_gen;
             s_p105_zero_seq  = s_p105_seq;
-            s_p105_flip      = *e;                   /* flip access — A7 already $0 here (pre-panic) */
-            s_p105_a7_before = s_p105_prev_a7;       /* A7-after for the flip = $0 */
+            s_p105_flip      = *e;                   /* flip アクセス — ここでは A7 は既に $0 (panic 前) */
+            s_p105_a7_before = s_p105_prev_a7;       /* flip の A7 変化後の値 = $0 */
             s_p105_livepc_flip = e->live_pc;
 
-            /* anchor = the prior access snapshot (ring slot just before this one). */
+            /* anchor = prior アクセスのスナップショット (このスロットの 1 つ前の ring スロット)。 */
             uint32_t prev_idx = (s_p105_ring_pos + P105_RING - 1u) % P105_RING;
             if (s_p105_ring[prev_idx].valid) {
                 s_p105_prior = s_p105_ring[prev_idx];
@@ -10735,10 +10735,10 @@ static void p105_on_access(uint32_t access_addr, int is_write) {
 
             /* (B) D0=$0 源流 latch (flip-instant、観測のみ・結論 bake-in しない)。 */
             {
-                uint32_t v9 = p47_read_long_le(0x9DCu);    /* longword @ $9DC covers $9DF byte */
-                s_p105_v9df = (uint8_t)(v9 & 0xFFu);       /* $9DF = low byte of BE longword @ $9DC */
-                uint32_t v9e = p47_read_long_le(0x9E0u);   /* longword @ $9E0 */
-                s_p105_v9e0 = (uint8_t)((v9e >> 24) & 0xFFu); /* $9E0 = high byte of BE longword @ $9E0 */
+                uint32_t v9 = p47_read_long_le(0x9DCu);    /* @ $9DC のロングワードが $9DF バイトを含む */
+                s_p105_v9df = (uint8_t)(v9 & 0xFFu);       /* $9DF = @ $9DC の BE ロングワードの下位バイト */
+                uint32_t v9e = p47_read_long_le(0x9E0u);   /* @ $9E0 のロングワード */
+                s_p105_v9e0 = (uint8_t)((v9e >> 24) & 0xFFu); /* $9E0 = @ $9E0 の BE ロングワードの上位バイト */
                 s_p105_ramsize = p47_read_long_le(0xED0008u);
                 s_p105_ed000c  = p47_read_long_le(0xED000Cu);
                 s_p105_ed0010  = p47_read_long_le(0xED0010u);
@@ -10747,14 +10747,14 @@ static void p105_on_access(uint32_t access_addr, int is_write) {
         }
     }
 
-    /* advance ring + prev tracking. */
+    /* ring + prev の追跡を進める。 */
     s_p105_ring_pos = (s_p105_ring_pos + 1u) % P105_RING;
     s_p105_prev_a7 = a7; s_p105_seq++;
 }
 
-/* one-shot panic-terminus dump — all heavy work (anchor-consistency gate, opword scan over the
-   frozen prior region, zero-match/rts_follows/helper_match classification, logging) deferred here.
-   per-access stays O(1). */
+/* one-shot の panic 終端ダンプ — 重い処理 (anchor 整合性ゲート、凍結した prior 領域に対する
+   opword 走査、zero-match/rts_follows/helper_match 分類、ログ出力) はすべてここへ先送りする。
+   アクセス毎の処理は O(1) のまま。 */
 static void p105_emit_dump(void) {
     if (s_p105_dumped) return;
     s_p105_dumped = 1;
@@ -10779,12 +10779,12 @@ static void p105_emit_dump(void) {
     p105_snap_t *prior = &s_p105_prior;
     p105_snap_t *flip  = &s_p105_flip;
 
-    /* (1) flip metadata. */
+    /* (1) flip のメタデータ。 */
     debug_log("[P105-DNPIN] FLIP   seq=%u a7_before=0x%08x a7_after=0x00000000 access_addr=0x%06x "
               "is_write=%d\n",
               (unsigned)s_p105_zero_seq, s_p105_a7_before, flip->access_addr, flip->is_write);
 
-    /* (2) anchor: prior snapshot region/basepc/bank/pred_pc + region 帰属信頼度 + live PC corroboration. */
+    /* (2) anchor: prior snapshot region/basepc/bank/pred_pc + region 帰属信頼度 + live PC による裏付け。 */
     {
         int pb = -1; const char *prg = p105_region_of_basepc(prior->basepc, &pb);
         debug_log("[P105-DNPIN] ANCHOR prior seq=%u access_addr=0x%06x is_write=%d a7=0x%08x "
@@ -10804,7 +10804,7 @@ static void p105_emit_dump(void) {
               prior->A[0], prior->A[1], prior->A[2], prior->A[3],
               prior->A[4], prior->A[5], prior->A[6], prior->A[7]);
 
-    /* (3) zero-register enumeration at BOTH prior and flip (D0 highlight = SP-source candidate). */
+    /* (3) prior と flip の両時点でのゼロレジスタ列挙 (D0 強調 = SP の出所候補)。 */
     char zbuf_prior[256]; int zcount_prior = p105_enum_zero_regs(prior->D, prior->A,
                                                                  zbuf_prior, sizeof zbuf_prior);
     char zbuf_flip[256];  int zcount_flip  = p105_enum_zero_regs(flip->D, flip->A,
@@ -10816,7 +10816,7 @@ static void p105_emit_dump(void) {
     /* (4) anchor-consistency gate: pred_pc が prior.region band 内のときのみ scan。
        region は prior.basepc (last-branch-target) 由来、base は pred_pc (chunk-stale) 由来 —
        2 oracle 食い違い時 clamp すると garbage window を走査するので scan しない。 */
-    int region_id = prior->region_id;   /* 0=IPL ROM, 1=RAM(MEM), 2=other */
+    int region_id = prior->region_id;   /* 0=IPL ROM、1=RAM(MEM)、2=その他 */
     uint32_t pred_pc = prior->pred_pc;
     int consistent = (region_id == 0 || region_id == 1) && p105_addr_in_region(region_id, pred_pc);
 
@@ -10847,8 +10847,8 @@ static void p105_emit_dump(void) {
     debug_log("[P105-DNPIN] ANCHOR-CONSISTENCY: pred_pc=0x%06x IN prior.region band (region_id=%d) "
               "— scan armed.\n", pred_pc, region_id);
 
-    /* (5) opword scan over the frozen prior region: [base-HALF, base+HALF] even offsets,
-       hit if 0x2E40 <= opword <= 0x2E4F. base = pred_pc (already verified in-region). */
+    /* (5) 凍結した prior 領域に対する opword 走査: [base-HALF, base+HALF] の偶数オフセットで、
+       0x2E40 <= opword <= 0x2E4F ならヒット。base = pred_pc (領域内であることは確認済み)。 */
     p105_hit_t hits[P105_HIT_MAX];
     int hit_count = 0;
     {
@@ -11016,7 +11016,7 @@ typedef struct {
     uint32_t A[8];
 } p106_regs_t;
 
-/* gate / window state */
+/* ゲート / 窓の状態 */
 static int      s_p106_stepping   = 0;            /* この chunk を 1 命令 step 中か */
 static int      s_p106_done       = 0;            /* 実 flip 捕捉済 — 二度と single-step しない */
 static uint32_t s_p106_step_count = 0;            /* 現 window 内の step 数 (cap 監視) */
@@ -11047,9 +11047,9 @@ static uint32_t s_p106_pre_pos = 0;
 
 /* 副次 hint (falsifiable、観測のみ・真因 bake-in しない) */
 static uint8_t  s_p106_v9e0     = 0;              /* $9E0 (Spec: 0x90=FDD0=正規 boot device) */
-static uint32_t s_p106_ramsize  = 0xFFFFFFFFu;    /* $ED0008-B (RAM Size longword) */
+static uint32_t s_p106_ramsize  = 0xFFFFFFFFu;    /* $ED0008-B (RAM サイズのロングワード) */
 
-static uint32_t s_p106_boot_gen = 0;              /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p106_boot_gen = 0;              /* reset_hard をまたいで加算のみ (memset しない) */
 static int      s_p106_dumped   = 0;
 
 /* opword を 0x2E40|Dn / 0x2E48|An として decode。
@@ -11096,7 +11096,7 @@ static void p106_emit_dump(void) {
         return;
     }
 
-    /* (2) flip metadata + entry_pc region。 */
+    /* (2) flip のメタデータ + entry_pc の領域。 */
     int region_id = p105_region_id((uintptr_t)C68K.BasePC);  /* corroboration のみ — flip_pc の region は addr で判定 */
     int pc_region; /* 0=IPL ROM, 1=RAM, 2=other (flip_pc アドレスから判定) */
     if (s_p106_flip_pc >= 0x00FE0000u && s_p106_flip_pc <= 0x00FFFFFFu) pc_region = 0;
@@ -11224,7 +11224,7 @@ typedef struct {
     uint32_t A[8];
 } p107_regs_t;
 
-/* gate / window state */
+/* ゲート / 窓の状態 */
 static int      s_p107_done        = 0;            /* 実 flip 捕捉済 — 二度と single-step しない (4096 恒久復帰) */
 static int      s_p107_stepping    = 0;            /* この chunk を 1 命令 step 中か */
 static uint32_t s_p107_step_count  = 0;            /* 現 window 内の step 数 (cap 監視) */
@@ -11251,9 +11251,9 @@ static p107_regs_t s_p107_after;                      /* flip step の after sna
 
 /* 副次 hint (falsifiable、観測のみ・真因 bake-in しない) */
 static uint8_t  s_p107_v9e0     = 0;              /* $9E0 (Spec: 0x90=FDD0=正規 boot device) */
-static uint32_t s_p107_ramsize  = 0xFFFFFFFFu;    /* $ED0008-B (RAM Size longword) */
+static uint32_t s_p107_ramsize  = 0xFFFFFFFFu;    /* $ED0008-B (RAM サイズのロングワード) */
 
-static uint32_t s_p107_boot_gen = 0;              /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p107_boot_gen = 0;              /* reset_hard をまたいで加算のみ (memset しない) */
 static int      s_p107_dumped   = 0;
 
 /* entry_pc から addr ベースで region を決定 (BasePC oracle でない、p105_read_opword の dispatch 用)。
@@ -11285,9 +11285,9 @@ static void p107_ring_push(uint32_t entry_pc, uint32_t a7b, uint32_t a7a) {
     uint32_t idx;
     uint32_t half = P107_RING / 2u;
     if (s_p107_ring_total < half) {
-        idx = s_p107_ring_total;                              /* HEAD slot (onset) */
+        idx = s_p107_ring_total;                              /* HEAD スロット (開始時点) */
     } else {
-        idx = half + ((s_p107_ring_total - half) % (P107_RING - half)); /* TAIL rolling slot */
+        idx = half + ((s_p107_ring_total - half) % (P107_RING - half)); /* TAIL の巡回スロット */
     }
     s_p107_pc_ring[idx]  = entry_pc;
     s_p107_a7b_ring[idx] = a7b;
@@ -11497,7 +11497,7 @@ static uint32_t  s_p108_frame_push_cnt = 0;        /* 低 A7 帯での frame-arm
 static uint32_t  s_p108_pop_breaks     = 0;        /* pop による A7 戻りで連鎖が途切れた回数 */
 static int       s_p108_chain_to_zero  = 0;        /* terminal 連鎖が pop なし $0 まで到達したか (storm 指紋) */
 
-static uint32_t  s_p108_boot_gen   = 0;            /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t  s_p108_boot_gen   = 0;            /* reset_hard をまたいで加算のみ (memset しない) */
 static int       s_p108_dumped     = 0;
 
 /* 低 A7 WriteW を head+tail preserve で ring に記録 (P107 pattern)。 */
@@ -11505,9 +11505,9 @@ static void p108_ring_push(uint32_t addr, uint16_t value, uint32_t live_a7, uint
     uint32_t idx;
     uint32_t half = P108_RING_DEPTH / 2u;
     if (s_p108_ring_total < half) {
-        idx = s_p108_ring_total;                       /* HEAD slot (descent onset) */
+        idx = s_p108_ring_total;                       /* HEAD スロット (降下の開始時点) */
     } else {
-        idx = half + ((s_p108_ring_total - half) % (P108_RING_DEPTH - half)); /* TAIL rolling (terminal) */
+        idx = half + ((s_p108_ring_total - half) % (P108_RING_DEPTH - half)); /* TAIL の巡回 (終端側) */
     }
     s_p108_ring[idx].seq     = s_p108_seq;
     s_p108_ring[idx].addr    = addr;
@@ -11577,7 +11577,7 @@ static void p108_emit_dump(void) {
         return;
     }
 
-    /* truncation report (head+tail preserve)。 */
+    /* 切り詰めレポート (head+tail を保持)。 */
     if (s_p108_ring_total > P108_RING_DEPTH) {
         debug_log("[P108-WEP] ring TRUNCATED: total=%u held=%u dropped=%u (HEAD=onset %u + TAIL=terminal preserved)\n",
                   (unsigned)s_p108_ring_total, (unsigned)P108_RING_DEPTH,
@@ -11627,7 +11627,7 @@ static void p108_emit_dump(void) {
                   (unsigned)last->live_a7, (unsigned)prev2->live_a7, terminal_descending);
     }
 
-    /* ---- (C) IRQ-ACK ring cross-check (CP-R-2、read-only) ---- */
+    /* ---- (C) IRQ-ACK ring との照合 (CP-R-2、read-only) ---- */
     debug_log("[P108-WEP] ---- IRQ-ACK cross-check (CP-R-2 ring、read-only): irq_total=%u ----\n",
               (unsigned)s_p82xr_irq_total);
     if (s_p82xr_irq_total > 0u) {
@@ -11700,7 +11700,7 @@ typedef struct {
     uint32_t A[8];
 } p109_regs_t;
 
-/* gate / window state */
+/* ゲート / 窓の状態 */
 static int      s_p109_done        = 0;            /* 実 flip 捕捉済 — 二度と single-step しない (4096 恒久復帰) */
 static int      s_p109_stepping    = 0;            /* この chunk を 1 命令 step 中か */
 static uint32_t s_p109_step_count  = 0;            /* 現 window 内の step 数 (cap 監視) */
@@ -11736,7 +11736,7 @@ static uint32_t   s_p109_flip_step    = 0xFFFFFFFFu;  /* flip 時の window 内 
 static p109_regs_t s_p109_before;                     /* flip step の before snapshot (source reg 値確認) */
 static p109_regs_t s_p109_after;                      /* flip step の after snapshot */
 
-static uint32_t s_p109_boot_gen = 0;              /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p109_boot_gen = 0;              /* reset_hard をまたいで加算のみ (memset しない) */
 static int      s_p109_dumped   = 0;
 
 /* entry_pc から addr ベースで region を決定 (BasePC oracle でない、p105_read_opword の dispatch 用)。
@@ -11768,9 +11768,9 @@ static void p109_ring_push(uint32_t entry_pc, uint32_t a7b, uint32_t a7a,
     uint32_t idx;
     uint32_t half = P109_RING / 2u;
     if (s_p109_ring_total < half) {
-        idx = s_p109_ring_total;                              /* HEAD slot (onset) */
+        idx = s_p109_ring_total;                              /* HEAD スロット (開始時点) */
     } else {
-        idx = half + ((s_p109_ring_total - half) % (P109_RING - half)); /* TAIL rolling slot */
+        idx = half + ((s_p109_ring_total - half) % (P109_RING - half)); /* TAIL の巡回スロット */
     }
     s_p109_pc_ring[idx]  = entry_pc;
     s_p109_op_ring[idx]  = opword;
@@ -11869,7 +11869,7 @@ static void p109_emit_dump(void) {
         return;
     }
 
-    /* flip metadata。 */
+    /* flip のメタデータ。 */
     int pc_region = p109_region_of_pc(s_p109_flip_pc);
     const char *pcr = (pc_region == 0) ? "IPL-ROM($FE0000+)" :
                       (pc_region == 1) ? "loaded-RAM($0-$BFFFFF)" : "OTHER";
@@ -11966,7 +11966,7 @@ typedef struct {
     uint32_t A[8];
 } p110_regs_t;
 
-/* gate / window state */
+/* ゲート / 窓の状態 */
 static int      s_p110_done        = 0;            /* 実 flip 捕捉済 — 二度と single-step しない (4096 恒久復帰) */
 static int      s_p110_stepping    = 0;            /* この chunk を 1 命令 step 中か */
 static uint32_t s_p110_step_count  = 0;            /* 現 window 内の step 数 (cap 監視) */
@@ -12008,7 +12008,7 @@ static uint32_t   s_p110_flip_popped_pc  = 0xFFFFFFFFu;  /* RTE が pop する P
 static p110_regs_t s_p110_before;                     /* flip step の before snapshot */
 static p110_regs_t s_p110_after;                      /* flip step の after snapshot */
 
-static uint32_t s_p110_boot_gen = 0;              /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p110_boot_gen = 0;              /* reset_hard をまたいで加算のみ (memset しない) */
 static int      s_p110_dumped   = 0;
 
 /* entry_pc から addr ベースで region を決定 (BasePC oracle でない)。
@@ -12051,9 +12051,9 @@ static void p110_ring_push(uint32_t entry_pc, uint32_t a7b, uint32_t a7a,
     uint32_t idx;
     uint32_t half = P110_RING / 2u;
     if (s_p110_ring_total < half) {
-        idx = s_p110_ring_total;                              /* HEAD slot (onset) */
+        idx = s_p110_ring_total;                              /* HEAD スロット (開始時点) */
     } else {
-        idx = half + ((s_p110_ring_total - half) % (P110_RING - half)); /* TAIL rolling slot */
+        idx = half + ((s_p110_ring_total - half) % (P110_RING - half)); /* TAIL の巡回スロット */
     }
     s_p110_pc_ring[idx]  = entry_pc;
     s_p110_op_ring[idx]  = opword;
@@ -12119,7 +12119,7 @@ static void p110_emit_dump(void) {
         return;
     }
 
-    /* flip metadata。 */
+    /* flip のメタデータ。 */
     int pc_region = p110_region_of_pc(s_p110_flip_pc);
     const char *pcr = (pc_region == 0) ? "IPL-ROM($FE0000+)" :
                       (pc_region == 1) ? "loaded-RAM($0-$BFFFFF)" : "OTHER";
@@ -12145,7 +12145,7 @@ static void p110_emit_dump(void) {
 
     /* ★物理整合チェック (Orchestrator 検算用、生値で併記)。 */
     int chk_a7after_eq_uspbefore = (s_p110_flip_a7a == s_p110_flip_usp_before) ? 1 : 0;
-    int chk_uspafter_eq_a7after  = (s_p110_flip_usp_after == s_p110_flip_a7a) ? 1 : 0;  /* mirror identity (MINOR-2) */
+    int chk_uspafter_eq_a7after  = (s_p110_flip_usp_after == s_p110_flip_a7a) ? 1 : 0;  /* 鏡像の恒等関係 (MINOR-2) */
     debug_log("[P110-USP] CHECK a7_after==usp_before? %d | usp_after==a7_after(mirror)? %d | "
               "sr_before.S=%d sr_after.S=%d popped_sr.S=%d usp_before==0? %d\n",
               chk_a7after_eq_uspbefore, chk_uspafter_eq_a7after,
@@ -12237,7 +12237,7 @@ static void p110_emit_dump(void) {
  * s_ipl_fetch[]/MEM[] addr-based read)。全 observation-only=動作変更ゼロ。
  * ============================================================================ */
 
-/* ---- gate / window state ---- */
+/* ---- ゲート / 窓の状態 ---- */
 static int      s_p111_done        = 0;            /* 実 flip 捕捉済 — 二度と single-step しない */
 static int      s_p111_stepping    = 0;            /* この chunk を 1 命令 step 中か */
 static uint32_t s_p111_step_count  = 0;            /* 現 window 内の step 数 (cap 監視) */
@@ -12260,7 +12260,7 @@ typedef struct {
     uint32_t obs_pc;       /* 遷移を観測した step N+1 の entry_pc (corroboration) */
     uint32_t frame;        /* 観測 frame */
     uint32_t seq;          /* step 連番 */
-    int      kind;         /* 0=ORIGINATING (priv-write) / 1=TERMINAL (RTE-pop) / 2=OTHER */
+    int      kind;         /* 0=ORIGINATING (特権書込) / 1=TERMINAL (RTE-pop) / 2=OTHER */
 } p111_sclear_t;
 static p111_sclear_t s_p111_sclear_ring[P111_SCLEAR_RING];
 static uint32_t s_p111_sclear_total = 0;           /* S-clear 遷移総数 (truncation 判定) */
@@ -12275,14 +12275,14 @@ typedef struct {
     uint32_t live_sr;          /* callback 時 live SR */
     uint32_t frame;            /* g_mx68k_frame_num */
     uint32_t seq;              /* 低 A7 WriteW 連番 */
-    int      sr_tag;           /* value-match TAG: addr==$1FF6 && val==$0000 */
-    int      pc_tag;           /* value-match TAG: recon($1FF8,$1FFA)==$0000212c */
+    int      sr_tag;           /* 値一致タグ: addr==$1FF6 && val==$0000 */
+    int      pc_tag;           /* 値一致タグ: recon($1FF8,$1FFA)==$0000212c */
 } p111_w_t;
 static p111_w_t  s_p111_w_ring[P111_W_RING];
 static uint32_t  s_p111_w_total = 0;               /* 低 A7 WriteW 総数 (truncation 判定) */
 static uint32_t  s_p111_w_seq   = 0;               /* 低 A7 WriteW 連番 */
 
-/* ---- flip latch (one-shot freeze) ---- */
+/* ---- flip latch (one-shot の凍結) ---- */
 static int        s_p111_flip_latched = 0;
 static uint32_t   s_p111_flip_pc      = 0xFFFFFFFFu;
 static uint32_t   s_p111_flip_a7b     = 0xFFFFFFFFu;
@@ -12290,7 +12290,7 @@ static uint32_t   s_p111_flip_a7a     = 0xFFFFFFFFu;
 static uint32_t   s_p111_flip_frame   = 0xFFFFFFFFu;
 
 /* ---- 隔離 ---- */
-static uint32_t s_p111_boot_gen = 0;               /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p111_boot_gen = 0;               /* reset_hard をまたいで加算のみ (memset しない) */
 static int      s_p111_dumped   = 0;
 
 /* entry_pc から addr ベースで region を決定 (BasePC oracle でない)。
@@ -12328,9 +12328,9 @@ static void p111_ring_push(uint32_t writer_pc, int was_stepping, uint32_t addr,
     uint32_t idx;
     uint32_t half = P111_W_RING / 2u;
     if (s_p111_w_total < half) {
-        idx = s_p111_w_total;                                  /* HEAD slot (onset) */
+        idx = s_p111_w_total;                                  /* HEAD スロット (開始時点) */
     } else {
-        idx = half + ((s_p111_w_total - half) % (P111_W_RING - half)); /* TAIL rolling */
+        idx = half + ((s_p111_w_total - half) % (P111_W_RING - half)); /* TAIL の巡回 */
     }
     s_p111_w_ring[idx].writer_pc            = writer_pc;
     s_p111_w_ring[idx].was_single_stepping  = was_stepping;
@@ -12425,7 +12425,7 @@ static void p111_emit_dump(void) {
         return;
     }
 
-    /* flip metadata。 */
+    /* flip のメタデータ。 */
     if (s_p111_flip_latched) {
         int frg = p111_region_of_pc(s_p111_flip_pc);
         const char *fpcr = (frg == 0) ? "IPL-ROM($FE0000+)" :
@@ -12574,8 +12574,8 @@ typedef struct {
     int      dir;                          /* 1 = 1->0 (user mode 突入)、0 = 0->1 (supervisor 復帰) */
     uint32_t a7_before;                    /* 遷移近傍の前 A7 (corroboration のみ・判別子でない) */
     uint32_t a7_after;                     /* 遷移近傍の現 A7 (corroboration のみ) */
-    uint32_t usp;                          /* C68k_Get_USP (corroboration) */
-    uint32_t ssp;                          /* C68k_Get_MSP (corroboration) */
+    uint32_t usp;                          /* C68k_Get_USP (裏付け) */
+    uint32_t ssp;                          /* C68k_Get_MSP (裏付け) */
     uint16_t sr_before;                    /* 前 access の SR (= s_p112_sr_prev) */
     uint16_t sr_after;                     /* 現 access の SR */
     int      region_hint;                  /* p112_region_of_pc (BasePC band hint、PC 断定でない) */
@@ -12594,19 +12594,19 @@ static uint32_t     s_p112_seq         = 0;   /* 遷移連番カウンタ */
 static int          s_p112_first_set = 0;     /* 最初の 1->0 を latch 済か (one-shot guard) */
 static p112_trans_t s_p112_first;             /* 最初の 1->0 遷移の全フィールド */
 
-/* ---- S sample state ---- */
+/* ---- S サンプルの状態 ---- */
 static int      s_p112_sr_init = 0;           /* SR を一度でも sample したか (s_prev 有効性) */
 static uint16_t s_p112_sr_prev = 0xFFFFu;     /* 前 access の SR (full word、sentinel=未取得) */
 static uint32_t s_p112_a7_prev = 0xFFFFFFFFu; /* 前 access の A7 (a7_before 記録用) */
 static uint32_t s_p112_access_count = 0;      /* 累計 access 数 (sample 間隔計測) */
 static uint32_t s_p112_last_trans_access = 0; /* 前遷移時点の access_count (gap 算出) */
 
-/* ---- freeze / dump ---- */
+/* ---- 凍結 / ダンプ ---- */
 static int      s_p112_frozen = 0;            /* A7=$0 flip / panic-terminus で ring 凍結 */
-static int      s_p112_dumped = 0;            /* one-shot dump guard */
+static int      s_p112_dumped = 0;            /* one-shot ダンプのガード */
 
 /* ---- 隔離 ---- */
-static uint32_t s_p112_boot_gen = 0;          /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p112_boot_gen = 0;          /* reset_hard をまたいで加算のみ (memset しない) */
 
 /* PC から addr ベースで region を決定 (BasePC oracle でなく hint のみ、lesson ⑤⑲)。
    戻り値: 0=IPL ROM ($FE0000..$FFFFFF), 1=loaded boot RAM (<$C00000), 2=other ($Dxxxxx 等)。 */
@@ -12623,9 +12623,9 @@ static void p112_trans_push(const p112_trans_t *e) {
     uint32_t idx;
     uint32_t half = P112_TRANS_RING / 2u;
     if (s_p112_trans_total < half) {
-        idx = s_p112_trans_total;                                       /* HEAD slot (onset) */
+        idx = s_p112_trans_total;                                       /* HEAD スロット (開始時点) */
     } else {
-        idx = half + ((s_p112_trans_total - half) % (P112_TRANS_RING - half)); /* TAIL rolling */
+        idx = half + ((s_p112_trans_total - half) % (P112_TRANS_RING - half)); /* TAIL の巡回 */
     }
     s_p112_trans_ring[idx] = *e;
     s_p112_trans_total++;
@@ -12901,12 +12901,12 @@ static p114_slot_t s_p114_fz_slot[2];         /* freeze 時の 2 slot スナッ�
 /* ---- landing_pc corroboration (chunk 境界 sample、表示のみ・freeze 判定に不使用) ---- */
 static uint32_t s_p114_landing_pc = 0xFFFFFFFFu; /* S 1->0 freeze 後 最初の chunk return PC */
 
-/* ---- freeze / dump ---- */
+/* ---- 凍結 / ダンプ ---- */
 static int      s_p114_frozen = 0;            /* S 1->0 / panic-terminus で named-slot 凍結 */
-static int      s_p114_dumped = 0;            /* one-shot dump guard */
+static int      s_p114_dumped = 0;            /* one-shot ダンプのガード */
 
 /* ---- 隔離 ---- */
-static uint32_t s_p114_boot_gen = 0;          /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p114_boot_gen = 0;          /* reset_hard をまたいで加算のみ (memset しない) */
 
 /* PC から addr ベースで region を決定 (BasePC oracle でなく hint のみ、lesson 5/19)。
    戻り値: 0=IPL ROM ($FE0000..$FFFFFF), 1=loaded boot RAM (<$C00000), 2=other。 */
@@ -12921,8 +12921,8 @@ static int p114_region_of_pc(uint32_t pc) {
    戻り値: 0=invalid, 1=IPL-ROM, 2=loaded-boot。corroboration 表示用。 */
 static int p114_pc_validity(uint32_t pcl) {
     uint32_t p = pcl & 0x00FFFFFFu;
-    if (p >= 0x00FF0000u && p <= 0x00FFFFFFu) return 1;  /* IPL-ROM PC */
-    if (p >= 0x00002000u && p <= 0x00002FFFu) return 2;  /* loaded-boot PC */
+    if (p >= 0x00FF0000u && p <= 0x00FFFFFFu) return 1;  /* IPL-ROM の PC */
+    if (p >= 0x00002000u && p <= 0x00002FFFu) return 2;  /* ロード済みブート部の PC */
     return 0;
 }
 
@@ -13149,7 +13149,7 @@ static void p114_emit_dump(void) {
 
 #if P119_A7_WATCH
 /* ============================================================================
- * P119-A7W: a7-watch localize probe (P118 plan §5.1)。
+ * P119-A7W: a7 監視による局所化プローブ (P118 plan §5.1)。
  *
  * 目的: 2-byte SSP offset がどこで・割込配送と相関して出るか、frame-push 回数 vs
  * RTE-pop 回数の count 非対称があるかを実測し、統一仮説 (配送タイミング依存の例外
@@ -13225,7 +13225,7 @@ static uint32_t s_p119_offset_pop_total_at  = 0; /* offset 出現時点の pop �
 
 /* ---- one-shot dump guard / 隔離 ---- */
 static int      s_p119_dumped   = 0;           /* one-shot dump guard (各 reset でクリア) */
-static uint32_t s_p119_boot_gen = 0;           /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p119_boot_gen = 0;           /* reset_hard をまたいで加算のみ (memset しない) */
 
 /* WriteW callback: 観測帯 write を frame-push event として ring に latch + count、
    かつ SSP slot ($1FF6/$1FF8) 直書きなら TRAP#15 entry frame-push を first-latch。
@@ -13447,7 +13447,7 @@ static uint32_t       s_p120_push_head      = 0;
 static uint32_t       s_p120_exc_push_count = 0;   /* 確定 exc-push 数 (第一判定軸の一方) */
 static uint32_t       s_p120_push_seq       = 0;   /* 確定 exc-push 連番 */
 
-/* ---- rte-pop ring + count ---- */
+/* ---- rte-pop ring + 件数 ---- */
 static p120_pop_ev_t  s_p120_pop_ring[P120_POP_RING];
 static uint32_t       s_p120_pop_head      = 0;
 static uint32_t       s_p120_rte_pop_count = 0;    /* 確定 RTE-pop 数 (第一判定軸の他方) */
@@ -13472,8 +13472,8 @@ static uint32_t s_p120_run_last_a7   = 0;   /* run 最新 read 時点の live a7
 /* ---- causal one-shot latch (gate frame>=80 後の初回のみ、上書きしない) ---- */
 static int      s_p120_centry_seen   = 0;   /* gate 後初回 exc-push を latch したか */
 static uint32_t s_p120_centry_sr     = 0;   /* SR slot addr (run 末尾) */
-static uint32_t s_p120_centry_pchi   = 0;   /* PC-hi addr (sr_slot+2) */
-static uint32_t s_p120_centry_pclo   = 0;   /* PC-lo addr (sr_slot+4) */
+static uint32_t s_p120_centry_pchi   = 0;   /* PC 上位のアドレス (sr_slot+2) */
+static uint32_t s_p120_centry_pclo   = 0;   /* PC 下位のアドレス (sr_slot+4) */
 static uint32_t s_p120_centry_a7     = 0;   /* run 先頭 live a7 */
 static uint32_t s_p120_centry_frame  = 0;
 static uint32_t s_p120_centry_seq    = 0;
@@ -13496,7 +13496,7 @@ static uint32_t s_p120_cbal_seq      = 0;
 
 /* ---- one-shot dump guard / 隔離 ---- */
 static int      s_p120_dumped   = 0;        /* one-shot dump guard (各 reset でクリア) */
-static uint32_t s_p120_boot_gen = 0;        /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p120_boot_gen = 0;        /* reset_hard をまたいで加算のみ (memset しない) */
 
 /* 確定した exc-push (run_len==3) を ring に latch + count + gate 後初回なら causal_entry。
    observation-only、host-side state のみ。run 末尾 addr (最低位) が SR slot。 */
@@ -13591,7 +13591,7 @@ static void p120_finalize_run(void) {
         p120_commit_pop(s_p120_run_base, s_p120_run_base_val, s_p120_run_base_a7,
                         s_p120_run_last_a7, s_p120_run_len, s_p120_run_frame);
     }
-    s_p120_run_len  = 0;    /* consumed */
+    s_p120_run_len  = 0;    /* 消費済み */
     s_p120_run_base = 0;
     s_p120_run_prev_addr = 0;
 }
@@ -13777,7 +13777,7 @@ static void p120_emit_dump(void) {
 
 #if P122_SRCLEAR_PROBE
 /* ============================================================================
- * P122-SRCLR: S-clear (S 1->0) supply-source discriminator (observation-only)。
+ * P122-SRCLR: S クリア (S 1->0) の供給源判別器 (observation-only)。
  *
  * 目的 (1 行): panic 直前に bad SR=$0000(S=0) を生む S-bit clear の供給源が、
  *   [A] RTE 系 (stack pop で新 SR を取る) か
@@ -13830,7 +13830,7 @@ typedef struct {
     uint32_t frame;
 } p122_push_ev_t;
 
-/* ---- pop-ring (straddle-S RTE-frame pop events) ---- */
+/* ---- pop-ring (straddle-S の RTE フレーム pop イベント) ---- */
 static p122_pop_ev_t s_p122_pop_ring[P122_RING];
 static uint32_t      s_p122_pop_head  = 0;
 static uint32_t      s_p122_pop_count = 0;   /* 総 pop event 数 (ring 巻き戻し計算用) */
@@ -13888,7 +13888,7 @@ static uint32_t s_p122_sclr_frame     = 0;
 
 /* ---- one-shot dump guard / 隔離 ---- */
 static int      s_p122_dumped   = 0;        /* one-shot dump guard (各 reset でクリア) */
-static uint32_t s_p122_boot_gen = 0;        /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p122_boot_gen = 0;        /* reset_hard をまたいで加算のみ (memset しない) */
 
 /* addr が観測帯内か判定し band を返す。帯外なら -1。 */
 static int p122_band_of(uint32_t a) {
@@ -13950,7 +13950,7 @@ static void p122_finalize_run(void) {
                             head_S_val, s_p122_run_band, straddle, s_p122_run_frame);
         }
     }
-    s_p122_run_len       = 0;   /* consumed */
+    s_p122_run_len       = 0;   /* 消費済み */
     s_p122_run_base      = 0;
     s_p122_run_prev_addr = 0;
     s_p122_run_head_S    = 0;
@@ -13969,7 +13969,7 @@ static void p122_finalize_wrun(void) {
         p122_commit_push(s_p122_wrun_base_seq, s_p122_wrun_last_val, saved_pc,
                          s_p122_wrun_base_a7, s_p122_wrun_frame);
     }
-    s_p122_wrun_len       = 0;   /* consumed */
+    s_p122_wrun_len       = 0;   /* 消費済み */
     s_p122_wrun_base      = 0;
     s_p122_wrun_prev_addr = 0;
 }
@@ -14222,7 +14222,7 @@ typedef struct {
 typedef struct {
     uint64_t seq;            /* この push の global seq (write 時点) */
     uint32_t a7_at_push;     /* push slot (= 減算後 a7 = addr) */
-    uint16_t pushed_sr;      /* pushed SR (= val16) */
+    uint16_t pushed_sr;      /* push された SR (= val16) */
     int      pushed_S;       /* pushed_sr の S-bit (bit13) */
     int      val_eq_sr;      /* val16 == C68k_Get_SR() (主軸識別 flag、corroboration) */
     int      slot_eq_a7;     /* addr == live A7 (near-tautological、over-weight しない) */
@@ -14246,7 +14246,7 @@ static p124_pop_ev_t s_p124_pop_ring[P124_RING];
 static uint32_t      s_p124_pop_head  = 0;
 static uint32_t      s_p124_pop_count = 0;
 
-/* ---- push-ring (standalone move sr,-(a7) push endpoint events) ---- */
+/* ---- push-ring (単独の move sr,-(a7) による push 端点イベント) ---- */
 static p124_push_ev_t s_p124_push_ring[P124_RING];
 static uint32_t       s_p124_push_head  = 0;
 static uint32_t       s_p124_push_count = 0;
@@ -14278,7 +14278,7 @@ static uint64_t s_p124_int_serviced   = 0;  /* host-side serviced 割込カウ�
 
 /* ---- one-shot dump guard / 隔離 ---- */
 static int      s_p124_dumped   = 0;        /* one-shot dump guard (各 reset でクリア) */
-static uint32_t s_p124_boot_gen = 0;        /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p124_boot_gen = 0;        /* reset_hard をまたいで加算のみ (memset しない) */
 
 /* addr が STK band 内か。 */
 static int p124_in_stk(uint32_t a) {
@@ -14609,7 +14609,7 @@ typedef struct {
 } p126_exc_t;
 
 static p126_exc_t s_p126_ring[P126_RING];
-static uint32_t   s_p126_head  = 0;   /* rotate index */
+static uint32_t   s_p126_head  = 0;   /* 巡回インデックス */
 static uint32_t   s_p126_count = 0;   /* 累計 append 数 (rotate 判定用) */
 static uint32_t   s_p126_seq   = 0;   /* ReadW+WriteW 共有 per-access counter (タグ用) */
 
@@ -14721,11 +14721,11 @@ static void p126_on_vec_fetch(uint32_t a) {
     if (a7_valid) {
         uint32_t l0 = p47_read_long_le(a7);
         if (l0 != P126_OOB_SENTINEL) {
-            pushed_sr_full = (l0 >> 16) & 0xFFFFu;  /* MEM[a7..a7+1] = pushed SR */
+            pushed_sr_full = (l0 >> 16) & 0xFFFFu;  /* MEM[a7..a7+1] = push された SR */
         }
         uint32_t l1 = p47_read_long_le(a7 + 2u);
         if (l1 != P126_OOB_SENTINEL) {
-            stacked_pc = l1;                        /* MEM[a7+2..a7+5] = pushed PC */
+            stacked_pc = l1;                        /* MEM[a7+2..a7+5] = push された PC */
         }
     }
 
@@ -14773,7 +14773,7 @@ static void p126_on_vec_fetch(uint32_t a) {
     }
 }
 
-/* one-record dump helper。 */
+/* 1 レコード分のダンプヘルパ。 */
 static void p126_dump_record(const char *tag, const p126_exc_t *e) {
     debug_log("[P126] %s seq=%u frame=%u vec=#0x%02x vec_addr=0x%04x "
               "handler_PC=0x%08x pushed_sr=0x%04x pushed_S=%u live_sr=0x%04x "
@@ -14852,7 +14852,7 @@ static void p126_exc_dump(uint32_t pc_now_h) {
 
 /* reset hook: ring / seq / latch / dumped guard をクリア。boot_gen は increment-only。 */
 static void p126_reset(void) {
-    s_p126_boot_gen++;  /* increment-only bump (NOT cleared) */
+    s_p126_boot_gen++;  /* 加算のみ (クリアしない) */
     memset(s_p126_ring, 0, sizeof(s_p126_ring));
     s_p126_head  = 0;
     s_p126_count = 0;
@@ -14863,7 +14863,7 @@ static void p126_reset(void) {
     s_p126_first_unexp_idx   = -1;
     s_p126_first_garbage_idx = -1;
     s_p126_dumped = 0;
-    /* NOTE: ONLY s_p126_boot_gen persists (increment-only above). */
+    /* 注: 保持されるのは s_p126_boot_gen のみ (上記で加算のみ)。 */
 }
 
 #else /* P126_ENABLE */
@@ -14922,7 +14922,7 @@ typedef struct {
 } p128_wr_t;
 
 static p128_wr_t s_p128_ring[P128_RING];
-static uint32_t  s_p128_head     = 0;   /* rotate index */
+static uint32_t  s_p128_head     = 0;   /* 巡回インデックス */
 static uint32_t  s_p128_count    = 0;   /* 累計 append 数 (rotate 判定用) */
 static uint32_t  s_p128_widx     = 0;   /* 累計 write 番号 (因果順序タグ) */
 static int       s_p128_dumped   = 0;   /* one-shot dump guard (各 reset でクリア) */
@@ -14997,13 +14997,13 @@ static void p128_dump(uint32_t pc_now_h) {
 
 /* reset hook: ring / head / count / widx / dumped をクリア。boot_gen は increment-only。 */
 static void p128_reset(void) {
-    s_p128_boot_gen++;  /* increment-only bump (NOT cleared) */
+    s_p128_boot_gen++;  /* 加算のみ (クリアしない) */
     memset(s_p128_ring, 0, sizeof(s_p128_ring));
     s_p128_head   = 0;
     s_p128_count  = 0;
     s_p128_widx   = 0;
     s_p128_dumped = 0;
-    /* NOTE: ONLY s_p128_boot_gen persists (increment-only above). */
+    /* 注: 保持されるのは s_p128_boot_gen のみ (上記で加算のみ)。 */
 }
 
 #else /* P128_ENABLE */
@@ -15043,13 +15043,13 @@ typedef struct {
 static p130_rec_t s_p130_ring[P130_RING];
 static uint32_t   s_p130_head     = 0;      /* 次格納 index (and(RING-1)) */
 static uint32_t   s_p130_count    = 0;      /* 総格納数 (overflow 検知) */
-static int        s_p130_dumped   = 0;      /* one-shot dump latch */
+static int        s_p130_dumped   = 0;      /* one-shot ダンプの latch */
 static uint32_t   s_p130_boot_gen = 0;      /* reset 毎 INCREMENT-ONLY (memset 禁止) */
 static uint32_t   s_p130_seq      = 0;      /* P130-own 単調 seq (pop/push 両 ring 共有・boot 毎 0 reset) */
 
 /* FIRST-S-CLEAR latch: 最初に s_before==1 and s_after_cand==0 を満たした record */
 static int        s_p130_clear_latched   = 0;
-static uint32_t   s_p130_clear_idx       = 0; /* ring index of the first S-clear pop */
+static uint32_t   s_p130_clear_idx       = 0; /* 最初の S クリア pop の ring インデックス */
 static int        s_p130_pending_confirm = 0; /* 直前の S-clear pop が confirm 待ちか */
 static uint32_t   s_p130_pending_idx     = 0; /* confirm を書き戻す ring index */
 
@@ -15074,7 +15074,7 @@ static uint32_t    s_p130_wcount = 0;
 
 #if P134_ENABLE
 /* ============================================================================
- * P134: $1FF6 zeroing source statics + per-frame poll helper。
+ * P134: $1FF6 ゼロ化の出所用 static 群 + フレーム毎のポーリングヘルパ。
  * ★PLACEMENT: これらの statics と p134_frame_poll() は、これらを参照する
  *   trace_Memory_WriteW (frame poll 呼出) / trace_Memory_WriteB (CCR-start latch) /
  *   p134_dump / p134_reset の手前に宣言する (use-before-declaration 回避)。
@@ -15084,7 +15084,7 @@ static uint32_t    s_p130_wcount = 0;
  *   BAR=off 0x1C (dmac.h:17/22・native host uint32_t・byte 順再構成不要)。
  *   EmulatorBridge.c:1511 の DMA[0].MAR 用法に合わせる。
  * ============================================================================ */
-/* per-frame snapshot (frame poll) */
+/* フレーム毎のスナップショット (フレームポーリング) */
 static uint16_t s_p134_frameval[P134_FRAMES];          /* 各 frame の $1FF6 word (0xFFFF=未取得) */
 static uint32_t s_p134_mar[P134_FRAMES][4];            /* 各 frame の ch0-3 MAR snapshot */
 static uint32_t s_p134_bar[P134_FRAMES][4];            /* 各 frame の ch0-3 BAR snapshot */
@@ -15115,7 +15115,7 @@ static uint8_t  s_p134_sstk_ch    = 0;
 static int      s_p134_sstk_frame = -1;
 static uint32_t s_p134_sstk_mar   = 0;
 static uint32_t s_p134_sstk_bar   = 0;
-static uint8_t  s_p134_dumped     = 0;                 /* one-shot dump flag */
+static uint8_t  s_p134_dumped     = 0;                 /* one-shot ダンプフラグ */
 
 /* frame 変化検出方式の per-frame poll。trace_Memory_WriteW 先頭で毎回呼ぶが、
  * frame 未変化なら即 return ゆえ低コスト。frame 変化時のみ $1FF6 word と
@@ -15125,7 +15125,7 @@ static inline void p134_frame_poll(void) {
     if (fr == s_p134_last_frame) return;       /* frame 未変化なら何もしない */
     s_p134_last_frame = fr;
     if (fr >= 0 && fr < P134_FRAMES) {
-        uint16_t v = (uint16_t)(p47_read_long_le(0x1FF6u) >> 16);   /* MEM[0x1FF6] word */
+        uint16_t v = (uint16_t)(p47_read_long_le(0x1FF6u) >> 16);   /* MEM[0x1FF6] のワード */
         int ch;
         s_p134_frameval[fr] = v;
         if (v == 0x0000u && !s_p134_zero_set) { s_p134_zero_set = 1u; s_p134_zero_frame = fr; }
@@ -15883,7 +15883,7 @@ static void p135_dump(uint32_t pc_h)
         debug_log("P135-Part1: any host-path @frame>=80? %s\n", late ? "YES" : "no");
     }
 
-    /* --- Part2: pop-site addr/cell capture --- */
+    /* --- Part2: pop 箇所のアドレス/セル捕捉 --- */
     debug_log("P135-Part2: cap_set=%u addr=%08X val_returned=%04X cell_at_addr=%04X cell_at_1FF6=%04X frame=%d\n",
         s_p135_cap_set, s_p135_cap_addr, s_p135_cap_valret,
         s_p135_cap_cell_addr, s_p135_cap_cell_1ff6, s_p135_cap_frame);
@@ -15907,7 +15907,7 @@ static void p135_dump(uint32_t pc_h)
         debug_log("P135-Part2b: hint -- RTE 署名不成立 (PC-pop 不在): 第3クラス候補 (非 RTE SR 書込命令 MOVE (A7)+,SR 等)\n");
     }
 
-    /* --- Part3: write-hook window audit --- */
+    /* --- Part3: 書込フックの窓監査 --- */
     debug_log("P135-Part3: write-audit count=%u (cap=%d ovf=%d) window=[%d,%d] addr=[%04X,%04X)\n",
         s_p135_wcount, P135_WRING, (s_p135_wcount > (uint32_t)P135_WRING) ? 1 : 0,
         P135_WIN_LO, P135_WIN_HI, (unsigned)P135_WADDR_LO, (unsigned)P135_WADDR_HI);
@@ -15975,8 +15975,8 @@ static int      s_p136_trig_frame    = -1;   /* g_mx68k_frame_num */
 static int      s_p136_trig_line     = -1;   /* H-line index (per-frame poll は -1) */
 static uint16_t s_p136_trig_prev_val = 0;    /* 遷移前値 (= 0x2000) */
 static uint16_t s_p136_trig_curr_val = 0;    /* 遷移後値 (= 0x0000) */
-static uint32_t s_p136_trig_pc       = 0;    /* MX68KQ_GUEST_PC() at trigger */
-static uint32_t s_p136_trig_a7       = 0;    /* C68k_Get_AReg(&C68K,7) at trigger */
+static uint32_t s_p136_trig_pc       = 0;    /* トリガ時点の MX68KQ_GUEST_PC() */
+static uint32_t s_p136_trig_a7       = 0;    /* トリガ時点の C68k_Get_AReg(&C68K,7) */
 static uint8_t  s_p136_dumped        = 0;    /* 独自 one-shot dump flag */
 
 /* step_id→名前 対応表 (offline 可読性・dump 併記)。enum 順と一致。 */
@@ -16005,7 +16005,7 @@ static const char *p136_step_name(unsigned char id) {
 void p136_poll(unsigned char step_id, int line)
 {
     uint16_t curr;
-    if (g_mx68k_frame_num < 88 || g_mx68k_frame_num > 89) return;   /* frame gate */
+    if (g_mx68k_frame_num < 88 || g_mx68k_frame_num > 89) return;   /* フレームゲート */
     curr = *(uint16_t*)&MEM[0x1FF6u];
     if (!s_p136_seeded) {                                            /* seed: 初比較無効化 */
         s_p136_prev_val = curr;
@@ -16137,12 +16137,12 @@ static uint32_t s_p113_sflip_pc     = 0xFFFFFFFFu; /* post-chunk PC (=RTE landin
 static uint32_t s_p113_sflip_a7     = 0xFFFFFFFFu; /* S 1->0 chunk の post a7 (SSP/USP top) */
 static uint32_t s_p113_sflip_usp    = 0xFFFFFFFFu; /* S 1->0 chunk の post USP */
 
-/* ---- freeze / dump ---- */
+/* ---- 凍結 / ダンプ ---- */
 static int      s_p113_frozen = 0;            /* S 1->0 chunk / panic-terminus で ring 凍結 */
-static int      s_p113_dumped = 0;            /* one-shot dump guard */
+static int      s_p113_dumped = 0;            /* one-shot ダンプのガード */
 
 /* ---- 隔離 ---- */
-static uint32_t s_p113_boot_gen = 0;          /* INCREMENT-ONLY across reset_hard (NOT memset) */
+static uint32_t s_p113_boot_gen = 0;          /* reset_hard をまたいで加算のみ (memset しない) */
 
 /* PC から addr ベースで region を決定 (BasePC oracle でなく hint のみ、lesson 5/19)。
    戻り値: 0=IPL ROM ($FE0000..$FFFFFF), 1=loaded boot RAM (<$C00000), 2=other。 */
@@ -16157,8 +16157,8 @@ static int p113_region_of_pc(uint32_t pc) {
    戻り値: 0=invalid, 1=IPL-ROM, 2=loaded-boot。frame coherence 判別子。 */
 static int p113_pc_validity(uint32_t pcl) {
     uint32_t p = pcl & 0x00FFFFFFu;
-    if (p >= 0x00FF0000u && p <= 0x00FFFFFFu) return 1;  /* IPL-ROM PC */
-    if (p >= 0x00002000u && p <= 0x00002FFFu) return 2;  /* loaded-boot PC */
+    if (p >= 0x00FF0000u && p <= 0x00FFFFFFu) return 1;  /* IPL-ROM の PC */
+    if (p >= 0x00002000u && p <= 0x00002FFFu) return 2;  /* ロード済みブート部の PC */
     return 0;
 }
 
@@ -16177,9 +16177,9 @@ static void p113_w_push(const p113_w_t *e) {
     uint32_t idx;
     uint32_t half = P113_W_RING / 2u;
     if (s_p113_w_total < half) {
-        idx = s_p113_w_total;                                       /* HEAD slot (onset) */
+        idx = s_p113_w_total;                                       /* HEAD スロット (開始時点) */
     } else {
-        idx = half + ((s_p113_w_total - half) % (P113_W_RING - half)); /* TAIL rolling */
+        idx = half + ((s_p113_w_total - half) % (P113_W_RING - half)); /* TAIL の巡回 */
     }
     s_p113_w_ring[idx] = *e;
     s_p113_w_total++;
@@ -17394,7 +17394,7 @@ static void p82xf_on_vector_fetch(uint32_t addr) {
 }
 #endif /* P82XF_ENABLE */
 
-/* P82-X-G: FDC/IOC register-access trace probe (read-only diagnostic) */
+/* P82-X-G: FDC/IOC レジスタアクセスのトレースプローブ (read-only の診断用) */
 #define P82XG_ENABLE 0
 #define P82XG_BUILD_TOKEN "P82XG-130-ioctrace-r1"
 
@@ -17754,7 +17754,7 @@ void p82xg_emit_verdict(void) {
 #define P82XH_WINDOW_LO      80u
 #define P82XH_WINDOW_HI      95u
 #define P82XH_VERDICT_FRAME  96u
-#define P82XH_FDC_VEC_ADDR   0x000180u   /* vec 0x60 -> table addr 0x60*4=0x180 */
+#define P82XH_FDC_VEC_ADDR   0x000180u   /* vec 0x60 -> テーブルアドレス 0x60*4=0x180 */
 #define P82XH_LOWRAM_HI      0x001FFFu
 #define P82XH_RETRY_PC_LO    0x00FF8D00u
 #define P82XH_RETRY_PC_HI    0x00FF93E0u
@@ -17767,8 +17767,8 @@ enum { P82XH_OP_E94001_R = 0, P82XH_OP_E94003_R = 1, P82XH_OP_E94003_W = 2,
        P82XH_OP_E9C001_R = 3, P82XH_OP_LOWRAM_W = 4 };
 
 /* 既知の FDC ワークエリア候補（m68000_bridge.c P42-DIAG / P61 プローブ由来 —
- * Code Review F3/R2）。RAM[0x0974]=FDC complete flag、RAM[0x0990]=FDC state、
- * RAM[0x0994]=FDC status mirror。ただし P60/P61 の観測はブートセクタ読み取り
+ * Code Review F3/R2）。RAM[0x0974]=FDC 完了フラグ、RAM[0x0990]=FDC 状態、
+ * RAM[0x0994]=FDC ステータスのミラー。ただし P60/P61 の観測はブートセクタ読み取り
  * ルーチン 0xff756c に関するもので、本サイクル対象の Recalibrate リトライ
  * ループ 0xff8d00-0xff93e0 が同じフラグを使うかは未確認 — VERDICT で実測照合。 */
 static const uint32_t P82XH_KNOWN_FLAGS[3] = {0x000974u, 0x000990u, 0x000994u};
@@ -17833,9 +17833,9 @@ static inline int p82xh_in_window(void) {
 }
 
 /* 現在の guest PC（P82-X-F/G と同一手段）。
- * P82-X-Q (P82XQ-PROBE-Q1): redirect to BPC-safe accessor — see top-of-file
- * MX68KQ_GUEST_PC. Result is 24-bit masked (legacy callers tolerate this,
- * see plan §3.2.1 B-用途分類). */
+ * P82-X-Q (P82XQ-PROBE-Q1): BPC 安全なアクセサへ差し替え — ファイル先頭の
+ * MX68KQ_GUEST_PC を参照。結果は 24 ビットマスク済み (従来の呼出し元はこれを許容する。
+ * plan §3.2.1 B-用途分類 を参照)。 */
 static inline uint32_t p82xh_guest_pc(void) {
     return MX68KQ_GUEST_PC();
 }
