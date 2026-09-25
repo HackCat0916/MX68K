@@ -7,14 +7,14 @@
 //
 //---------------------------------------------------------------------------
 //
-//	Ported to MX68K (macOS port of px68k) — Bridge layer, SCSI/SASI HD + MO
-//	+ CD-ROM. Hard-disk classes (DiskTrack / DiskCache / Disk / SASIHD /
-//	SCSIHD), the MO class (SCSIMO, P668) and the CD-ROM classes (CDTrack /
-//	SCSICD, P676) are ported verbatim from XM6 vm/disk.h with only Win32
-//	type/macro shims applied and are wired into the runtime.
-//	CDDABuf remains excluded (#if 0) — upstream XM6 itself seals its class
-//	body (XM6:vm/disk.h:452-498), and MX implements no CD-DA path.
-//	See NOTICE-THIRD-PARTY.md at the repository root.
+//	MX68K (px68k の macOS 移植) への移植 — Bridge 層。SCSI/SASI HD + MO +
+//	CD-ROM。ハードディスク系クラス (DiskTrack / DiskCache / Disk / SASIHD /
+//	SCSIHD)、MO クラス (SCSIMO, P668)、CD-ROM 系クラス (CDTrack / SCSICD,
+//	P676) は XM6 vm/disk.h から、Win32 環境の型/マクロのシムだけを適用して
+//	逐語的に移植したもので、ランタイムへ配線済み。
+//	CDDABuf は除外 (#if 0) のまま — 上流 XM6 自身がそのクラス本体を封印して
+//	おり (XM6:vm/disk.h:452-498)、MX は CD-DA 経路を一切実装していない。
+//	リポジトリ直下の NOTICE-THIRD-PARTY.md を参照のこと。
 //
 //---------------------------------------------------------------------------
 
@@ -25,7 +25,7 @@
 
 //---------------------------------------------------------------------------
 //
-//	Class forward declarations (XM6 original)
+//	クラスの前方宣言 (XM6 オリジナル)
 //
 //---------------------------------------------------------------------------
 class DiskTrack;
@@ -42,10 +42,10 @@ class Filepath;
 
 //===========================================================================
 //
-//	File path (minimal MX68K wrapper — replaces XM6 vm/filepath.h)
+//	ファイルパス (MX68K 独自の最小ラッパー — XM6 vm/filepath.h の代替)
 //
-//	Only the interface actually used by the ported disk code is provided:
-//	default construction, assignment, path access, and state Save/Load.
+//	移植したディスクコードが実際に使うインターフェースだけを提供する:
+//	デフォルト構築、代入、パス参照、状態の Save/Load。
 //
 //===========================================================================
 class Filepath
@@ -64,28 +64,28 @@ public:
 	BOOL FASTCALL Load(Fileio *fio, int ver);
 
 private:
-	char m_szPath[520];					// file path (host encoding)
+	char m_szPath[520];					// ファイルパス (ホスト側エンコーディング)
 };
 
 //===========================================================================
 //
-//	File I/O (minimal MX68K wrapper — replaces XM6 vm/fileio.h)
+//	ファイル I/O (MX68K 独自の最小ラッパー — XM6 vm/fileio.h の代替)
 //
-//	Thin wrapper delegating to px68k's host file API (File_Open / File_Seek
-//	/ File_Read / File_Write / File_Close in Core/px68k dosio). Only the
-//	interface used by the ported disk code is provided. The handle is stored
-//	as an opaque pointer (px68k FILEH == HANDLE == void*, NULL = invalid) so
-//	this header does not need to include px68k headers.
+//	px68k のホストファイル API (Core/px68k dosio の File_Open / File_Seek /
+//	File_Read / File_Write / File_Close) へ処理を委譲する薄いラッパー。移植した
+//	ディスクコードが使うインターフェースだけを提供する。ハンドルは不透明な
+//	ポインタとして保持する (px68k の FILEH == HANDLE == void*、NULL = 無効) ため、
+//	このヘッダは px68k のヘッダを include する必要がない。
 //
 //===========================================================================
 class Fileio
 {
 public:
 	enum OpenMode {
-		ReadOnly,						// read only
-		WriteOnly,						// write only
-		ReadWrite,						// read / write
-		Append							// append
+		ReadOnly,						// 読み込みのみ
+		WriteOnly,						// 書き込みのみ
+		ReadWrite,						// 読み書き
+		Append							// 追記
 	};
 
 public:
@@ -102,17 +102,17 @@ public:
 	BOOL FASTCALL IsValid() const		{ return (BOOL)(handle != 0); }
 
 private:
-	void *handle;						// host file handle (NULL = invalid)
+	void *handle;						// ホストファイルハンドル (NULL = 無効)
 };
 
 //---------------------------------------------------------------------------
 //
-//	Error definitions (sense codes returned by REQUEST SENSE)
+//	エラー定義 (REQUEST SENSE が返すセンスコード)
 //
-//	MSB		reserved (0x00)
-//			sense key
-//			additional sense code (ASC)
-//	LSB		additional sense code qualifier (ASCQ)
+//	MSB		予約 (0x00)
+//			センスキー
+//			追加センスコード (ASC)
+//	LSB		追加センスコード修飾子 (ASCQ)
 //
 //---------------------------------------------------------------------------
 #define DISK_NOERROR		0x00000000	// NO ADDITIONAL SENSE INFO.
@@ -137,399 +137,399 @@ private:
 
 //===========================================================================
 //
-//	Disk track
+//	ディスクトラック
 //
 //===========================================================================
 class DiskTrack
 {
 public:
-	// internal data definition
+	// 内部データ定義
 	typedef struct {
-		int track;						// track number
-		int size;						// sector size (8 or 9)
-		int sectors;					// number of sectors (<=0x100)
-		BYTE *buffer;					// data buffer
-		BOOL init;						// loaded flag
-		BOOL changed;					// changed flag
-		BOOL *changemap;				// changed map
-		BOOL raw;						// RAW mode
+		int track;						// トラック番号
+		int size;						// セクタサイズ (8 または 9)
+		int sectors;					// セクタ数 (<=0x100)
+		BYTE *buffer;					// データバッファ
+		BOOL init;						// ロード済みフラグ
+		BOOL changed;					// 変更済みフラグ
+		BOOL *changemap;				// 変更済みマップ
+		BOOL raw;						// RAW モード
 	} disktrk_t;
 
 public:
-	// basic functions
+	// 基本ファンクション
 	DiskTrack(int track, int size, int sectors, BOOL raw = FALSE);
-										// constructor
+										// コンストラクタ
 	virtual ~DiskTrack();
-										// destructor
+										// デストラクタ
 	BOOL FASTCALL Load(const Filepath& path);
-										// load
+										// ロード
 	BOOL FASTCALL Save(const Filepath& path);
-										// save
+										// セーブ
 
-	// read / write
+	// 読み書き
 	BOOL FASTCALL Read(BYTE *buf, int sec) const;
-										// sector read
+										// セクタ読み込み
 	BOOL FASTCALL Write(const BYTE *buf, int sec);
-										// sector write
+										// セクタ書き込み
 
-	// misc
+	// その他
 	int FASTCALL GetTrack() const		{ return dt.track; }
-										// get track
+										// トラック取得
 	BOOL FASTCALL IsChanged() const		{ return dt.changed; }
-										// changed-flag check
+										// 変更済みフラグチェック
 
 private:
-	// internal data
+	// 内部データ
 	disktrk_t dt;
-										// internal data
+										// 内部データ
 };
 
 //===========================================================================
 //
-//	Disk cache
+//	ディスクキャッシュ
 //
 //===========================================================================
 class DiskCache
 {
 public:
-	// internal data definition
+	// 内部データ定義
 	typedef struct {
-		DiskTrack *disktrk;				// assigned track
-		DWORD serial;					// last serial
+		DiskTrack *disktrk;				// 割り当てトラック
+		DWORD serial;					// 最終シリアル
 	} cache_t;
 
-	// number of caches
+	// キャッシュ数
 	enum {
-		CacheMax = 16					// number of cached tracks
+		CacheMax = 16					// キャッシュするトラック数
 	};
 
 public:
-	// basic functions
+	// 基本ファンクション
 	DiskCache(const Filepath& path, int size, int blocks);
-										// constructor
+										// コンストラクタ
 	virtual ~DiskCache();
-										// destructor
+										// デストラクタ
 	void FASTCALL SetRawMode(BOOL raw);
-										// CD-ROM raw mode setting
+										// CD-ROM RAW モード設定
 
-	// access
+	// アクセス
 	BOOL FASTCALL Save();
-										// save all & release
+										// 全セーブ & 解放
 	BOOL FASTCALL Read(BYTE *buf, int block);
-										// sector read
+										// セクタ読み込み
 	BOOL FASTCALL Write(const BYTE *buf, int block);
-										// sector write
+										// セクタ書き込み
 	BOOL FASTCALL GetCache(int index, int& track, DWORD& serial) const;
-										// get cache info
+										// キャッシュ情報取得
 
 private:
-	// internal management
+	// 内部管理
 	void FASTCALL Clear();
-										// clear all tracks
+										// 全トラッククリア
 	DiskTrack* FASTCALL Assign(int track);
-										// track load
+										// トラックロード
 	BOOL FASTCALL Load(int index, int track);
-										// track load
+										// トラックロード
 	void FASTCALL Update();
-										// serial-number update
+										// シリアル番号更新
 
-	// internal data
+	// 内部データ
 	cache_t cache[CacheMax];
-										// cache management
+										// キャッシュ管理
 	DWORD serial;
-										// last-access serial number
+										// 最終アクセスシリアル番号
 	Filepath sec_path;
-										// path
+										// パス
 	int sec_size;
-										// sector size (8 or 9 or 11)
+										// セクタサイズ (8 または 9 または 11)
 	int sec_blocks;
-										// number of sector blocks
+										// セクタブロック数
 	BOOL cd_raw;
-										// CD-ROM RAW mode
+										// CD-ROM RAW モード
 };
 
 //===========================================================================
 //
-//	Disk
+//	ディスク
 //
 //===========================================================================
 class Disk
 {
 public:
-	// internal work
+	// 内部ワーク
 	typedef struct {
-		DWORD id;						// media ID
-		BOOL ready;						// valid disk
-		BOOL writep;					// write protected
-		BOOL readonly;					// read only
-		BOOL removable;					// removable
-		BOOL lock;						// locked
-		BOOL attn;						// attention
-		BOOL reset;						// reset
-		int size;						// sector size
-		int blocks;						// total sectors
+		DWORD id;						// メディア ID
+		BOOL ready;						// 有効なディスク
+		BOOL writep;					// 書き込み禁止
+		BOOL readonly;					// 読み込みのみ
+		BOOL removable;					// リムーバブル
+		BOOL lock;						// ロック中
+		BOOL attn;						// アテンション
+		BOOL reset;						// リセット
+		int size;						// セクタサイズ
+		int blocks;						// 総セクタ数
 		DWORD lun;						// LUN
-		DWORD code;						// status code
-		DiskCache *dcache;				// disk cache
+		DWORD code;						// ステータスコード
+		DiskCache *dcache;				// ディスクキャッシュ
 	} disk_t;
 
 public:
-	// basic functions
+	// 基本ファンクション
 	Disk(Device *dev);
-										// constructor
+										// コンストラクタ
 	virtual ~Disk();
-										// destructor
+										// デストラクタ
 	virtual void FASTCALL Reset();
-										// device reset
+										// デバイスリセット
 	virtual BOOL FASTCALL Save(Fileio *fio, int ver);
-										// save
+										// セーブ
 	virtual BOOL FASTCALL Load(Fileio *fio, int ver);
-										// load
+										// ロード
 
 	// ID
 	DWORD FASTCALL GetID() const		{ return disk.id; }
-										// get media ID
+										// メディア ID 取得
 	BOOL FASTCALL IsNULL() const;
-										// NULL check
+										// NULL チェック
 	BOOL FASTCALL IsSASI() const;
-										// SASI check
+										// SASI チェック
 
-	// media operations
+	// メディア操作
 	virtual BOOL FASTCALL Open(const Filepath& path);
-										// open
+										// オープン
 	void FASTCALL GetPath(Filepath& path) const;
-										// get path
+										// パス取得
 	void FASTCALL Eject(BOOL force);
-										// eject
+										// イジェクト
 	BOOL FASTCALL IsReady() const		{ return disk.ready; }
-										// ready check
+										// レディチェック
 	void FASTCALL WriteP(BOOL flag);
-										// write protect
+										// 書き込み禁止
 	BOOL FASTCALL IsWriteP() const		{ return disk.writep; }
-										// write-protect check
+										// 書き込み禁止チェック
 	BOOL FASTCALL IsReadOnly() const	{ return disk.readonly; }
-										// read-only check
+										// read-only チェック
 	BOOL FASTCALL IsRemovable() const	{ return disk.removable; }
-										// removable check
+										// リムーバブルチェック
 	BOOL FASTCALL IsLocked() const		{ return disk.lock; }
-										// lock check
+										// ロックチェック
 	BOOL FASTCALL IsAttn() const		{ return disk.attn; }
-										// change check
+										// 交換チェック
 	BOOL FASTCALL Flush();
-										// cache flush
+										// キャッシュフラッシュ
 	void FASTCALL GetDisk(disk_t *buffer) const;
-										// get internal work
+										// 内部ワーク取得
 
-	// properties
+	// プロパティ
 	void FASTCALL SetLUN(DWORD lun)		{ disk.lun = lun; }
-										// set LUN
+										// LUN 設定
 	DWORD FASTCALL GetLUN()				{ return disk.lun; }
-										// get LUN
+										// LUN 取得
 
-	// commands
+	// コマンド
 	virtual int FASTCALL Inquiry(const DWORD *cdb, BYTE *buf);
-										// INQUIRY command
+										// INQUIRY コマンド
 	virtual int FASTCALL RequestSense(const DWORD *cdb, BYTE *buf);
-										// REQUEST SENSE command
+										// REQUEST SENSE コマンド
 	int FASTCALL SelectCheck(const DWORD *cdb);
-										// SELECT check
+										// SELECT チェック
 	BOOL FASTCALL ModeSelect(const BYTE *buf, int size);
-										// MODE SELECT command
+										// MODE SELECT コマンド
 	int FASTCALL ModeSense(const DWORD *cdb, BYTE *buf);
-										// MODE SENSE command
+										// MODE SENSE コマンド
 	BOOL FASTCALL TestUnitReady(const DWORD *cdb);
-										// TEST UNIT READY command
+										// TEST UNIT READY コマンド
 	BOOL FASTCALL Rezero(const DWORD *cdb);
-										// REZERO command
+										// REZERO コマンド
 	BOOL FASTCALL Format(const DWORD *cdb);
-										// FORMAT UNIT command
+										// FORMAT UNIT コマンド
 	BOOL FASTCALL Reassign(const DWORD *cdb);
-										// REASSIGN UNIT command
+										// REASSIGN UNIT コマンド
 	virtual int FASTCALL Read(BYTE *buf, int block);
-										// READ command
+										// READ コマンド
 	int FASTCALL WriteCheck(int block);
-										// WRITE check
+										// WRITE チェック
 	BOOL FASTCALL Write(const BYTE *buf, int block);
-										// WRITE command
+										// WRITE コマンド
 	BOOL FASTCALL Seek(const DWORD *cdb);
-										// SEEK command
+										// SEEK コマンド
 	BOOL FASTCALL StartStop(const DWORD *cdb);
-										// START STOP UNIT command
+										// START STOP UNIT コマンド
 	BOOL FASTCALL SendDiag(const DWORD *cdb);
-										// SEND DIAGNOSTIC command
+										// SEND DIAGNOSTIC コマンド
 	BOOL FASTCALL Removal(const DWORD *cdb);
-										// PREVENT/ALLOW MEDIUM REMOVAL command
+										// PREVENT/ALLOW MEDIUM REMOVAL コマンド
 	int FASTCALL ReadCapacity(const DWORD *cdb, BYTE *buf);
-										// READ CAPACITY command
+										// READ CAPACITY コマンド
 	BOOL FASTCALL Verify(const DWORD *cdb);
-										// VERIFY command
+										// VERIFY コマンド
 	virtual int FASTCALL ReadToc(const DWORD *cdb, BYTE *buf);
-										// READ TOC command
+										// READ TOC コマンド
 	virtual BOOL FASTCALL PlayAudio(const DWORD *cdb);
-										// PLAY AUDIO command
+										// PLAY AUDIO コマンド
 	virtual BOOL FASTCALL PlayAudioMSF(const DWORD *cdb);
-										// PLAY AUDIO MSF command
+										// PLAY AUDIO MSF コマンド
 	virtual BOOL FASTCALL PlayAudioTrack(const DWORD *cdb);
-										// PLAY AUDIO TRACK command
+										// PLAY AUDIO TRACK コマンド
 	void FASTCALL InvalidCmd()			{ disk.code = DISK_INVALIDCMD; }
-										// unsupported command
+										// 未サポートコマンド
 
 protected:
-	// sub-processing
+	// サブ処理
 	int FASTCALL AddError(BOOL change, BYTE *buf);
-										// add error page
+										// エラーページ追加
 	int FASTCALL AddFormat(BOOL change, BYTE *buf);
-										// add format page
+										// フォーマットページ追加
 	int FASTCALL AddOpt(BOOL change, BYTE *buf);
-										// add optical page
+										// オプティカルページ追加
 	int FASTCALL AddCache(BOOL change, BYTE *buf);
-										// add cache page
+										// キャッシュページ追加
 	int FASTCALL AddCDROM(BOOL change, BYTE *buf);
-										// add CD-ROM page
+										// CD-ROM ページ追加
 	int FASTCALL AddCDDA(BOOL change, BYTE *buf);
-										// add CD-DA page
+										// CD-DA ページ追加
 	BOOL FASTCALL CheckReady();
-										// ready check
+										// レディチェック
 
-	// internal data
+	// 内部データ
 	disk_t disk;
-										// disk internal data
+										// ディスク内部データ
 	Device *ctrl;
-										// controller device
+										// コントローラデバイス
 	Filepath diskpath;
-										// path (for GetPath)
+										// パス (GetPath 用)
 };
 
 //===========================================================================
 //
-//	SASI hard disk
+//	SASI ハードディスク
 //
 //===========================================================================
 class SASIHD : public Disk
 {
 public:
-	// basic functions
+	// 基本ファンクション
 	SASIHD(Device *dev);
-										// constructor
+										// コンストラクタ
 	BOOL FASTCALL Open(const Filepath& path);
-										// open
+										// オープン
 
-	// media operations
+	// メディア操作
 	void FASTCALL Reset();
-										// device reset
+										// デバイスリセット
 
-	// commands
+	// コマンド
 	int FASTCALL RequestSense(const DWORD *cdb, BYTE *buf);
-										// REQUEST SENSE command
+										// REQUEST SENSE コマンド
 };
 
 //===========================================================================
 //
-//	SCSI hard disk
+//	SCSI ハードディスク
 //
 //===========================================================================
 class SCSIHD : public Disk
 {
 public:
-	// basic functions
+	// 基本ファンクション
 	SCSIHD(Device *dev);
-										// constructor
+										// コンストラクタ
 	BOOL FASTCALL Open(const Filepath& path);
-										// open
+										// オープン
 
-	// commands
+	// コマンド
 	int FASTCALL Inquiry(const DWORD *cdb, BYTE *buf);
-										// INQUIRY command
+										// INQUIRY コマンド
 };
 
 //===========================================================================
 //
-//	SCSI magneto-optical disk (P668)
+//	SCSI 光磁気ディスク (P668)
 //
-//	Ported from XM6:vm/disk.cpp:2117-2316. Load() is intentionally omitted:
-//	MX's SCSI state save/load path (SCSI::Save/Load in scsi_spc.cpp) is a stub
-//	and is not wired, and SCSIHD above likewise has no Load(). When a future
-//	cycle wires SCSI state save/load, add Load() to SCSIHD and SCSIMO together.
+//	XM6:vm/disk.cpp:2117-2316 から移植。Load() は意図的に省略している:
+//	MX の SCSI 状態セーブ/ロード経路 (scsi_spc.cpp の SCSI::Save/Load) はスタブで
+//	未配線であり、上の SCSIHD も同様に Load() を持たない。将来のサイクルで SCSI
+//	状態のセーブ/ロードを配線する際は、SCSIHD と SCSIMO へ Load() をまとめて追加すること。
 //
 //===========================================================================
 class SCSIMO : public Disk
 {
 public:
 	SCSIMO(Device *dev);
-										// constructor
+										// コンストラクタ
 	BOOL FASTCALL Open(const Filepath& path, BOOL attn = TRUE);
-										// open
+										// オープン
 
-	// commands
+	// コマンド
 	int FASTCALL Inquiry(const DWORD *cdb, BYTE *buf);
-										// INQUIRY command
+										// INQUIRY コマンド
 };
 
 //===========================================================================
 //
-//	CD-ROM track (P676)
+//	CD-ROM トラック (P676)
 //
-//	Ported from XM6:vm/disk.h:397-445. Comments translated to English to
-//	match the rest of this header; declarations unchanged.
+//	XM6:vm/disk.h:397-445 から移植。コメントはこのヘッダの他の部分と表記を
+//	揃えている (宣言は無変更)。
 //
 //===========================================================================
 class CDTrack
 {
 public:
-	// basic functions
+	// 基本ファンクション
 	CDTrack(SCSICD *scsicd);
-										// constructor
+										// コンストラクタ
 	virtual ~CDTrack();
-										// destructor
+										// デストラクタ
 	BOOL FASTCALL Init(int track, DWORD first, DWORD last);
-										// initialize
+										// 初期化
 
-	// properties
+	// プロパティ
 	void FASTCALL SetPath(BOOL cdda, const Filepath& path);
-										// set path
+										// パス設定
 	void FASTCALL GetPath(Filepath& path) const;
-										// get path
+										// パス取得
 	void FASTCALL AddIndex(int index, DWORD lba);
-										// add index
+										// インデックス追加
 	DWORD FASTCALL GetFirst() const;
-										// get start LBA
+										// 開始 LBA 取得
 	DWORD FASTCALL GetLast() const;
-										// get end LBA
+										// 終了 LBA 取得
 	DWORD FASTCALL GetBlocks() const;
-										// get number of blocks
+										// ブロック数取得
 	int FASTCALL GetTrackNo() const;
-										// get track number
+										// トラック番号取得
 	BOOL FASTCALL IsValid(DWORD lba) const;
-										// is this LBA valid
+										// この LBA は有効か
 	BOOL FASTCALL IsAudio() const;
-										// is this an audio track
+										// オーディオトラックか
 
 private:
 	SCSICD *cdrom;
-										// parent device
+										// 親デバイス
 	BOOL valid;
-										// valid track
+										// 有効なトラック
 	int track_no;
-										// track number
+										// トラック番号
 	DWORD first_lba;
-										// start LBA
+										// 開始 LBA
 	DWORD last_lba;
-										// end LBA
+										// 終了 LBA
 	BOOL audio;
-										// audio-track flag
+										// オーディオトラックフラグ
 	BOOL raw;
-										// RAW-data flag
+										// RAW データフラグ
 	Filepath imgpath;
-										// image file path
+										// イメージファイルパス
 };
 
 //===========================================================================
 //
-//	CD-DA buffer — excluded (#if 0).
+//	CD-DA バッファ — 除外 (#if 0)。
 //
-//	Upstream XM6 itself seals the class body (XM6:vm/disk.h:460-497) and MX
-//	implements no CD-DA path (P676), so the seal is kept to stay faithful to
-//	upstream rather than deleting the class outright.
+//	上流 XM6 自身がクラス本体を封印しており (XM6:vm/disk.h:460-497)、MX も
+//	CD-DA 経路を実装していない (P676) ため、クラスを丸ごと削除するのではなく、
+//	上流への忠実さを保つために封印をそのまま残している。
 //
 //===========================================================================
 #if 0
@@ -539,78 +539,78 @@ public:
 	CDDABuf();
 	virtual ~CDDABuf();
 };
-#endif	// 0 (CD-DA buffer excluded)
+#endif	// 0 (CD-DA バッファは除外)
 
 //===========================================================================
 //
 //	SCSI CD-ROM (P676)
 //
-//	Ported from XM6:vm/disk.h:505-588. Load() and the CD-DA members
+//	XM6:vm/disk.h:505-588 から移植。Load() と CD-DA 関連メンバ
 //	(PlayAudio / PlayAudioMSF / PlayAudioTrack / NextFrame / GetBuf /
-//	MSFtoLBA) are intentionally not declared: their implementations are not
-//	ported. Load() follows SCSIHD / SCSIMO, which likewise have no Load()
-//	because MX's SCSI state save/load path is a stub. The CD-DA methods are
-//	dead in upstream XM6 as well (PlayAudio* only set DISK_INVALIDCDB and
-//	GetBuf is an empty function), and the Disk base class already returns
-//	INVALIDCMD for them, so nothing is left uncovered.
-//	The audioindex / frame members ARE kept: the constructor initializes them
-//	and is ported byte-for-byte from XM6.
+//	MSFtoLBA) は意図的に宣言していない: それらの実装は移植していないため。
+//	Load() は SCSIHD / SCSIMO に倣っている (MX の SCSI 状態セーブ/ロード経路が
+//	スタブなので、両クラスとも同様に Load() を持たない)。CD-DA 系メソッドは上流
+//	XM6 でも死んだコードであり (PlayAudio* は DISK_INVALIDCDB を設定するだけで、
+//	GetBuf は空関数)、Disk 基底クラスがそれらに対して既に INVALIDCMD を返すので、
+//	カバーされずに残るものは無い。
+//	一方 audioindex / frame メンバは残している: コンストラクタがそれらを初期化
+//	しており、そのコンストラクタは XM6 からバイト単位で忠実に移植しているため。
 //
 //===========================================================================
 class SCSICD : public Disk
 {
 public:
-	// number of tracks
+	// トラック数
 	enum {
-		TrackMax = 96					// maximum number of tracks
+		TrackMax = 96					// 最大トラック数
 	};
 
 public:
-	// basic functions
+	// 基本ファンクション
 	SCSICD(Device *dev);
-										// constructor
+										// コンストラクタ
 	virtual ~SCSICD();
-										// destructor
+										// デストラクタ
 	BOOL FASTCALL Open(const Filepath& path, BOOL attn = TRUE);
-										// open
+										// オープン
 
-	// commands
+	// コマンド
 	int FASTCALL Inquiry(const DWORD *cdb, BYTE *buf);
-										// INQUIRY command
+										// INQUIRY コマンド
 	int FASTCALL Read(BYTE *buf, int block);
-										// READ command
+										// READ コマンド
 	int FASTCALL ReadToc(const DWORD *cdb, BYTE *buf);
-										// READ TOC command
+										// READ TOC コマンド
 
-	// LBA-MSF conversion
+	// LBA-MSF 変換
 	void FASTCALL LBAtoMSF(DWORD lba, BYTE *msf) const;
-										// LBA -> MSF conversion
+										// LBA -> MSF 変換
 
 private:
-	// open
+	// オープン
 	BOOL FASTCALL OpenCue(const Filepath& path);
-										// open (CUE)
+										// オープン (CUE)
 	BOOL FASTCALL OpenIso(const Filepath& path);
-										// open (ISO)
+										// オープン (ISO)
 	BOOL rawfile;
-										// RAW flag
+										// RAW フラグ
 
-	// track management
+	// トラック管理
 	void FASTCALL ClearTrack();
-										// clear tracks
+										// トラッククリア
 	int FASTCALL SearchTrack(DWORD lba) const;
-										// search track
+										// トラック検索
 	CDTrack* track[TrackMax];
-										// track objects
+										// トラックオブジェクト
 	int tracks;
-										// number of valid track objects
+										// 有効なトラックオブジェクト数
 	int dataindex;
-										// current data track
+										// カレントデータトラック
 	int audioindex;
-										// current audio track
+										// カレントオーディオトラック
 
 	int frame;
-										// frame number
+										// フレーム番号
 };
 
 #endif	// scsi_disk_h
