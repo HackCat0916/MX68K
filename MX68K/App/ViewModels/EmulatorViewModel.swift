@@ -205,17 +205,17 @@ class EmulatorViewModel: ObservableObject {
     /// 永続化するために発火する(path 空 = 取り外し)。onMOChanged と対称。
     var onCDChanged: ((String) -> Void)?
 
-    /// P53 — weak singleton so `MX68KAppDelegate.applicationWillTerminate`
-    /// can locate the running ViewModel to call `stopEmulation()` from
-    /// outside the SwiftUI environment. `weak` prevents retain cycles and
-    /// extension of lifetime; becomes nil on deinit so the AppDelegate
-    /// gracefully no-ops if the VM has been torn down.
-    /// See /tmp/mx68k_P53_plan.md §3.4 / Edit E.
+    /// P53 — weak なシングルトン。`MX68KAppDelegate.applicationWillTerminate` が
+    /// SwiftUI の環境の外から実行中の ViewModel を見つけ、`stopEmulation()` を
+    /// 呼べるようにするためのもの。`weak` にすることで循環参照と寿命の延長を防ぐ。
+    /// deinit 時に nil になるので、VM が既に破棄されていれば AppDelegate 側は
+    /// 何もせず穏当に終わる。
+    /// /tmp/mx68k_P53_plan.md §3.4 / Edit E 参照。
     static weak var shared: EmulatorViewModel?
 
-    /// P53 — new explicit init (Code Review v2 N-4 fix). The class had no
-    /// prior explicit init (Swift synthesised one); @Published defaults
-    /// remain inline. Registers `self` as the weak singleton.
+    /// P53 — 新設した明示的な init(Code Review v2 N-4 の指摘への対応)。このクラスには
+    /// 以前は明示的な init が無かった(Swift が合成していた)。@Published の既定値は
+    /// インラインのまま残す。`self` を weak シングルトンとして登録する。
     init() {
         EmulatorViewModel.shared = self
     }
@@ -278,7 +278,7 @@ class EmulatorViewModel: ObservableObject {
         mx68k_init()
         mx68k_log("[Swift] mx68k_init() returned")
 
-        // P68-g3: mount disks before frame loop so IPLROM sees FDD ready on first boot
+        // P68-g3: 初回起動時に IPLROM が FDD を準備完了と認識できるよう、フレームループより前にディスクをマウントする
         if !fdd0.isEmpty && FileManager.default.fileExists(atPath: fdd0) {
             mountFDD(drive: 0, path: fdd0, writeProtect: config.fdd.fdd0WriteProtect)
         }
@@ -469,7 +469,7 @@ class EmulatorViewModel: ObservableObject {
         mx68k_log("[Swift] startEmulation end")
     }
 
-    // MARK: - Power (P204)
+    // MARK: - 電源 (P204)
 
     /// 電源OFF 押下 — 実機の電源OFF シーケンスを host 側で近似する:
     /// 電源ランプ点滅(遅→速・計 4.0s)+ 画面を 4.0s かけて黒へフェード。
@@ -736,9 +736,9 @@ class EmulatorViewModel: ObservableObject {
     }
 
     func stopEmulation() {
-        // P53 — Swift-layer idempotency (Plan v2 §3.5). Combined with the
-        // C-side `s_p53_shutdown_done` guard, double-call from .onDisappear
-        // + applicationWillTerminate is safe in any order.
+        // P53 — Swift 層での冪等性(Plan v2 §3.5)。C 側の `s_p53_shutdown_done`
+        // ガードと組み合わせることで、.onDisappear と applicationWillTerminate の
+        // 両方から二重に呼ばれても、順序を問わず安全。
         guard isRunning else { return }
         /* P697: 録画中に電源OFF/アプリ終了が来た場合、ここでファイルを閉じておかないと
          * moov atom が書かれず再生できない mp4 が残る。終端処理の完了を(最大 5 秒)
@@ -924,7 +924,7 @@ class EmulatorViewModel: ObservableObject {
         }
     }
 
-    // MARK: - State Save / Load (Phase 2 #4)
+    // MARK: - ステート保存 / 読込 (Phase 2 #4)
 
     /// ステート保存先ディレクトリ ~/Documents/MX68K/states/(無ければ作成)。
     private func statesDirectory() -> URL {
@@ -1140,14 +1140,14 @@ class EmulatorViewModel: ObservableObject {
         alert.runModal()
     }
 
-    // MARK: - Blank image creation
+    // MARK: - 空イメージ作成
     //
     // P578 — P574 の `createBlankFDImage()`(Emulator メニュー直結の FD 専用経路)は
     // ここから撤去した。FD/SASI/SCSI の 3 種は Tools メニュー「イメージ作成」の
     // 専用ダイアログ(`BlankImageDialogs.swift`)へ一本化されており、生成そのものは
     // 従来どおり `BlankImageService` の static 関数が担う(ロジック無変更)。
 
-    // MARK: - Auto-pause (P229)
+    // MARK: - 自動一時停止 (P229)
 
     /// P229 — モーダル UI(設定シート・FDD 選択ダイアログ等)が同時に開放要求
     /// されても安全に扱うための参照カウント。
@@ -1542,11 +1542,12 @@ class EmulatorViewModel: ObservableObject {
                 }
                 setFddPath(drive, (path as NSString).lastPathComponent)
                 onFDDMounted?(drive, path)
-                // P185: only reboot on the INITIAL launch mount (isRunning still false
-                // during startEmulation → the IPL re-reads the disk on reset to boot it).
-                // Runtime mounts (user swapping disks mid-game, isRunning true) do NOT
-                // reset — real hardware doesn't reset on floppy insert, and multi-disk
-                // games swap mid-run; the user resets manually to boot a new disk.
+                // P185: 再起動するのは「起動時の初回」マウントのみ(startEmulation 中は
+                // isRunning がまだ false → リセット時に IPL がディスクを読み直して起動する)。
+                // 実行中のマウント(ユーザーがゲーム途中でディスクを入れ替える、isRunning が
+                // true)ではリセットしない——実機はフロッピー挿入でリセットしないし、複数枚組の
+                // ゲームは実行途中で入れ替える。新しいディスクから起動したい場合はユーザーが
+                // 手動でリセットする。
                 if !isRunning {
                     mx68k_schedule_hard_reset()
                 }
@@ -1808,7 +1809,7 @@ class EmulatorViewModel: ObservableObject {
         }
     }
 
-    // MARK: - SCSI (external CZ-6BS1) — P241 Stage A
+    // MARK: - SCSI (外付け CZ-6BS1) — P241 Stage A
 
     /// 外付け SCSI(CZ-6BS1)ディスクイメージをマウントする(id = SCSI ID 0..6)。
     /// Bridge が Config.SCSIEXHDImage[id] にパスを設定する(次回ブロックアクセスから
@@ -1835,7 +1836,7 @@ class EmulatorViewModel: ObservableObject {
         showTransientMessage(String(localized: "SCSI image ejected (takes effect immediately)"))
     }
 
-    // MARK: - SCSI MO (magneto-optical, ID5 dedicated slot) — P668
+    // MARK: - SCSI MO (光磁気ディスク、ID5 専用スロット) — P668
 
     /// P673 — File メニュー「MO ドライブ」→「挿入…」用。拡張子基準は
     /// SCSISettingsView.browseDiskImage() と同じ(hds/hdf/mos + 汎用 data)。
@@ -1926,7 +1927,7 @@ class EmulatorViewModel: ObservableObject {
         }
     }
 
-    // MARK: - SCSI CD-ROM (ID6 dedicated slot) — P676
+    // MARK: - SCSI CD-ROM (ID6 専用スロット) — P676
 
     /// P676 — File メニュー「CD-ROM ドライブ」→「挿入…」用。拡張子は
     /// `.iso` に限定しない(D-8 再発防止方針 — 実データの検証は Bridge 側
