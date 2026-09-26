@@ -900,7 +900,8 @@ static int s_p35_oob_dump_count = 0;  /* P35-DIAG: SSP範囲外時のダンプ�
  * ログ出力ゲートより手前(=毎フレーム)に行う。P385_ENABLE が 0 の場合は
  * 初期値 0 のまま = 「未計測」。 */
 static int32_t g_p408_clock_slice_snapshot   = 0; /* CLOCK_SLICE(現行値、既定200) */
-static int32_t g_p408_clkdiv_snapshot        = 0; /* clkdiv 生値 */
+static int32_t g_p408_clkdiv_snapshot        = 0; /* clkdiv 生値(P822以降は有理数クロックの分子) */
+static int32_t g_p408_clkden_snapshot        = 0; /* P822: 有理数クロックの分母(16/17MHzのみ1超) */
 static int32_t g_p408_clk_total_snapshot     = 0; /* 1フレームCPU予算 生値(line_budget の分子) */
 static int32_t g_p408_vline_total_snapshot   = 0; /* 走査線数 生値(line_budget の分母) */
 static int32_t g_p408_chunks_last_frame      = 0; /* 直近フレームのチャンク数(毎フレーム更新) */
@@ -3415,6 +3416,18 @@ void mx68k_pump_pending(void) {
     (void)consume_pending_ops();
 }
 
+/* P822 (D-77): クロック設定値 [MHz] を有理数 num/den へ写像する。16/17MHz のみ実機準拠の
+ * 分数値を返し、他は従来通り (n,1)。g_clock_mhz 自体・Swift・config.json・セーブステート・
+ * XVIMode 判定は変更せず、影響はクロック会計2箇所(予算計算・タイマー供給)と status 表示に限る。 */
+static inline void p822_clock_ratio(int mhz, int32_t *num, int32_t *den) {
+    switch (mhz) {
+        case 16: *num = 50; *den = 3; break;   /* 16.667MHz: [reference book: Outside X68000 p.42] + [XEiJ] */
+        case 17: *num = 87; *den = 5; break;   /* 17.4MHz: [XM6 TypeG の表示のみ]、確度中〜低 */
+        /* mhz<=0 の異常値は従来通り整数 16 扱い(保守的側)。正常系の 16 は上の case で処理される。 */
+        default: *num = (mhz > 0 ? mhz : 16); *den = 1; break;
+    }
+}
+
 void mx68k_run_frame(void) {
     if (consume_pending_ops()) return;
 
@@ -3717,8 +3730,12 @@ void mx68k_run_frame(void) {
      * clk_total*10/clkdiv = base は不変なので、MFP/RTC/OPM/ADPCM の tick レートは変わらない。
      * clkdiv は必ず > 0 — g_clock_mhz==0 だと usedclk = ClkUsed/clkdiv がゼロ除算になる
      * (mx68k_set_clock_mhz にクランプは無く、Swift の config が 0 を渡しうる)。crash-0 はマージゲート。 */
-    int32_t clkdiv = (g_clock_mhz > 0 ? g_clock_mhz : 16);      /* P180: 以前は *5。16MHz -> 16 */
-    clk_total = (int32_t)(((int64_t)clk_total * clkdiv) / 10);  /* CPU 予算 = base*(clock/10) */
+    /* P822 (D-77): クロックを有理数 clk_num/clk_den [MHz] で扱う。16/17MHz のみ
+     * 実機準拠の 50/3・87/5、他は従来通り (n,1) で式はビット一致。clk_den は常に >= 1。 */
+    int32_t clk_num, clk_den;
+    p822_clock_ratio(g_clock_mhz, &clk_num, &clk_den);
+    int32_t clkdiv = clk_num;   /* 表示・診断ログ専用の分子エイリアス */
+    clk_total = (int32_t)(((int64_t)clk_total * clk_num) / (10 * (int64_t)clk_den));  /* CPU 予算 = base*(clock/10) */
 
     /* P641: clk_total と対になる走査線数。CRTC_GetFrameClocks() は、ゲストが
      * CRTC レジスタを順に書き換えている途中(組合せが一時的に不正)でも直前の
@@ -4137,9 +4154,11 @@ void mx68k_run_frame(void) {
          * P808: OFF 時(既定)は MPX68K との一致のため要求値 n で進める。ON 時
          * (MX68K_DEBUG_OVERSHOOT_FIX=1)は px68k本家 x11/winx68k.cpp:428-437 方式で
          * 実績値(下限 n)の adv で進め、フレーム間で超過を持ち越す。 */
-        ClkUsed += adv * 10;
-        int32_t usedclk = ClkUsed / clkdiv;
-        ClkUsed -= usedclk * clkdiv;
+        /* P822 (D-77): usedclk = adv*10/(clk_num/clk_den)。den=1 なら従来式と同一。
+         * adv*10*clk_den は CLOCK_SLICE 上書き上限 1,000,000 × 10 × 5 = 5e7 で int32 に収まる。 */
+        ClkUsed += adv * 10 * clk_den;
+        int32_t usedclk = ClkUsed / clk_num;
+        ClkUsed -= usedclk * clk_num;
         line_usedclk += usedclk;
         MFP_Timer(usedclk);   /* per-chunk 供給 → IRQ/タイマー粒度 ≤1500 cyc */
 #if P404_ENABLE
@@ -4551,6 +4570,7 @@ void mx68k_run_frame(void) {
      * (P382/P383 の状態スタンプ鮮度バグと同型の再発を避けるため)。 */
     g_p408_clock_slice_snapshot = clock_slice;   /* P805: 実効値(既定では CLOCK_SLICE と同値) */
     g_p408_clkdiv_snapshot      = clkdiv;
+    g_p408_clkden_snapshot      = clk_den;
     g_p408_clk_total_snapshot   = clk_total;
     g_p408_vline_total_snapshot = vline_total_val;
     g_p408_chunks_last_frame    = p385_chunks;
@@ -9610,6 +9630,7 @@ void mx68k_get_status(MX68KStatus* status) {
      * 最新スナップショットをそのまま渡す。 */
     status->clock_slice       = g_p408_clock_slice_snapshot;
     status->clkdiv            = g_p408_clkdiv_snapshot;
+    status->clkden            = g_p408_clkden_snapshot;
     status->clk_total         = g_p408_clk_total_snapshot;
     status->vline_total       = g_p408_vline_total_snapshot;
     status->chunks_last_frame = g_p408_chunks_last_frame;

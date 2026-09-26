@@ -67,7 +67,8 @@ struct CPUMonitorView: View {
                     .foregroundColor(.secondary)
                 HStack(spacing: 24) {
                     Text("CLOCK_SLICE: \(Int(s.clock_slice))")
-                    Text("clkdiv: \(Int(s.clkdiv))")
+                    // P822: クロックは有理数(分子/分母)。16/17MHz のみ分母が 1 を超える。
+                    Text("clkdiv: \(Int(s.clkdiv))/\(Int(s.clkden))")
                 }
                 HStack(spacing: 24) {
                     Text("line_budget: \(lineBudgetText)")

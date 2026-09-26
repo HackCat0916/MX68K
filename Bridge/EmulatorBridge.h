@@ -628,7 +628,8 @@ typedef struct {
     /* P408: 実行粒度(CLOCK_SLICE)の可視化。既存 [P385-CHUNK] 計測値の読み取り専用
      * 横流し。末尾追加のため既存の初期化コードは無改修。 */
     int32_t  clock_slice;        // CLOCK_SLICE 現行値
-    int32_t  clkdiv;             // クロック係数 生値
+    int32_t  clkdiv;             // クロック係数 生値(P822以降は有理数クロックの分子)
+    int32_t  clkden;             // クロック係数 分母(P822、常に1以上、16/17MHzのみ1超。未計測時0)
     int32_t  clk_total;          // 1フレームCPU予算 生値(line_budget の分子)
     int32_t  vline_total;        // 走査線数 生値(line_budget の分母)
     int32_t  chunks_last_frame;  // 直近フレームのチャンク数
