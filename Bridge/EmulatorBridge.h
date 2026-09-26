@@ -3635,6 +3635,18 @@ void p492_io_histogram_dump(void);
 #endif
 
 /* ====================================================================
+ *  P806 (D-14/D-15): I/O 空間アクセスのウェイトステート(GVRAM/TVRAM/CRTC/MFP/FDC)。
+ *  ウェイト注入本体は m68000_bridge.c の p806_io_wait()(ガード無し=本体機能、
+ *  倍率は環境変数 MX68K_DEBUG_IOWAIT=0|1|2、既定 1)。
+ *  P806_IOWAIT_LOG は 60 フレームごとの [P806-IOWAIT] ログ出力のみを制御する。
+ * ==================================================================== */
+#ifndef P806_IOWAIT_LOG
+#define P806_IOWAIT_LOG        1   /* D-14/D-15調査用[P806-IOWAIT]ログ */
+#endif
+/* m68000_bridge.c 定義。mx68k_run_frame() の P805 集計ブロック直後から毎フレーム呼ぶ。 */
+void p806_io_wait_frame_end(int frame_num, int clk_total, int total_executed);
+
+/* ====================================================================
  *  P602 (D-57): 同人版ソーサリアンが MC68040 搭載と誤検出される件の
  *  実行時診断プローブ群 [P602-WORKAREA] / [P602-EXCHIST] /
  *  [P602-BRFF] / [P602-IOHIST]。

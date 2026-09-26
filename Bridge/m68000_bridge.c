@@ -22,6 +22,7 @@
 #include <string.h>                    /* P47-D: リセット用の memset */
 #include <stdio.h>                     /* P214-R2: プローブの1行サマリ用 snprintf */
 #include <time.h>                      /* P518: p424_now_ns() 用の clock_gettime/struct timespec */
+#include <stdlib.h>                    /* P806: MX68K_DEBUG_IOWAIT の getenv() */
 
 extern uint8_t IRQH_IRQ[8];  /* P42-DIAG: irqh.c で定義、ヘッダ宣言なし */
 /* P483: Mercury Unit の配線確定値(EmulatorBridge.c 定義)。
@@ -408,6 +409,72 @@ void p492_io_histogram_dump(void) {
     p492b_dmac_dump(frame_no);
 }
 #endif /* P492_ENABLE */
+
+/* ====================================================================
+ *  P806 (D-14/D-15 部分修正候補): I/O 空間アクセスのウェイトステート注入。
+ *
+ *  XM6 mainline (v2.06) の各デバイス ReadByte/ReadWord/WriteByte/WriteWord が
+ *  scheduler->Wait(N) で差し引いている CPU サイクルを、c68k のメモリコールバック
+ *  (trace_Memory_ReadB/ReadW/WriteB/WriteW) の冒頭で C68k_Add_Cycle() により
+ *  同じく差し引く。対象は 5 デバイスのみ(Fix Plan §記号表 S-1〜S-10):
+ *    GVRAM $C00000-$DFFFFF : 0/1 交互(平均 0.5)       XM6 vm/gvram.cpp:1445 他
+ *    TVRAM $E00000-$E7FFFF : 4 回中 3 回 1(平均 0.75) XM6 vm/tvram.cpp:785 他
+ *    CRTC  $E80000-$E81FFF : Byte=1 / Word=2           XM6 vm/crtc.cpp:318,375 + device.cpp:224-266
+ *    MFP   $E88000-$E89FFF : 奇数Byte/Word=3、偶数Byte=0 XM6 vm/mfp.cpp:297-300,443-454
+ *    FDC   $E94000-$E95FFF : 奇数Byte/Word=1、偶数Byte=0 XM6 vm/fdc.cpp:373-383,481-489
+ *  倍率 mult(S-14)は環境変数 MX68K_DEBUG_IOWAIT=0|1|2 で切替(既定 1)。
+ *  mult=0 でも gvcount/tvcount のトグルと acc/wait の計上は同じ規則で進める
+ *  (OFF 時の total_wait が「差し引かれなかったサイクル数」になる)。
+ *  C68k_Add_Cycle は C68K_RUNNING 中のみ有効(Core:c68k/c68k.c:142-145)なので、
+ *  C68k_Exec 外からの呼出し(モニタ読出し等)では無効=安全。
+ *  ウェイト注入本体は #if ガードしない(本体機能)。ログ出力のみ P806_IOWAIT_LOG で制御。
+ * ==================================================================== */
+static int      s_p806_iowait_mult = 1;      /* 環境変数 MX68K_DEBUG_IOWAIT=0|1|2(S-14)、既定1 */
+static uint32_t s_p806_gvcount = 0;          /* XM6 gvcount 相当(0/1交互) */
+static uint32_t s_p806_tvcount = 0;          /* XM6 tvcount 相当(&3 判定) */
+/* ログ用窓カウンタ(60 フレーム窓、ダンプ後リセット)。*_wait は mult を掛ける前の w の合計。 */
+static uint32_t s_p806_gv_acc = 0,   s_p806_gv_wait = 0;
+static uint32_t s_p806_tv_acc = 0,   s_p806_tv_wait = 0;
+static uint32_t s_p806_crtc_acc = 0, s_p806_crtc_wait = 0;
+static uint32_t s_p806_mfp_acc = 0,  s_p806_mfp_wait = 0;
+static uint32_t s_p806_fdc_acc = 0,  s_p806_fdc_wait = 0;
+static unsigned long long s_p806_total_wait = 0;
+
+static inline void p806_io_wait(uint32_t addr, int is_word) {
+    uint32_t a = addr & 0x00FFFFFFu;
+    uint32_t w;
+    /* 主記憶・ROM 等の高頻度経路は比較 1 回で早期脱出する。 */
+    if (a < 0xC00000u) return;
+    if (a >= 0xE96000u) return;
+    if (a <= 0xDFFFFFu) {
+        /* S-6 GVRAM: w = gvcount; gvcount ^= 1 */
+        w = s_p806_gvcount;
+        s_p806_gvcount ^= 1u;
+        s_p806_gv_acc++;  s_p806_gv_wait += w;
+    } else if (a >= 0xE00000u && a <= 0xE7FFFFu) {
+        /* S-7 TVRAM: w = ((++tvcount) & 3) ? 1 : 0 */
+        w = ((++s_p806_tvcount) & 3u) ? 1u : 0u;
+        s_p806_tv_acc++;  s_p806_tv_wait += w;
+    } else if (a >= 0xE80000u && a <= 0xE81FFFu) {
+        /* S-8 CRTC: w = is_word ? 2 : 1 */
+        w = is_word ? 2u : 1u;
+        s_p806_crtc_acc++;  s_p806_crtc_wait += w;
+    } else if (a >= 0xE88000u && a <= 0xE89FFFu) {
+        /* S-9 MFP: w = (is_word || (a & 1)) ? 3 : 0(偶数 Byte はデコードされずウェイト無し) */
+        w = (is_word || (a & 1u)) ? 3u : 0u;
+        s_p806_mfp_acc++;  s_p806_mfp_wait += w;
+    } else if (a >= 0xE94000u && a <= 0xE95FFFu) {
+        /* S-10 FDC: w = (is_word || (a & 1)) ? 1 : 0(偶数 Byte はデコードされずウェイト無し) */
+        w = (is_word || (a & 1u)) ? 1u : 0u;
+        s_p806_fdc_acc++;  s_p806_fdc_wait += w;
+    } else {
+        return;   /* 対象 5 デバイス以外(VC/DMAC/RTC 等)はスコープ外(残留リスク R-5) */
+    }
+    s_p806_total_wait += w;
+    if (w > 0 && s_p806_iowait_mult > 0) {
+        C68k_Add_Cycle(&C68K, (int32_t)(w * (uint32_t)s_p806_iowait_mult));
+    }
+}
 
 /* ====================================================================
  *  P634 (D-43): Mercury Unit の LR クロックを「観測経路のみ」自走化する。
@@ -1602,7 +1669,7 @@ static unsigned s_p221d_n = 0;   /* プローブ行カウンタ (上限 8) */
  * クロックから導出されるようになった (EmulatorBridge.c の p270_derive_xvimode)
  * 時点で廃止された。10MHz 経路は現在、通常の clock=10 経路で到達可能であり、
  * その到達性確認は P221B_PROBE が担う。 */
-#define P221_PROBE 0
+#define P221_PROBE 1   /* P806: R-2(IPLROM クロック判定 $CB6)の検出用に有効化 */
 
 #if P221_PROBE
 /* (a) $E88001 GPIP ポーリング状態。"バースト" = 読出し元が $E88001 に留まって
@@ -24200,6 +24267,8 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
 #if P492_ENABLE
     p492_io_histogram_note(addr, 0);
 #endif
+    /* P806: I/O ウェイト注入(Byte)。addr は未マスクだが関数内で 24bit マスクする。 */
+    p806_io_wait(addr, 0);
 #if P602_ENABLE
     /* P602 (D-57) プローブ4 + プローブ3(a)。観測のみ、返却値は不変。 */
     p602_io_read_note(addr, 1);
@@ -24997,6 +25066,8 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
 #if P492_ENABLE
     p492_io_histogram_note(addr, 1);
 #endif
+    /* P806: I/O ウェイト注入(Word)。addr は関数冒頭で 24bit マスク済み。 */
+    p806_io_wait(addr, 1);
 #if P602_ENABLE
     /* P602 (D-57) プローブ4 + プローブ3(a) + プローブ2。いずれも観測のみで
      * 返却値・制御フローは不変。プローブ2 のゲートは既存 CP-R-1/P91 と同一条件
@@ -26774,6 +26845,8 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
         p523_record_run_start();
     }
 #endif
+    /* P806: I/O ウェイト注入(Byte)。addr は未マスクだが関数内で 24bit マスクする。 */
+    p806_io_wait(addr, 0);
 #if P602_ENABLE
     /* P602 (D-57) プローブ1 + プローブ3(a)。実書込みの前に呼ぶので旧値が読める。
      * 観測のみ —— val も addr も改変せず、書込み自体には一切干渉しない。 */
@@ -27573,6 +27646,8 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
         p523_record_run_start();
     }
 #endif
+    /* P806: I/O ウェイト注入(Word)。addr は関数冒頭で 24bit マスク済み。 */
+    p806_io_wait(addr, 1);
 #if P602_ENABLE
     /* P602 (D-57) プローブ1 + プローブ3(a)。実書込みの前に呼ぶので旧値が読める。
      * word 書込みは $0CBF を跨いで $0CBC-$0CBF に触れる場合も拾う。観測のみ。 */
@@ -29587,6 +29662,75 @@ static void scsi_in_fetch_overlay_apply(void)
  * 512KB)、宣言は Core/px68k/x68k/gvram.h:6。Core は一切改変しない。 */
 extern uint8_t GVRAM[];
 
+/* P806: mx68k_run_frame() の P805 集計ブロック直後から毎フレーム呼ばれる。
+ * clk_total / total_executed を 60 フレーム窓で累積し、frame_num % 60 == 0 で
+ * [P806-IOWAIT] を 1 行出力して窓カウンタをリセットする(比は出さず生値のみ)。
+ * pc は窓末フレームのゲスト PC(ブート中か si 実行中かを標本自身で判別するため)。
+ * ログ出力は P806_IOWAIT_LOG でガード。ウェイト注入本体(p806_io_wait)は無関係。 */
+void p806_io_wait_frame_end(int frame_num, int clk_total, int total_executed) {
+#if P806_IOWAIT_LOG
+    static unsigned long long s_clk_total_sum = 0;
+    static unsigned long long s_executed_sum  = 0;
+    static unsigned int       s_frames        = 0;
+    s_clk_total_sum += (unsigned long long)(clk_total > 0 ? clk_total : 0);
+    s_executed_sum  += (unsigned long long)(total_executed > 0 ? total_executed : 0);
+    s_frames++;
+    if ((frame_num % 60) == 0) {
+        debug_log("[P806-IOWAIT] f=%d frames=%u mult=%d pc=%06x clk_total_sum=%llu executed_sum=%llu "
+                  "gv_acc=%u gv_wait=%u tv_acc=%u tv_wait=%u crtc_acc=%u crtc_wait=%u "
+                  "mfp_acc=%u mfp_wait=%u fdc_acc=%u fdc_wait=%u total_wait=%llu\n",
+                  frame_num, s_frames, s_p806_iowait_mult, (unsigned)MX68KQ_GUEST_PC(),
+                  s_clk_total_sum, s_executed_sum,
+                  s_p806_gv_acc, s_p806_gv_wait, s_p806_tv_acc, s_p806_tv_wait,
+                  s_p806_crtc_acc, s_p806_crtc_wait, s_p806_mfp_acc, s_p806_mfp_wait,
+                  s_p806_fdc_acc, s_p806_fdc_wait, s_p806_total_wait);
+        s_clk_total_sum = 0;
+        s_executed_sum  = 0;
+        s_frames        = 0;
+        s_p806_gv_acc = s_p806_gv_wait = 0;
+        s_p806_tv_acc = s_p806_tv_wait = 0;
+        s_p806_crtc_acc = s_p806_crtc_wait = 0;
+        s_p806_mfp_acc = s_p806_mfp_wait = 0;
+        s_p806_fdc_acc = s_p806_fdc_wait = 0;
+        s_p806_total_wait = 0;
+    }
+#else
+    (void)frame_num; (void)clk_total; (void)total_executed;
+#endif
+}
+
+/* P806: 環境変数 MX68K_DEBUG_IOWAIT を読み、文字列 "0"/"1"/"2" と完全一致するときだけ
+ * その値を倍率とする(未設定・空文字・不正値は既定 1。不正値は rejected を出す——
+ * P805 の CLOCK_SLICE オーバーライドと同じ流儀)。トグル/カウンタを 0 に戻す
+ * (XM6 の Reset 時 gvcount/tvcount=0 に対応)。無出力を「未到達」と区別するため
+ * 未設定時も 1 行出す。 */
+static void p806_io_wait_init(void) {
+    const char *env = getenv("MX68K_DEBUG_IOWAIT");
+    s_p806_iowait_mult = 1;
+    if (env != NULL && env[0] != '\0') {
+        if (strcmp(env, "0") == 0)      s_p806_iowait_mult = 0;
+        else if (strcmp(env, "1") == 0) s_p806_iowait_mult = 1;
+        else if (strcmp(env, "2") == 0) s_p806_iowait_mult = 2;
+        else {
+            debug_log("[P806-IOWAIT-CFG] env=\"%s\" rejected -> mult=%d (default)\n",
+                      env, s_p806_iowait_mult);
+        }
+    }
+    s_p806_gvcount = 0;
+    s_p806_tvcount = 0;
+    s_p806_gv_acc = s_p806_gv_wait = 0;
+    s_p806_tv_acc = s_p806_tv_wait = 0;
+    s_p806_crtc_acc = s_p806_crtc_wait = 0;
+    s_p806_mfp_acc = s_p806_mfp_wait = 0;
+    s_p806_fdc_acc = s_p806_fdc_wait = 0;
+    s_p806_total_wait = 0;
+    if (env != NULL) {
+        debug_log("[P806-IOWAIT-CFG] env=\"%s\" mult=%d\n", env, s_p806_iowait_mult);
+    } else {
+        debug_log("[P806-IOWAIT-CFG] env=(unset) mult=%d\n", s_p806_iowait_mult);
+    }
+}
+
 /*--------------------------------------------------------
 	CPU初期化
 --------------------------------------------------------*/
@@ -29594,6 +29738,9 @@ static void c68k_init(void)
 {
     /* P47-D-DIAG-F: IRQ 受理コールバックを自前のラッパへ振り向ける。 */
     C68k_Init(&C68K, mx68k_diag_irqh_callback);
+
+    /* P806: I/O ウェイト倍率の読込とトグル/カウンタのリセット。 */
+    p806_io_wait_init();
 
     C68k_Set_ReadB(&C68K, trace_Memory_ReadB);
     C68k_Set_ReadW(&C68K, trace_Memory_ReadW);
