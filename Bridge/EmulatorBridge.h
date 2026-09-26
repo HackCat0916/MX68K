@@ -3647,6 +3647,19 @@ void p492_io_histogram_dump(void);
 void p806_io_wait_frame_end(int frame_num, int clk_total, int total_executed);
 
 /* ====================================================================
+ *  P808 (D-15): 命令境界オーバーシュート補正の診断プローブ群
+ *  [P808-KEY] / [P808-CHUNKHIST] / [P808-CAL](いずれもログ出力のみ、挙動不変)。
+ *  補正本体は環境変数 MX68K_DEBUG_OVERSHOOT_FIX=1 のときのみ有効(既定 0 = 無効、
+ *  本ガードとは独立)。[P808-CFG] は本ガードと無関係に常に 1 行出る。
+ * ==================================================================== */
+#ifndef P808_ENABLE
+#define P808_ENABLE            1   /* D-15調査用[P808-KEY]/[P808-CHUNKHIST]/[P808-CAL]プローブ */
+#endif
+/* m68000_bridge.c 定義。[P806-IOWAIT] の pc= と同じ取得法(MX68KQ_GUEST_PC())で
+ * ゲスト PC を返す。[P808-CHUNKHIST] の pc= 専用(読取りのみ)。 */
+uint32_t p808_guest_pc(void);
+
+/* ====================================================================
  *  P602 (D-57): 同人版ソーサリアンが MC68040 搭載と誤検出される件の
  *  実行時診断プローブ群 [P602-WORKAREA] / [P602-EXCHIST] /
  *  [P602-BRFF] / [P602-IOHIST]。

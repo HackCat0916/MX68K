@@ -1449,6 +1449,39 @@ static void p805_load_clock_slice_override(void) {
     }
 }
 
+/* P808 (D-15): 命令境界オーバーシュート補正の有効フラグ(既定 0 = 無効)と、
+ * 前フレーム末の予算超過(負債、≤0)。書込みは mx68k_init() / mx68k_reset_hard() /
+ * mx68k_run_frame() のみ(いずれもエミュレーションを駆動するスレッド上で直列)。
+ * OFF 時は s_p808_carry が常に 0 のままなので、フレームループは従来と同値になる。 */
+static int32_t s_p808_overshoot_fix = 0;
+static int32_t s_p808_carry = 0;
+
+/* P808: 環境変数 MX68K_DEBUG_OVERSHOOT_FIX を読み、10進整数として完全にパースでき
+ * 値がちょうど 1 のときだけ補正を有効にする。未設定・空文字・非数値・末尾ゴミ付き・
+ * 1 以外はすべて 0。毎回 mx68k_init() で再評価し、carry も 0 に戻す(前回値を
+ * 持ち越さない)。「未到達」と区別できるよう、未設定時も 1 行出す。 */
+static void p808_load_overshoot_fix(void) {
+    const char *env = getenv("MX68K_DEBUG_OVERSHOOT_FIX");
+    s_p808_overshoot_fix = 0;
+    s_p808_carry = 0;
+    if (env == NULL || env[0] == '\0') {
+        debug_log("[P808-CFG] overshoot_fix=%d env=(unset)\n", (int)s_p808_overshoot_fix);
+        return;
+    }
+
+    char *end = NULL;
+    errno = 0;
+    long v = strtol(env, &end, 10);
+    if (errno == 0 && end != env && *end == '\0' && v == 1) {
+        s_p808_overshoot_fix = 1;
+        debug_log("[P808-CFG] overshoot_fix=%d env=\"%s\" accepted\n",
+                  (int)s_p808_overshoot_fix, env);
+    } else {
+        debug_log("[P808-CFG] overshoot_fix=%d env=\"%s\" rejected\n",
+                  (int)s_p808_overshoot_fix, env);
+    }
+}
+
 // ---- init / shutdown(初期化 / 終了) ----
 int mx68k_init(void) {
     /* P753: ここにあった debug_log_init() の単独呼出しは削除した。次行の
@@ -1458,6 +1491,9 @@ int mx68k_init(void) {
 
     /* P805: CLOCK_SLICE の診断用上書き(環境変数未設定なら既定値 200 のまま)。 */
     p805_load_clock_slice_override();
+
+    /* P808: 命令境界オーバーシュート補正の診断用有効化(環境変数未設定なら無効=従来挙動)。 */
+    p808_load_overshoot_fix();
 
     /* P633: ここにあった P490 の packetList 付け替え(欠陥 A 対策)は、CoreMIDI
      * 連携層を Bridge/midi_coremidi.c へ移設し、新実装が自前の書込可能バッファを
@@ -1954,6 +1990,11 @@ void mx68k_reset_hard(void) {
     g_mx68k_dbg_bp_skip_once = 0;
     g_mx68k_dbg_stop_reason  = MX68K_DEBUG_STOP_NONE;
     dbg_recalc_active();
+
+    /* P808: CPU リセットでは前フレームの予算超過を持ち越さない。CPU をリセットする
+     * 経路(m68000_reset() の呼出し)は本関数だけで、mx68k_reset_soft() と予約
+     * リセットもここを通る。NMI は時間会計を切らないので対象外。 */
+    s_p808_carry = 0;
 
     /* P146/P221b: Config.XVIMode は MX Bridge では一切初期化されない
      * (winx68k_compat.c の Config={0})ため、明示的に設定する必要がある。ゲストの
@@ -3726,6 +3767,15 @@ void mx68k_run_frame(void) {
 #if P805_ENABLE
     int32_t p805_chunks = 0;   /* このフレームの m68000_execute() 呼出回数 */
 #endif
+#if P808_ENABLE
+    /* P808: [P808-CHUNKHIST] 用のフレームローカル計数(フレーム末で窓累積へ加算)。
+     * バケットは要求値 n で分類: 0 / 1-15 / 16-31 / 32-63 / 64-127 / 128-199 / 200+。
+     * p808_o[] は ex>n のチャンクの超過合計 Σ(ex-n)、p808_under は ex<n のチャンク数、
+     * p808_usum はその Σ(n-ex)。すべて生値の加算のみ(ex・n・adv には触れない)。 */
+    uint32_t p808_c[7] = {0}, p808_o[7] = {0};
+    uint32_t p808_under = 0, p808_usum = 0;
+    uint64_t p808_ex_sum = 0, p808_n_sum = 0, p808_adv_sum = 0;
+#endif
     /* P149: MPX の ClkUsed 余り累積器(winx68k.cpp のグローバル)。static なので
      * ≤clkdiv の余りが chunk・走査線・フレームをまたいで持ち越される — MPX と byte-identical。
      * フレーム毎にリセットしないこと。シングルスレッド(CVDisplayLink のフレームループ)。 */
@@ -3751,10 +3801,14 @@ void mx68k_run_frame(void) {
     /* P153: MPX WinX68k_Exec のフレーム全体シード(winx68k.cpp:386-410)。
      * frame_icount はフレームローカルな予算(MX はフレームをまたぐ ICount を持ち越さず、
      * 旧 clk_per_line*VLINE+remainder と同じく各フレームちょうど clk_total 分走る)。
-     * ループ全体を通じた不変条件: clk_count + frame_icount == clk_total。 */
-    int32_t frame_icount = clk_total;       /* MPX: ICount += clk_total(毎フレーム新規) */
-    ICount = clk_total;                     /* P158: Core のグローバル ICount をミラー(mfp.c H-SYNC hpos = ICount % HSYNC_CLK) */
-    int32_t clk_count = 0;                  /* MPX: clk_count = -ICount_old -> ここでは 0 */
+     * ループ全体を通じた不変条件: clk_count + frame_icount == clk_total。
+     * P808: 補正 ON(MX68K_DEBUG_OVERSHOOT_FIX=1)時のみ、前フレーム末の予算超過
+     * p808_carry(≤0)を持ち越す(px68k本家 x11/winx68k.cpp:350/361 方式)。
+     * OFF 時は s_p808_carry==0 が不変なので p808_carry==0 となり従来と同値。 */
+    int32_t p808_carry = s_p808_overshoot_fix ? s_p808_carry : 0;
+    int32_t frame_icount = clk_total + p808_carry;   /* MPX: ICount += clk_total(毎フレーム新規)/px68k本家 :361 */
+    ICount = frame_icount;                  /* P158: Core のグローバル ICount をミラー(mfp.c H-SYNC hpos = ICount % HSYNC_CLK)。不変条件を保つ */
+    int32_t clk_count = -p808_carry;        /* MPX: clk_count = -ICount_old -> OFF 時は 0(px68k本家 :350) */
     int32_t clk_next  = clk_total / vline_total_val;   /* 最初の走査線境界(vl==0) */
     int32_t clk_line_start = 0;   /* P657: 現在走査線の開始位置(スケール済)。line_len の算出に使う */
     int     hsync     = 1;
@@ -4020,17 +4074,35 @@ void mx68k_run_frame(void) {
          * MFP/RTC にはチャンクごとに clkdiv 正規化済みクロックを渡す。これにより
          * IRQ/タイマーの粒度が MPX と同等になる(c68k は execute 呼出しの境界でのみ
          * IRQ を確認するため)。 */
-        int32_t ex = m68000_execute(n);     /* 実行サイクル数: 記録用のみ */
+        int32_t ex = m68000_execute(n);     /* 実行サイクル数(OFF 時は記録用のみ) */
         total_executed += ex;
+        /* P808: ゲスト時間を進める量。ON 時は実績 ex で進める(px68k本家 :430 の m)。
+         * ex<n(異常状態/デバッガ停止)では要求値 n を下限とし、時間の停止・逆走を防ぐ。
+         * OFF 時は常に adv==n で従来と同値。 */
+        int32_t adv = (s_p808_overshoot_fix && ex > n) ? ex : n;
 #if P805_ENABLE
         p805_chunks++;   /* P805: 呼出回数の計数のみ(ex・n には触れない) */
+#endif
+#if P808_ENABLE
+        {
+            int b = (n <= 0) ? 0 : (n < 16) ? 1 : (n < 32) ? 2 : (n < 64) ? 3
+                  : (n < 128) ? 4 : (n < 200) ? 5 : 6;
+            p808_c[b]++;
+            if (ex > n) p808_o[b] += (uint32_t)(ex - n);
+            if (ex < n) { p808_under++; p808_usum += (uint32_t)(n - ex); }
+            p808_ex_sum  += (uint64_t)(int64_t)ex;
+            p808_n_sum   += (uint64_t)(int64_t)n;
+            p808_adv_sum += (uint64_t)(int64_t)adv;
+        }
 #endif
         /* P657: 水平フロントポーチ到達 → ラスタコピーの唯一の実行契機。
          * PR#2 は m(= n - m68000_ICountBk)で判定するが、MX は m ≡ n
          * (m68000_ICountBk は常に0、下記 P152 コメント)。
+         * P808: 判定は adv で行う(OFF 時は adv==n で従来と同値。ON 時は PR#2 原文の
+         * m と同じく実績で判定し、超過で表示終了境界をまたいだ場合も取りこぼさない)。
          * MFP_Timer() より前に置くのは PR#2 と同じ順序。 */
 #if P657_FRONTPORCH_ENABLE
-        if (until_display_end > 0 && n >= until_display_end) {
+        if (until_display_end > 0 && adv >= until_display_end) {
 #if P657_PROBE_ENABLE
             /* 測定1の内訳。Core パッチ側からは取得できないため Bridge 側で
              * 同じ条件を読み取って分類する(いずれも crtc.h 公開の
@@ -4061,8 +4133,11 @@ void mx68k_run_frame(void) {
          * なので m = n。割込み/チャンク境界で c68k はスライスを使い切らない
          * (ex < n)ため、ex を加算すると Timer-C が約3.3%不足し、FF0B48 の
          * キャリブレーションが遅れて発火していた(icount 308493 vs MPX 308239)。n を加算し、
-         * frame_icount も n で減らして MPX と完全一致させる(winx68k.cpp:484-490)。 */
-        ClkUsed += n * 10;
+         * frame_icount も n で減らして MPX と完全一致させる(winx68k.cpp:484-490)。
+         * P808: OFF 時(既定)は MPX68K との一致のため要求値 n で進める。ON 時
+         * (MX68K_DEBUG_OVERSHOOT_FIX=1)は px68k本家 x11/winx68k.cpp:428-437 方式で
+         * 実績値(下限 n)の adv で進め、フレーム間で超過を持ち越す。 */
+        ClkUsed += adv * 10;
         int32_t usedclk = ClkUsed / clkdiv;
         ClkUsed -= usedclk * clkdiv;
         line_usedclk += usedclk;
@@ -4110,9 +4185,9 @@ void mx68k_run_frame(void) {
         }
 #endif
         RTC_Timer(usedclk);   /* RP5C15 1Hz/16Hz アラーム、MFP の直後(winx68k.cpp:493-494) */
-        frame_icount -= n;    /* MPX: ICount -= m, m == n */
-        ICount -= n;          /* P158: mfp.c の H-SYNC ビット掃引のため Core グローバル ICount にも反映(MPX winx68k.cpp:488) */
-        clk_count    += n;
+        frame_icount -= adv;  /* MPX: ICount -= m, m == n(P808: OFF 時 adv==n) */
+        ICount -= adv;        /* P158: mfp.c の H-SYNC ビット掃引のため Core グローバル ICount にも反映(MPX winx68k.cpp:488) */
+        clk_count    += adv;
 
         /* ===== LINE-END block — 1 回/ライン（MPX 499-537） ===== */
         if (clk_count >= clk_next) {
@@ -4405,6 +4480,23 @@ void mx68k_run_frame(void) {
         }
     } while (vl < (int)vline_total_val);        /* MPX: while(vline<VLINE_TOTAL) */
 
+    /* P808: フレーム末の予算超過(frame_icount ≤ 0)を次フレームへ持ち越す(ON 時のみ)。
+     * 不変条件 clk_count + frame_icount == clk_total と、ループ終了条件(最終ライン末
+     * clk_next==clk_total)から正常時は frame_icount ≤ 0。c>0 のクランプは到達しない
+     * 想定の防御(予算未消化は持ち越さない。px68k本家と異なる点)。下限クランプは
+     * 参照実装に無い MX 独自の防御で、-line_budget だと次フレーム先頭で
+     * clk_count==clk_next となり n==0 チャンクが出るため 1 サイクル手前で止める。 */
+    int32_t p808_carry_clamped = 0;
+    if (s_p808_overshoot_fix) {
+        int32_t line_budget = clk_total / vline_total_val;   /* vline_total_val > 0 は上で保証済み */
+        int32_t c = frame_icount;
+        if (c > 0) c = 0;
+        if (c < -(line_budget - 1)) { c = -(line_budget - 1); p808_carry_clamped = 1; }
+        s_p808_carry = c;
+    } else {
+        s_p808_carry = 0;
+    }
+
 #if P657_PROBE_ENABLE
     /* [P657-RCFIRE]: 測定1(フロントポーチ発火の分子・内訳・分母)・
      * 測定2(GPIP 差し替えヒットとその分母 mfp_reads)・
@@ -4498,16 +4590,74 @@ void mx68k_run_frame(void) {
         if ((frame_num % 300) == 0) {
             debug_log("[P805-OVERSHOOT] f=%d frames=%u clk_total_sum=%llu executed_sum=%llu "
                       "chunks_sum=%llu clock_mhz=%d clkdiv=%d clock_slice=%d "
-                      "last_clk_total=%d last_executed=%d last_chunks=%d\n",
+                      "last_clk_total=%d last_executed=%d last_chunks=%d fix=%d carry=%d\n",
                       frame_num, s_p805_frames,
                       s_p805_clk_total_sum, s_p805_executed_sum, s_p805_chunks_sum,
                       g_clock_mhz, clkdiv, clock_slice,
-                      clk_total, total_executed, p805_chunks);
+                      clk_total, total_executed, p805_chunks,
+                      (int)s_p808_overshoot_fix, (int)s_p808_carry);
             s_p805_clk_total_sum = 0;
             s_p805_executed_sum  = 0;
             s_p805_chunks_sum    = 0;
             s_p805_frames        = 0;
         }
+    }
+#endif
+#if P808_ENABLE
+    /* P808 (D-15): [P808-CHUNKHIST] チャンク長ヒストグラム。[P806-IOWAIT] と同じ
+     * 60 フレーム窓境界(frame_num % 60 == 0)で出力し窓をリセットする。
+     * 分母 chunks を同一行に出すので、0 件バケットが「発生しなかった」のか
+     * 「未到達」なのかを区別できる。比などの派生値は出さず生値のみ。
+     * fix/carry は窓末フレームの値、carry_clamped は窓内の下限クランプ発火回数。 */
+    {
+        static unsigned long long s_p808_c[7], s_p808_o[7];
+        static unsigned long long s_p808_ex_sum, s_p808_n_sum, s_p808_adv_sum;
+        static unsigned long long s_p808_under, s_p808_usum;
+        static unsigned long long s_p808_chunks;
+        static unsigned int       s_p808_carry_clamped;
+        for (int i = 0; i < 7; i++) {
+            s_p808_c[i] += p808_c[i];
+            s_p808_o[i] += p808_o[i];
+            s_p808_chunks += p808_c[i];
+        }
+        s_p808_ex_sum  += p808_ex_sum;
+        s_p808_n_sum   += p808_n_sum;
+        s_p808_adv_sum += p808_adv_sum;
+        s_p808_under   += p808_under;
+        s_p808_usum    += p808_usum;
+        s_p808_carry_clamped += (unsigned int)p808_carry_clamped;
+        if ((frame_num % 60) == 0) {
+            debug_log("[P808-CHUNKHIST] f=%d chunks=%llu "
+                      "c0=%llu o0=%llu c1=%llu o1=%llu c16=%llu o16=%llu c32=%llu o32=%llu "
+                      "c64=%llu o64=%llu c128=%llu o128=%llu c200=%llu o200=%llu "
+                      "ex_sum=%llu n_sum=%llu adv_sum=%llu fix=%d carry=%d carry_clamped=%u "
+                      "under=%llu usum=%llu pc=%06x\n",
+                      frame_num, s_p808_chunks,
+                      s_p808_c[0], s_p808_o[0], s_p808_c[1], s_p808_o[1],
+                      s_p808_c[2], s_p808_o[2], s_p808_c[3], s_p808_o[3],
+                      s_p808_c[4], s_p808_o[4], s_p808_c[5], s_p808_o[5],
+                      s_p808_c[6], s_p808_o[6],
+                      s_p808_ex_sum, s_p808_n_sum, s_p808_adv_sum,
+                      (int)s_p808_overshoot_fix, (int)s_p808_carry, s_p808_carry_clamped,
+                      s_p808_under, s_p808_usum, (unsigned)p808_guest_pc());
+            for (int i = 0; i < 7; i++) { s_p808_c[i] = 0; s_p808_o[i] = 0; }
+            s_p808_ex_sum = s_p808_n_sum = s_p808_adv_sum = 0;
+            s_p808_under = s_p808_usum = 0;
+            s_p808_chunks = 0;
+            s_p808_carry_clamped = 0;
+        }
+    }
+
+    /* P808 (D-15): [P808-CAL] ゲスト RAM $000CB8〜$000CBB の生 4 バイト。
+     * [P805-OVERSHOOT] と同じ 300 フレーム窓で出す。MEM[] を直接読むだけ
+     * (p47_read_long_le() と同じバイト順処理、Memory_Read* を通さないので副作用なし)。
+     * b0..b3 はゲストアドレス順。解釈(ワード/ロング・単位)はログに埋め込まない。 */
+    if ((frame_num % 300) == 0) {
+        uint32_t v = p47_read_long_le(0x000CB8u);
+        debug_log("[P808-CAL] f=%d b0=%02x b1=%02x b2=%02x b3=%02x\n",
+                  frame_num,
+                  (unsigned)((v >> 24) & 0xFFu), (unsigned)((v >> 16) & 0xFFu),
+                  (unsigned)((v >> 8) & 0xFFu),  (unsigned)(v & 0xFFu));
     }
 #endif
     /* P806: I/O ウェイトの 60 フレーム窓集計・[P806-IOWAIT] 出力(ログは P806_IOWAIT_LOG で制御)。 */
@@ -9340,6 +9490,20 @@ void mx68k_key_down(uint8_t keycode) {
      * (上流のsend_keycode: down=code)。 */
 #if P214_ENABLE
     p214_k_log("make ", keycode);
+#endif
+#if P808_ENABLE
+    /* P808 (D-15): si 起動フレーム特定用。定数(Return のスキャンコード等)を持たず
+     * 全 make の生値をフレーム番号付きで記録する。上限到達時は打ち切りを 1 回明示。 */
+    {
+        static unsigned s_p808_key_lines = 0;
+        if (s_p808_key_lines < 400) {
+            s_p808_key_lines++;
+            debug_log("[P808-KEY] f=%d make=0x%02x\n", g_mx68k_frame_num, (unsigned)keycode);
+        } else if (s_p808_key_lines == 400) {
+            s_p808_key_lines++;
+            debug_log("[P808-KEY] capped at 400\n");
+        }
+    }
 #endif
     uint8_t newwp = (uint8_t)((KeyBufWP + 1) & (KeyBufSize - 1));
     if (newwp != KeyBufRP) { KeyBuf[KeyBufWP] = keycode; KeyBufWP = newwp; }

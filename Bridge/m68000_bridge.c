@@ -29699,6 +29699,12 @@ void p806_io_wait_frame_end(int frame_num, int clk_total, int total_executed) {
 #endif
 }
 
+/* P808: [P808-CHUNKHIST] の pc= 用。[P806-IOWAIT] と同じ取得法にそろえるため、
+ * static inline の MX68KQ_GUEST_PC() を EmulatorBridge.c から呼べるよう包むだけの関数。 */
+uint32_t p808_guest_pc(void) {
+    return (uint32_t)MX68KQ_GUEST_PC();
+}
+
 /* P806: 環境変数 MX68K_DEBUG_IOWAIT を読み、文字列 "0"/"1"/"2" と完全一致するときだけ
  * その値を倍率とする(未設定・空文字・不正値は既定 1。不正値は rejected を出す——
  * P805 の CLOCK_SLICE オーバーライドと同じ流儀)。トグル/カウンタを 0 に戻す
