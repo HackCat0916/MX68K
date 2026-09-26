@@ -4510,6 +4510,8 @@ void mx68k_run_frame(void) {
         }
     }
 #endif
+    /* P806: I/O ウェイトの 60 フレーム窓集計・[P806-IOWAIT] 出力(ログは P806_IOWAIT_LOG で制御)。 */
+    p806_io_wait_frame_end(frame_num, clk_total, total_executed);
 
 #if P63_PROBE_ENABLE
     /* Probe-C: フレーム毎の FDD_IsReady(0) 状態ログ。
