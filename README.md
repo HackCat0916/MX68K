@@ -128,7 +128,8 @@ iOS版（iPhone/iPad）はmacOS版と同じエミュレーションコア・設�
 - General / Input / Windrv の各設定タブ（キーリマップ設定を含む）
 - FDDの書込み禁止切替
 - FD2/FD3の挿入・イジェクト
-- Mercury Unit・外部MIDIボード（CZ-6BM1）関連の設定(内蔵MT-32/SC-55は利用可能)
+- Mercury Unit（macOS版のみ）
+- 外部MIDI出力先デバイスの選択（CoreMIDIデバイス一覧、macOS版のみ——MIDIボード[CZ-6BM1]自体のON/OFFや出力先を「External MIDI」に選ぶこと自体はiOS版でも可能ですが、接続先デバイスを選ぶ機能が無いため実際には鳴りません。内蔵MT-32/SC-55はiOS版でも利用可能です）
 - 電源ボタン・ゲストソフトからの電源OFF要求の検出（現状macOS版のみ）
 
 **English:**
@@ -158,7 +159,8 @@ The iOS version (iPhone/iPad) shares the same emulation core and settings screen
 - The General / Input / Windrv settings tabs (including key remapping)
 - FDD write-protect toggle
 - Inserting/ejecting FD2/FD3
-- Mercury Unit and external MIDI board (CZ-6BM1) settings (internal MT-32/SC-55 are available)
+- Mercury Unit (macOS only)
+- Selecting an external MIDI output/input device (the CoreMIDI device list, macOS only — toggling the MIDI board (CZ-6BM1) on/off and choosing "External MIDI" as the output destination both work on iOS, but there is no way to pick which device to send to, so no sound comes out in practice. Internal MT-32/SC-55 are available on iOS)
 - The power button and detection of guest power-off requests (currently macOS only)
 
 ---
