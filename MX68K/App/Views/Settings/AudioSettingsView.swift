@@ -153,8 +153,11 @@ struct AudioSettingsView: View {
                 if settingsViewModel.midiEnabled {
                     // P825/P826: 出力先の排他選択(外部 CoreMIDI / 内蔵 MT-32 / 内蔵 SC-55)。
                     // P831: 内蔵 SC-55 は iOS でも選択できる(P830 までは macOS 専用だった)。
+                    // P843: iOS には CoreMIDI デバイス選択が無く外部 MIDI は鳴らないため選択肢から除外。
                     Picker("Output", selection: $settingsViewModel.midiOutputDestination) {
+                        #if os(macOS)
                         Text("External MIDI").tag(0)
+                        #endif
                         Text("Internal MT-32").tag(1)
                         Text("Internal SC-55").tag(2)
                     }
@@ -222,14 +225,6 @@ struct AudioSettingsView: View {
                                 }
                             }
                         }
-                    }
-                    #else
-                    // P830: iOS には CoreMIDI デバイス選択の配線が無い(P761 の判断を継承)。
-                    // config.json に外部 MIDI(0)が入っている場合でも表示が崩れないよう案内する。
-                    if settingsViewModel.midiOutputDestination == 0 {
-                        Text("⚠ External MIDI device selection is not available on iOS. Use Internal MT-32 or SC-55.")
-                            .font(.subheadline).foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                     #endif
                 }
