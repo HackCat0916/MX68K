@@ -24,6 +24,17 @@ enum FilePickerDestination {
     case biosDir
     /// iOS: ~/Library/Application Support/MX68K/disks/ へコピーイン。
     case disksDir
+    /// P825: iOS: ~/Library/Application Support/MX68K/mt32rom/ へコピーイン(元のファイル名のまま)。
+    case mt32ControlRom
+    /// P825: 同上(Control / PCM は同じディレクトリ。区別はログの kind のみ)。
+    case mt32PcmRom
+    /// P826: 内蔵 SC-55 の ROM 5 種。iOS では内蔵 SC-55 自体が非対応(macOS 限定)のため
+    /// 実際には使われないが、下の網羅的 switch を満たすために定義する。
+    case sc55Rom1
+    case sc55Rom2
+    case sc55WaveRom1
+    case sc55WaveRom2
+    case sc55WaveRom3
 }
 
 struct FilePickerButton: View {
@@ -121,6 +132,10 @@ enum ImportedFileStore {
         case .biosDir:  return appSupportDir + "/bios"
         case .disksDir: return appSupportDir + "/disks"
         case .inPlace:  return appSupportDir
+        // ★ディレクトリを返す関数。ファイル名を含めてはならない(P825 R2-5)。
+        case .mt32ControlRom, .mt32PcmRom: return appSupportDir + "/mt32rom"
+        case .sc55Rom1, .sc55Rom2, .sc55WaveRom1, .sc55WaveRom2, .sc55WaveRom3:
+            return appSupportDir + "/sc55rom"
         }
     }
 
@@ -129,6 +144,13 @@ enum ImportedFileStore {
         case .biosDir:  return "bios"
         case .disksDir: return "disk"
         case .inPlace:  return "inplace"
+        case .mt32ControlRom: return "mt32control"
+        case .mt32PcmRom:     return "mt32pcm"
+        case .sc55Rom1:       return "sc55rom1"
+        case .sc55Rom2:       return "sc55rom2"
+        case .sc55WaveRom1:   return "sc55waverom1"
+        case .sc55WaveRom2:   return "sc55waverom2"
+        case .sc55WaveRom3:   return "sc55waverom3"
         }
     }
 

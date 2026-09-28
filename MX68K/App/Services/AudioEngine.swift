@@ -11,6 +11,11 @@ class AudioEngine {
     var volume: Float = 1.0
     /// false = ミュート(バックプレッシャーを避けるため、リングバッファの読み出しは継続する)。
     var enabled: Bool = true
+    /// P825: `initialize(sampleRate:)` が最後に AudioUnit へ要求した出力レート。
+    /// 内蔵 MT-32 のリサンプラへ渡すレートはこれに揃える。`mx68k_get_audio_sample_rate()` は
+    /// Apply 直後に「次回ハードリセットで適用される予定値」へ変わり、AudioUnit の実レートと
+    /// 食い違い得るため使わない。
+    private(set) var currentSampleRate: Double = 44100.0
 
     /// P629 (D-64) — 診断専用ロガー。`initialize()` が投げる各 `OSStatus` と、
     /// `AudioUnitInitialize()` 後に実際に確定したストリームフォーマットを unified log
@@ -23,6 +28,7 @@ class AudioEngine {
     private static let log = Logger(subsystem: "com.mx68k.emulator", category: "AudioEngine")
 
     func initialize(sampleRate: Double = 44100.0, bufferFrames: UInt32 = 512) {
+        self.currentSampleRate = sampleRate
         // P757: kAudioUnitSubType_DefaultOutput は iOS SDK では未定義
         // (AUComponent.h の `#if !TARGET_OS_IPHONE` ガード内)。iOS の
         // ハードウェア出力ユニットは RemoteIO。
@@ -173,6 +179,12 @@ private func audioCallback(
     let frames = Int(buffer.mDataByteSize) / 4
     let ptr = data.assumingMemoryBound(to: Int16.self)
     mx68k_audio_read(ptr, Int32(frames))
+    // P825: 内蔵 MT-32 の出力を volume/mute・録画より「前」に加算する(FM/ADPCM と同じ経路に
+    // 乗せることで、マスター音量・ミュート・動画録画が自動的に効く)。無効時・再構成中は即 return。
+    mx68k_mt32_render_mix(ptr, Int32(frames))
+    // P826: 内蔵 SC-55 も同じ位置(volume/mute・録画より前)で加算する。こちらはコアを直接
+    // 呼ばず、専用ワーカーが埋めた出力リングを読むだけ(ロック無し、無効時・iOS では何も足さない)。
+    mx68k_sc55_render_mix(ptr, Int32(frames))
     let n = frames * 2   // ステレオ: 1 フレームあたり Int16 × 2
     if !engine.enabled {
         for i in 0..<n { ptr[i] = 0 }

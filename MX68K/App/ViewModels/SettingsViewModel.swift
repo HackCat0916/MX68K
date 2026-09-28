@@ -27,6 +27,18 @@ class SettingsViewModel: ObservableObject {
     @Published var midiDelayMs: Int = 0
     @Published var midiOutDeviceIndex: Int = 0
     @Published var midiInDeviceIndex: Int = 0
+    // P826: MIDI 出力先。0 = 外部 CoreMIDI, 1 = 内蔵 MT-32(P825), 2 = 内蔵 SC-55(P826)
+    @Published var midiOutputDestination: Int = 0
+    // P825: 内蔵 MT-32 の ROM
+    @Published var mt32ControlRomPath: String = ""
+    @Published var mt32PcmRomPath: String = ""
+    @Published var mt32PartialCount: Int = 32   // P827: 最大パーシャル数(既定 32 = 実機準拠)
+    // P826: 内蔵 SC-55 の ROM
+    @Published var sc55Rom1Path: String = ""
+    @Published var sc55Rom2Path: String = ""
+    @Published var sc55WaveRom1Path: String = ""
+    @Published var sc55WaveRom2Path: String = ""
+    @Published var sc55WaveRom3Path: String = ""
     @Published var sram64kEnabled: Bool = false   // P493: 内蔵 SRAM 64KB 化(改造相当)
     // P642: Windrv(Mac フォルダのホスト共有)
     @Published var windrvEnabled: Bool = false
@@ -62,6 +74,15 @@ class SettingsViewModel: ObservableObject {
         config.extensions.midiDelayMs = midiDelayMs
         config.extensions.midiOutDeviceIndex = midiOutDeviceIndex
         config.extensions.midiInDeviceIndex = midiInDeviceIndex
+        config.extensions.midiOutputDestination = midiOutputDestination         // P826
+        config.extensions.mt32ControlRomPath = mt32ControlRomPath               // P825
+        config.extensions.mt32PcmRomPath = mt32PcmRomPath                       // P825
+        config.extensions.mt32PartialCount = mt32PartialCount                   // P827
+        config.extensions.sc55Rom1Path = sc55Rom1Path                           // P826
+        config.extensions.sc55Rom2Path = sc55Rom2Path                           // P826
+        config.extensions.sc55WaveRom1Path = sc55WaveRom1Path                   // P826
+        config.extensions.sc55WaveRom2Path = sc55WaveRom2Path                   // P826
+        config.extensions.sc55WaveRom3Path = sc55WaveRom3Path                   // P826
         config.extensions.sram64kEnabled = sram64kEnabled
         config.extensions.windrvEnabled  = windrvEnabled     // P642
         config.extensions.windrvHostPath = windrvHostPath    // P642
@@ -94,6 +115,15 @@ class SettingsViewModel: ObservableObject {
         midiDelayMs = config.extensions.midiDelayMs
         midiOutDeviceIndex = config.extensions.midiOutDeviceIndex
         midiInDeviceIndex = config.extensions.midiInDeviceIndex
+        midiOutputDestination = config.extensions.midiOutputDestination         // P826
+        mt32ControlRomPath = config.extensions.mt32ControlRomPath               // P825
+        mt32PcmRomPath = config.extensions.mt32PcmRomPath                       // P825
+        mt32PartialCount = config.extensions.mt32PartialCount                   // P827
+        sc55Rom1Path = config.extensions.sc55Rom1Path                           // P826
+        sc55Rom2Path = config.extensions.sc55Rom2Path                           // P826
+        sc55WaveRom1Path = config.extensions.sc55WaveRom1Path                   // P826
+        sc55WaveRom2Path = config.extensions.sc55WaveRom2Path                   // P826
+        sc55WaveRom3Path = config.extensions.sc55WaveRom3Path                   // P826
         sram64kEnabled = config.extensions.sram64kEnabled
         windrvEnabled  = config.extensions.windrvEnabled     // P642
         windrvHostPath = config.extensions.windrvHostPath    // P642

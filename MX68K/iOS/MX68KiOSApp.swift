@@ -27,6 +27,16 @@ private struct SoftKeyboardSizeKey: PreferenceKey {
     }
 }
 
+/// P835(診断専用) — 右帯の状態表示(`statusLines(axis: .vertical)`)が折り返さず
+/// 収まるために必要な理想幅を、隠し計測用コピーから親へ伝搬する。
+/// `SoftKeyboardSizeKey` と同型。
+private struct BandContentIdealWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 @main
 struct MX68KiOSApp: App {
     var body: some Scene {
@@ -51,6 +61,16 @@ struct MX68KiOSRootView: View {
     @StateObject private var viewModel = MX68KiOSViewModel()
     @StateObject private var configManager = ConfigManager()
     @StateObject private var settingsViewModel = SettingsViewModel()
+    /// P824 — 物理ゲームパッドのポート割当状態。`gamepadControllers` の変化で
+    /// `body` を再評価させるためだけに保持する。
+    /// ★`body` 内でこのプロパティを直接参照していないが、**削除してはならない**:
+    ///   `@ObservedObject` はオブジェクト単位で `objectWillChange` を購読する
+    ///   (プロパティ単位の読み取り追跡ではない)ため、`Self.virtualPadAvailable` が
+    ///   内部で `IOSGamepadInput.shared` を静的に読む現行の設計のままで、
+    ///   コントローラの接続/切断時にオーバーレイと「Pad」ボタンの状態が追随する。
+    ///   `static var` 単体は値取得時点のスナップショットで、SwiftUI へ変化を通知しない。
+    ///   シングルトンの寿命はプロセスと同じなので `@StateObject` ではなくこちらを使う。
+    @ObservedObject private var gamepadInput = IOSGamepadInput.shared
 
     @State private var activeSheet: IOSSheetKind?
     /// ブートディスク取り込みの失敗文言(§B-6: 無言で何も起きない状態を作らない)。
@@ -75,7 +95,7 @@ struct MX68KiOSRootView: View {
     /// ★`TouchJoystickView` が同名キーを**独自に**読んでいるのと同じキーを、
     ///   ここでも読む。二重宣言だが、幅ゲート
     ///   (`TouchJoystickView.requiredWidth(forTriggerLevel:)`)の計算は
-    ///   `geo.size` を持つこのビュー側でしか行えないため必要な最小限の重複である
+    ///   `rootGeo.size` を持つこのビュー側でしか行えないため必要な最小限の重複である
     ///   (`virtualPadOpacity` は描画側だけで完結するのでこの重複を持たない)。
     ///   閾値そのものは `TouchJoystickView` の static 関数 1 本に閉じており、
     ///   ここで再計算はしない。
@@ -93,46 +113,67 @@ struct MX68KiOSRootView: View {
     @State private var measuredKeyboardSize = CGSize(
         width: MX68KiOSRootView.softKeyboardIntrinsicWidth,
         height: MX68KiOSRootView.softKeyboardIntrinsicHeight)
+    /// P835(診断専用) — 側方帯の実描画フレーム(`.global`)と右帯の理想幅。
+    /// ログ出力にのみ使い、`body` からは読まない(レイアウトへ影響させない)。
+    @State private var p835LeftBandFrame: CGRect = .zero
+    @State private var p835RightBandFrame: CGRect = .zero
+    @State private var p835RightIdealWidth: CGFloat = 0
+    /// P840(診断専用) — ソフトキーボード帯のセーフエリア計測値。
+    /// ログ出力にのみ使い、`body` からは読まない(レイアウトへ影響させない)。
+    @State private var p839ChildSafeArea = EdgeInsets()
+    @State private var p839BandFrame: CGRect = .zero
+    @State private var p839BandSafeArea = EdgeInsets()
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Color.black
-                .ignoresSafeArea()
+        // P834(D-80) — GeometryReader を body 最上位へ移し、帯配置(else 分岐)と
+        // Metal ビューの padding を**同一の `rootGeo.size` から同一レンダーパスで**
+        // 導出する。`@State` 経由の非同期更新だと起動/回転直後の 1 フレームだけ
+        // 帯とゲスト画面が重なる(修正対象そのものが一瞬再現する)ため採らない。
+        GeometryReader { rootGeo in
+            let layout = DisplayViewport.bandLayout(container: rootGeo.size)
+            ZStack(alignment: .top) {
+                Color.black
+                    .ignoresSafeArea()
 
-            EmulatorMetalView_iOS(viewModel: viewModel)
+                // P834 — reservedSide 時のみ左右を帯幅ぶん縮め、その余白へ側方帯を置く。
+                EmulatorMetalView_iOS(viewModel: viewModel)
+                    .padding(.horizontal, layout.placement == .reservedSide ? layout.sideWidth : 0)
 
-            if viewModel.needsConfiguration {
-                // P706 §D-1 — BIOS 未設定時は設定画面を**全画面**で出す
-                // (macOS の RootView フォールバック MX68KApp.swift:39-40 と同じ形)。
-                // ★Metal ビューは裏で生かしたまま重ねる。ビュー階層から外して
-                //   再マウントさせると、Apply 直後にレンダラを作り直すことになる。
-                ZStack {
-                    Color(uiColor: .systemBackground)
-                        .ignoresSafeArea()
-                    SettingsView(showCloseButton: false)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                // ★P706追記(2026-08-30、ユーザー指摘): macOSは
-                //   ToolbarView(上部・Hard/Soft Reset/Interrupt/FDD)と
-                //   StatusBarView(下部・状態表示)の2段構成——同一ユーザーが
-                //   macOS版とiOS版を行き来する際の違和感を減らすため、iOSも
-                //   同じ上下配置に揃える(帯のスタイル自体は既存の半透明オーバーレイを
-                //   踏襲し、描画を覆う面積は増やさない)。
-                //
-                // ★P708: 横向きでは 4:3 面が画面高いっぱいまで拡がり**上下余白が 0pt**に
-                //   なるため、上端/下端に貼り付く帯は幾何的に必ず映像へ重なる。そこで
-                //   「向き」ではなく「**どちらの軸に余白があるか**」で配置を決める
-                //   (§C-1)。判定には新しい幾何計算を作らず、レンダラが実際に使う
-                //   `DisplayViewport.face()` と同一の純関数を呼ぶ(単一情報源)。
-                //   縦向きは `face().x == 0` により構造的に従来の上下配置を選ぶ ——
-                //   縦向き用の特別扱いは 1 行も書かない。
-                GeometryReader { geo in
-                    let sideW = DisplayViewport.face(container: geo.size).x
+                if viewModel.needsConfiguration {
+                    // P706 §D-1 — BIOS 未設定時は設定画面を**全画面**で出す
+                    // (macOS の RootView フォールバック MX68KApp.swift:39-40 と同じ形)。
+                    // ★Metal ビューは裏で生かしたまま重ねる。ビュー階層から外して
+                    //   再マウントさせると、Apply 直後にレンダラを作り直すことになる。
+                    ZStack {
+                        Color(uiColor: .systemBackground)
+                            .ignoresSafeArea()
+                        SettingsView(showCloseButton: false)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    // ★P706追記(2026-08-30、ユーザー指摘): macOSは
+                    //   ToolbarView(上部・Hard/Soft Reset/Interrupt/FDD)と
+                    //   StatusBarView(下部・状態表示)の2段構成——同一ユーザーが
+                    //   macOS版とiOS版を行き来する際の違和感を減らすため、iOSも
+                    //   同じ上下配置に揃える(帯のスタイル自体は既存の半透明オーバーレイを
+                    //   踏襲し、描画を覆う面積は増やさない)。
+                    //
+                    // ★P708: 横向きでは 4:3 面が画面高いっぱいまで拡がり**上下余白が 0pt**に
+                    //   なるため、上端/下端に貼り付く帯は幾何的に必ず映像へ重なる。そこで
+                    //   「向き」ではなく「**どちらの軸に余白があるか**」で配置を決める
+                    //   (§C-1)。判定には新しい幾何計算を作らず、レンダラが実際に使う
+                    //   `DisplayViewport.face()` と同一の純関数を呼ぶ(単一情報源)。
+                    //   縦向きは `face().x == 0` により構造的に従来の上下配置を選ぶ ——
+                    //   縦向き用の特別扱いは 1 行も書かない。
+                    // ★P834(D-80): 4:3 に近い横長画面(iPad Pro 12.9 等)では左右・上下とも
+                    //   余白が閾値未満になり、従来の上下配置は映像へ重なっていた。判定は
+                    //   `DisplayViewport.bandLayout()` へ集約し、両軸とも不足する場合は
+                    //   Metal ビューを左右に縮めて帯の場所を確保する(reservedSide)。
+                    let sideW = layout.sideWidth
                     // P710 §C-2 — 幅ゲート。判定式は `softKeyboardAvailable(width:)`
                     // ただ 1 本であり、ボタンの表示可否とオーバーレイの表示可否は
                     // **同じ値**を使う(閾値リテラルを 2 箇所に書かない = CR-7)。
-                    let canShowKeyboard = Self.softKeyboardAvailable(width: geo.size.width)
+                    let canShowKeyboard = Self.softKeyboardAvailable(width: rootGeo.size.width)
                     // P716 §変更内容 4 — 仮想パッド帯の幅ゲート。ソフトキーボードの
                     // `canShowKeyboard` と**同型**(オーバーレイの表示可否とトグル
                     // ボタンの有効/無効が同じ 1 つの値を共有する)だが、必要幅が
@@ -140,9 +181,9 @@ struct MX68KiOSRootView: View {
                     // `requiredWidth(forTriggerLevel:)` の戻り値である。
                     // 判定式そのものは `TouchJoystickView` 側 1 本に閉じている。
                     let canShowVirtualPad =
-                        geo.size.width >= TouchJoystickView.requiredWidth(forTriggerLevel: triggerButtonSizeLevel)
+                        rootGeo.size.width >= TouchJoystickView.requiredWidth(forTriggerLevel: triggerButtonSizeLevel)
                     // P710 §C-2 — キーボード帯は `ZStack` の後段に重ねるだけで
-                    // **レイアウトに参加しない**(Metal ビューの寸法も `geo.size` も
+                    // **レイアウトに参加しない**(Metal ビューの寸法も `rootGeo.size` も
                     // 変えない)。これにより `DisplayViewport.face()` の入力が不変となり、
                     // P708 の帯配置はキーボードの表示/非表示にかかわらずビット同一になる。
                     ZStack(alignment: .bottom) {
@@ -156,7 +197,7 @@ struct MX68KiOSRootView: View {
                         //   細い領域だけなので、そこ以外のタッチは下のレイヤーへ届く。
                         //
                         // ★どちらもレイアウトに参加しない(Metal ビューの寸法も
-                        //   `geo.size` も変えない)—— P710 のソフトキーボード帯と同じ原則。
+                        //   `rootGeo.size` も変えない)—— P710 のソフトキーボード帯と同じ原則。
                         if mouseModeEnabled {
                             TouchMouseView()
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -166,7 +207,7 @@ struct MX68KiOSRootView: View {
                         }
 
                         Group {
-                            if sideW >= Self.minSideBandWidth {
+                            if layout.placement != .stacked {
                                 // 側方配置: 左=操作 / 右=状態(macOS の上=Toolbar / 下=StatusBar を
                                 // 90° 回した先へそのまま写す。読み順も操作→状態で保たれる)。
                                 HStack(spacing: 0) {
@@ -178,10 +219,52 @@ struct MX68KiOSRootView: View {
                                                    canShowVirtualPad: canShowVirtualPad)
                                         .frame(minWidth: sideW, maxWidth: sideW,
                                                maxHeight: .infinity, alignment: .top)
+                                        // P835(診断専用) — 左帯の実描画フレーム。
+                                        .background(bandFrameProbe { frame in
+                                            p835LeftBandFrame = frame
+                                            logBandFrame(container: rootGeo.size,
+                                                         left: frame,
+                                                         right: p835RightBandFrame,
+                                                         rightIdealW: p835RightIdealWidth,
+                                                         trigger: "leftFrame")
+                                        })
                                     Spacer(minLength: 0)
                                     sideStatusBand
                                         .frame(minWidth: sideW, maxWidth: sideW,
                                                maxHeight: .infinity, alignment: .bottom)
+                                        // P835(診断専用) — 右帯の実描画フレーム。
+                                        .background(bandFrameProbe { frame in
+                                            p835RightBandFrame = frame
+                                            logBandFrame(container: rootGeo.size,
+                                                         left: p835LeftBandFrame,
+                                                         right: frame,
+                                                         rightIdealW: p835RightIdealWidth,
+                                                         trigger: "rightFrame")
+                                        })
+                                        // P835(診断専用) — 右帯の中身の理想幅(隠し計測用コピー)。
+                                        // `.background` 内なので帯のレイアウトサイズには参加しない。
+                                        .background(alignment: .topLeading) {
+                                            statusLines(axis: .vertical)
+                                                .fixedSize(horizontal: true, vertical: false)
+                                                .background(
+                                                    GeometryReader { g in
+                                                        Color.clear.preference(key: BandContentIdealWidthKey.self,
+                                                                               value: g.size.width)
+                                                    }
+                                                )
+                                                .opacity(0)
+                                                .allowsHitTesting(false)
+                                                .accessibilityHidden(true)
+                                                .onPreferenceChange(BandContentIdealWidthKey.self) { w in
+                                                    guard w > 0, w != p835RightIdealWidth else { return }
+                                                    p835RightIdealWidth = w
+                                                    logBandFrame(container: rootGeo.size,
+                                                                 left: p835LeftBandFrame,
+                                                                 right: p835RightBandFrame,
+                                                                 rightIdealW: w,
+                                                                 trigger: "rightIdeal")
+                                                }
+                                        }
                                 }
                             } else {
                                 VStack(spacing: 0) {
@@ -205,7 +288,8 @@ struct MX68KiOSRootView: View {
                             //   報告するため、位置決めは外側の `ZStack(alignment: .bottom)`
                             //   (水平方向は中央寄せ)の既定配置に委ねる —— 対称な幅であれば
                             //   自動的に左右へ `sideW` ずつの余白が残る。
-                            softKeyboardBand(containerSize: geo.size, leadingInset: sideW, trailingInset: sideW)
+                            softKeyboardBand(containerSize: rootGeo.size, leadingInset: sideW, trailingInset: sideW,
+                                             rootSafeArea: rootGeo.safeAreaInsets)
                                 .transition(.move(edge: .bottom))
                         }
                     }
@@ -214,8 +298,8 @@ struct MX68KiOSRootView: View {
                     //   置く場所ではない)。回転 / Stage Manager のリサイズ時だけ発火する。
                     //   ★`.onChange` は iOS 16 互換の**単一引数クロージャ形式**を使う
                     //     (iOS 17 の 2 引数形式は本ターゲットの deployment target 16.0 で使えない)。
-                    .onAppear { logBandGeometry(container: geo.size) }
-                    .onChange(of: geo.size) { newSize in
+                    .onAppear { logBandGeometry(container: rootGeo.size) }
+                    .onChange(of: rootGeo.size) { newSize in
                         logBandGeometry(container: newSize)
                     }
                     // P710 — トグル操作の 1 行。★ここで `showSoftKeyboard` を
@@ -223,7 +307,7 @@ struct MX68KiOSRootView: View {
                     // `canShowKeyboard` が担っているので、縦へ回せばキーボードは消え、
                     // 横へ戻せば元の状態のまま復帰する(§C-2)。
                     .onChange(of: showSoftKeyboard) { _ in
-                        logSoftKeyboardGeometry(container: geo.size, tag: "P710-SKBD-TOGGLE")
+                        logSoftKeyboardGeometry(container: rootGeo.size, tag: "P710-SKBD-TOGGLE")
                     }
                     // P714 §変更内容 5(Code Review R-2)—— 仮想パッドが画面から
                     // 消える契機では、指を離す前でも必ず押しっぱなしを解除する。
@@ -253,69 +337,69 @@ struct MX68KiOSRootView: View {
                     }
                 }
             }
-        }
-        // 環境オブジェクトの付与はここ 1 箇所に集約する(macOS の MX68KApp.swift:82-86
-        // と同じ方針)。シート経路では IOSSettingsSheet が明示的に付け直す。
-        .environmentObject(configManager)
-        .environmentObject(settingsViewModel)
-        .environmentObject(viewModel)
-        .iosSettingsSheet(activeSheet: $activeSheet,
-                          configManager: configManager,
-                          settingsViewModel: settingsViewModel,
-                          viewModel: viewModel)
-        // P729 — zip 展開の結果として出る選択シートの配線。
-        //
-        // 他のシート(`.settings` / `.loadState`)はボタンが `activeSheet` を直接
-        // 立てるが、これだけは VM 側の処理結果(zip に複数イメージがあった)から
-        // 出るため、起点が `viewModel.showArchivePicker` になる。提示器は
-        // P578/P585 以来の規約どおり単一の `.sheet(item:)` のままにしたいので、
-        // ここで**片方向に転写**する。
-        // ★`.onChange` は iOS 16 互換の単一引数クロージャ形式(既存の 5 本と同じ)。
-        .onChange(of: viewModel.showArchivePicker) { shown in
-            // true 方向のみ駆動する。false 方向をここで `activeSheet = nil` に
-            // するとシート自身の dismiss と二重に競合するため、閉じる側は
-            // `.sheet(item:)` の標準的な dismiss 経路へ任せる。
-            if shown { activeSheet = .archivePicker }
-        }
-        // ★スワイプで閉じられた場合の後始末。行タップ / Cancel ボタンの経路は
-        //   `completeArchiveSelection` / `cancelArchiveSelection` が
-        //   `showArchivePicker` を false へ戻すが、**スワイプ dismiss ではその
-        //   どちらも呼ばれない**。その場合 `activeSheet` だけが nil に戻り、
-        //   `showArchivePicker` は true のまま取り残される —— 展開先の一時
-        //   ディレクトリがリークするうえ、次に zip を選んでも true→true で
-        //   上の `.onChange` が発火せずシートが二度と出なくなる。
-        //   ここで取りこぼしを拾い、キャンセル扱い(一時ディレクトリの破棄)にする。
-        .onChange(of: activeSheet) { sheet in
-            if sheet == nil && viewModel.showArchivePicker {
-                viewModel.cancelArchiveSelection()
+            // 環境オブジェクトの付与はここ 1 箇所に集約する(macOS の MX68KApp.swift:82-86
+            // と同じ方針)。シート経路では IOSSettingsSheet が明示的に付け直す。
+            .environmentObject(configManager)
+            .environmentObject(settingsViewModel)
+            .environmentObject(viewModel)
+            .iosSettingsSheet(activeSheet: $activeSheet,
+                              configManager: configManager,
+                              settingsViewModel: settingsViewModel,
+                              viewModel: viewModel)
+            // P729 — zip 展開の結果として出る選択シートの配線。
+            //
+            // 他のシート(`.settings` / `.loadState`)はボタンが `activeSheet` を直接
+            // 立てるが、これだけは VM 側の処理結果(zip に複数イメージがあった)から
+            // 出るため、起点が `viewModel.showArchivePicker` になる。提示器は
+            // P578/P585 以来の規約どおり単一の `.sheet(item:)` のままにしたいので、
+            // ここで**片方向に転写**する。
+            // ★`.onChange` は iOS 16 互換の単一引数クロージャ形式(既存の 5 本と同じ)。
+            .onChange(of: viewModel.showArchivePicker) { shown in
+                // true 方向のみ駆動する。false 方向をここで `activeSheet = nil` に
+                // するとシート自身の dismiss と二重に競合するため、閉じる側は
+                // `.sheet(item:)` の標準的な dismiss 経路へ任せる。
+                if shown { activeSheet = .archivePicker }
             }
-        }
-        // P706 改訂 1 — 帯の Hard Reset ボタンの確認ダイアログ。
-        // 文言・ボタン・ロールは macOS `ToolbarView.swift:20-28` を逐語再利用し、
-        // 新しい文言を発明しない。★`.keyboardShortcut` は付けない(タッチ操作専用 UI で
-        // あり、Bluetooth キーボード接続時のみ意味を持つ副次機能は本改訂のスコープ外)。
-        .alert("Hard Reset", isPresented: $viewModel.showHardResetConfirm) {
-            Button("Cancel", role: .cancel) { }
-            Button("Reset", role: .destructive) {
-                viewModel.hardReset()
+            // ★スワイプで閉じられた場合の後始末。行タップ / Cancel ボタンの経路は
+            //   `completeArchiveSelection` / `cancelArchiveSelection` が
+            //   `showArchivePicker` を false へ戻すが、**スワイプ dismiss ではその
+            //   どちらも呼ばれない**。その場合 `activeSheet` だけが nil に戻り、
+            //   `showArchivePicker` は true のまま取り残される —— 展開先の一時
+            //   ディレクトリがリークするうえ、次に zip を選んでも true→true で
+            //   上の `.onChange` が発火せずシートが二度と出なくなる。
+            //   ここで取りこぼしを拾い、キャンセル扱い(一時ディレクトリの破棄)にする。
+            .onChange(of: activeSheet) { sheet in
+                if sheet == nil && viewModel.showArchivePicker {
+                    viewModel.cancelArchiveSelection()
+                }
             }
-        } message: {
-            Text("The current state will be lost. Execute a hard reset?")
-        }
-        // ★`.task` はビュー ID ごとに 1 回発火するが、再出現で再発火し得る。
-        //   MX68KiOSViewModel.start() 自身が `didStart` で一度きりに落とし、
-        //   さらに EmulatorEngine.start() も `guard !isRunning` を持つため、
-        //   多重呼び出しは無害。BIOS 未設定で保留した場合の再試行は Apply 経由
-        //   (MX68KiOSViewModel.applySettings)であり、ここではない。
-        .task {
-            viewModel.start(config: configManager.config)
+            // P706 改訂 1 — 帯の Hard Reset ボタンの確認ダイアログ。
+            // 文言・ボタン・ロールは macOS `ToolbarView.swift:20-28` を逐語再利用し、
+            // 新しい文言を発明しない。★`.keyboardShortcut` は付けない(タッチ操作専用 UI で
+            // あり、Bluetooth キーボード接続時のみ意味を持つ副次機能は本改訂のスコープ外)。
+            .alert("Hard Reset", isPresented: $viewModel.showHardResetConfirm) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    viewModel.hardReset()
+                }
+            } message: {
+                Text("The current state will be lost. Execute a hard reset?")
+            }
+            // ★`.task` はビュー ID ごとに 1 回発火するが、再出現で再発火し得る。
+            //   MX68KiOSViewModel.start() 自身が `didStart` で一度きりに落とし、
+            //   さらに EmulatorEngine.start() も `guard !isRunning` を持つため、
+            //   多重呼び出しは無害。BIOS 未設定で保留した場合の再試行は Apply 経由
+            //   (MX68KiOSViewModel.applySettings)であり、ここではない。
+            .task {
+                viewModel.start(config: configManager.config)
+            }
+            // P824 — 物理ゲームパッドの監視開始。上の `.task` とは独立させる。
+            // 再発火しても `startMonitoring()` 自身の冪等ガードで多重登録されない。
+            .task {
+                IOSGamepadInput.shared.startMonitoring()
+            }
         }
     }
-
-    /// P708 §C-1 — 側方配置を選ぶ最小余白幅。
-    /// 導出: Apple HIG の最小タップ領域 44pt + 既存の `.padding(6)` の左右分 6×2 = 56pt。
-    /// これ未満なら従来の上下配置へフォールバックする(= 現行挙動と同一 / 回帰ではない)。
-    private static let minSideBandWidth: CGFloat = 56.0
 
     /// P710 §記号表 — ソフトキーボードを**提示してよい**最小 container 幅(pt)。
     ///
@@ -345,25 +429,19 @@ struct MX68KiOSRootView: View {
     /// P714 §変更内容 3/4 — 仮想パッドを提示してよいか。**オーバーレイの自動非表示と
     /// トグルボタンの無効化はこの 1 つの値を共有する**(条件を 2 箇所に書かない)。
     ///
-    /// 計画の原文は `inputManager.gamepadControllers[0] == nil`
-    /// (= 「port0(JOY1)に物理コントローラが割り当てられていないか」)である。
-    /// 意味論はそのままだが、iOS ではその値が **恒真**になる:
+    /// = 「port0(JOY1)に物理コントローラが割り当てられていないか」。
+    /// macOS 版の `inputManager.gamepadControllers[0] == nil` と同じ意味論。
     ///
-    ///   `MX68K/App/Services/InputManager.swift` は `import AppKit` / `import Carbon`
-    ///   を持つ macOS 専用ファイルで、iOS ターゲットの Sources phase に入っていない
-    ///   (`ruby Scripts/add_ios_target.rb dump-sources MX68K-iOS` で確認)。
-    ///   したがって iOS 版には GameController の配線そのものが存在せず、
-    ///   **物理ゲームパッドから X68000 側へ入力が届く経路が 1 本も無い**。
-    ///   port0 へ割り当てられたコントローラは常に存在しない = 常に `nil` 相当。
-    ///
-    /// ★ここで `GCController.controllers()` を見て自動非表示を実装しては **ならない**:
-    ///   物理パッドを繋いだ瞬間に、実際には何も入力できない物理パッドのために
-    ///   唯一機能している入力手段(仮想パッド)を消してしまう。計画が自動非表示に
-    ///   期待していた「port0 の取り合いの回避」は、取り合う相手が存在しない iOS では
-    ///   守るべき不変条件そのものが無い(§実装差分 D-1)。
-    ///   iOS が物理ゲームパッドに対応した時点で、この 1 行を実際の port0 割当状態へ
-    ///   差し替えれば、オーバーレイ側・ボタン側の双方が同時に追随する。
-    static var virtualPadAvailable: Bool { true }
+    /// P824 — iOS 版が物理 Bluetooth / MFi ゲームパッドに対応したため、P714 当時の
+    /// 恒真値(`true` 固定)から、`IOSGamepadInput` が管理する実際の port0 割当状態へ
+    /// 差し替えた(P714 のコメントが予告していた拡張点)。port0 に物理パッドが
+    /// 割り当てられている間は仮想パッドを隠し、port0 の取り合いを避ける。
+    /// ★`IOSGamepadInput` は `GCController.controllers()` を直接見るのではなく、
+    ///   実際にハンドラを登録してポートを割り当てたコントローラだけを記録するため、
+    ///   「入力できない物理パッドのために仮想パッドを消す」事態は起きない。
+    static var virtualPadAvailable: Bool {
+        IOSGamepadInput.shared.gamepadControllers[0] == nil
+    }
 
     /// macOS `ToolbarView`(上部)に対応する帯——Hard/Soft Reset・FDD0/FDD1・歯車。
     /// 描画を隠さないよう上端の細い帯だけを使う(P703以来の設計方針を継続)。
@@ -516,7 +594,7 @@ struct MX68KiOSRootView: View {
     ///   `DragGesture(minimumDistance: 0)`とスクロールのパンの競合)への一次防壁として
     ///   維持(実測サイズが収まっていればスクロールジェスチャそのものが無効化される)。
     ///
-    /// P760 —— `leadingInset` は側方ボタン帯の幅(`DisplayViewport.face().x`)。
+    /// P760 —— `leadingInset` は側方ボタン帯の幅(P834 以降は `DisplayViewport.bandLayout().sideWidth`)。
     /// 帯を右へずらす `.padding(.leading:)` だけでは内部の幅計算(スクロール要否・
     /// `minWidth`)が縮小前のフル幅のままになり、需要側と供給側が食い違う。
     /// `TouchJoystickView(sideInset:)` と同型に、実際に使える幅を引数で受け取る。
@@ -524,7 +602,10 @@ struct MX68KiOSRootView: View {
     /// P772 —— `trailingInset` は右側状態帯(`sideStatusBand`、左と同じ `sideW` 幅)の分。
     /// P771 で帯が実際に幅いっぱいへ広がる設計になったことで、右側を差し引いていない
     /// 従来の `availableWidth` 計算が初めて可視化された(右の状態帯へ重なる)。
-    private func softKeyboardBand(containerSize: CGSize, leadingInset: CGFloat = 0, trailingInset: CGFloat = 0) -> some View {
+    ///
+    /// P840 —— `rootSafeArea` は `[P839-SKBDGEOM]` 診断ログ専用(レイアウトには使わない)。
+    private func softKeyboardBand(containerSize: CGSize, leadingInset: CGFloat = 0, trailingInset: CGFloat = 0,
+                                  rootSafeArea: EdgeInsets = EdgeInsets()) -> some View {
         let availableWidth = containerSize.width - leadingInset - trailingInset
         // P771 —— 幅いっぱいに拡大する倍率。`measuredKeyboardSize`(既存の実測
         // 機構)を分母に使う。初期値は intrinsic 定数(790pt、ゼロではない)の
@@ -540,11 +621,30 @@ struct MX68KiOSRootView: View {
         //   高さがコンテナ高を超える場合)の保険として残す。
         let needsVScroll = containerSize.height < scaledSize.height
         let bandHeight = min(scaledSize.height, containerSize.height)
+        // P840(診断専用) —— 計測値の更新契機ごとに同じ 1 行を出す(`trigger=` で区別)。
+        // 帯側の局所値(scale 等)はここで捕捉し、計測値は引数で最新値を渡す
+        // (`@State` 書き込み直後の読み戻しに依存しない)。
+        let logGeom = { (child: EdgeInsets, bandFrame: CGRect, bandSafe: EdgeInsets, trigger: String) in
+            logSoftKeyboardBandGeometry(rootSize: containerSize, rootSafeArea: rootSafeArea,
+                                        childSafeArea: child, scale: scale, scaledSize: scaledSize,
+                                        bandFrame: bandFrame, bandSafeArea: bandSafe,
+                                        bandHeight: bandHeight, needsVScroll: needsVScroll,
+                                        trigger: trigger)
+        }
         return ScrollView(needsVScroll ? [.vertical] : [], showsIndicators: needsVScroll) {
             SoftKeyboardView()
                 .background(
                     GeometryReader { contentGeo in
                         Color.clear.preference(key: SoftKeyboardSizeKey.self, value: contentGeo.size)
+                            // P840(診断専用) —— 既存の preference はそのまま、ログ用に safeAreaInsets を読む。
+                            .onAppear {
+                                p839ChildSafeArea = contentGeo.safeAreaInsets
+                                logGeom(contentGeo.safeAreaInsets, p839BandFrame, p839BandSafeArea, "childAppear")
+                            }
+                            .onChange(of: contentGeo.safeAreaInsets) { inset in
+                                p839ChildSafeArea = inset
+                                logGeom(inset, p839BandFrame, p839BandSafeArea, "childSafeArea")
+                            }
                     }
                 )
                 // ★実測(上の GeometryReader)は scaleEffect **より前**の非スケール状態の
@@ -553,8 +653,13 @@ struct MX68KiOSRootView: View {
                 //   循環参照にはならない。
                 .scaleEffect(scale, anchor: .top)
                 // `.scaleEffect` はレイアウトサイズを変えないため、スケール後の占有サイズを
-                // 親レイアウトへ明示的に伝える。
-                .frame(width: scaledSize.width, height: scaledSize.height)
+                // 親レイアウトへ明示的に伝える。`anchor: .top` と揃え、alignment も
+                // `.top` を明示する(P836/D-81) —— 省略時の既定 `.center` だと、
+                // scaleEffect 前の未スケールなレイアウトサイズを報告し続ける子ビューが
+                // 新しい(大きい)フレームの「中央」に配置され、視覚的な拡大の基準点
+                // (上端固定)とずれて正味 `(scaledHeight-242)/2` だけ下方向に
+                // コンテンツがずれる(最下段が画面外/操作帯の下へ押し出される)。
+                .frame(width: scaledSize.width, height: scaledSize.height, alignment: .top)
         }
         .onPreferenceChange(SoftKeyboardSizeKey.self) { size in
             // ★ゼロサイズ(未計測/レイアウト前)は既定値のまま保持し、上書きしない。
@@ -568,6 +673,27 @@ struct MX68KiOSRootView: View {
         //   暗黙的挙動に一切依存しない)。これが無いと、内部コンテンツ幅だけを縮めても
         //   `ScrollView` の占有幅は縮まらず、差の半分だけ右帯へ食い込んだままになる。
         .frame(width: availableWidth, height: bandHeight)
+        // P840(診断専用) —— 帯自身の `.global` フレームと safeAreaInsets。
+        //   タップを奪わないよう `allowsHitTesting(false)`。
+        .background(
+            GeometryReader { g in
+                Color.clear
+                    .onAppear {
+                        p839BandFrame = g.frame(in: .global)
+                        p839BandSafeArea = g.safeAreaInsets
+                        logGeom(p839ChildSafeArea, g.frame(in: .global), g.safeAreaInsets, "bandAppear")
+                    }
+                    .onChange(of: g.frame(in: .global)) { frame in
+                        p839BandFrame = frame
+                        logGeom(p839ChildSafeArea, frame, p839BandSafeArea, "bandFrame")
+                    }
+                    .onChange(of: g.safeAreaInsets) { inset in
+                        p839BandSafeArea = inset
+                        logGeom(p839ChildSafeArea, p839BandFrame, inset, "bandSafeArea")
+                    }
+            }
+            .allowsHitTesting(false)
+        )
         // P720 — 帯全体へ 1 回だけ適用する(`SoftKeyboardView` 内部の個々のキーには
         // 掛けない)。既定 1.0 のため、スライダーを動かすまで見た目は現状のまま。
         .opacity(softKeyboardOpacity)
@@ -579,20 +705,114 @@ struct MX68KiOSRootView: View {
     /// (a) container が想定と違う / (b) `face()` の結果が想定と違う /
     /// (c) 閾値で弾かれた / (d) そもそもログが出ていない(分岐コードに未到達)
     /// を 1 行で区別できる。
+    /// P834(D-80) —— 判定は `DisplayViewport.bandLayout()` の戻り値をそのまま出す
+    /// (判定式をここへ重複記述しない)。`branch=` は 3 値の `mode=` へ置き換え、
+    /// Metal ビューの左右縮小量 `reserve=` を併記する。純粋なログ出力のみ(状態は書かない)。
     private func logBandGeometry(container: CGSize) {
+        let layout = DisplayViewport.bandLayout(container: container)
         let f = DisplayViewport.face(container: container)
         let aspect = container.height > 0 ? container.width / container.height : 0
-        let branch = f.x >= Self.minSideBandWidth ? "side" : "stacked"
         let numbers = String(format:
-            "container=%.1fx%.1f aspect=%.3f face=(x=%.1f y=%.1f w=%.1f h=%.1f) sideW=%.1f threshold=%.1f",
+            "container=%.1fx%.1f aspect=%.3f face=(x=%.1f y=%.1f w=%.1f h=%.1f) sideW=%.1f thresholdSide=%.1f thresholdStacked=%.1f",
             container.width, container.height, aspect,
-            f.x, f.y, f.w, f.h, f.x, Self.minSideBandWidth)
-        mx68k_log("[Swift][iOS][P708-BAND] \(numbers) branch=\(branch)")
+            f.x, f.y, f.w, f.h, layout.sideWidth,
+            DisplayViewport.minSideBandContentWidth, DisplayViewport.minBandThickness)
+        mx68k_log("[Swift][iOS][P708-BAND] \(numbers) mode=\(layout.placement) reserve=\(layout.placement == .reservedSide ? layout.sideWidth : 0)")
 
         // P710 自己反証可能性 —— P708 の既存行の書式は **1 文字も変えず**、
         // 同じ呼び出し点・同じ `container` から 2 行目として出す
         // (情報源を 2 つに割らない)。
         logSoftKeyboardGeometry(container: container, tag: "P710-SKBD")
+
+        // P835(診断専用) —— 同じ呼び出し点から右帯の内容幅を出す。
+        // ★reservedSide 以外では [P835-BANDFRAME] は意図的に出力しない
+        //   (右帯内寸不足の検証は reservedSide でしか成立しないため)。side/stacked 時に
+        //   この行が無いことは「分岐に未到達」を意味しない —— 分岐到達の判定は
+        //   上の [P708-BAND] 行の `mode=` で行うこと。
+        logBandFrame(container: container,
+                     left: p835LeftBandFrame,
+                     right: p835RightBandFrame,
+                     rightIdealW: p835RightIdealWidth,
+                     trigger: "size")
+
+        // P837(診断専用) —— 分岐に依存せず無条件で出す(P835 の盲点対策)。
+        logContentWidth()
+    }
+
+    /// P837(D-80継続) —— SwiftUIのレイアウト計装(P835で機能しなかった)に頼らず、
+    /// UIFont+NSAttributedStringで実際のフォントメトリクスから帯内容の必要幅を
+    /// 直接測る。分岐(reservedSide到達)に依存しないため、P835のBuild&Testが
+    /// 陥った「対象分岐に届かない試験がPASSする」盲点を構造的に回避する。
+    private func logContentWidth() {
+        let font = UIFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        func w(_ s: String) -> CGFloat { (s as NSString).size(withAttributes: attrs).width }
+
+        let cpuWorst = String(format: String(localized: "CPU: %dMHz"), 200)
+        let memWorst = String(format: String(localized: "MEM: %dMB"), 12)
+        let spdWorst = String(format: String(localized: "Spd: %3d%%"), 9999)
+        let widths = [("cpu", cpuWorst, w(cpuWorst)), ("mem", memWorst, w(memWorst)), ("spd", spdWorst, w(spdWorst))]
+        let worst = widths.map(\.2).max() ?? 0
+        let detail = widths.map { String(format: "%@=\"%@\"(%.2f)", $0.0, $0.1, $0.2) }.joined(separator: " ")
+        mx68k_log("[Swift][iOS][P837-CONTENTW] worst=\(String(format: "%.2f", worst)) \(detail)")
+    }
+
+    /// P835(診断専用) —— 側方帯の実描画フレームと右帯の理想幅を 1 行に併記する。
+    /// 派生値だけでなく生入力(`container=`)と利用可能幅の算出元(`layout.sideWidth`)を
+    /// 同じ行に出す。`trigger=` はどの契機で出た行かを示す —— 回転直後の `size` 契機では
+    /// フレーム・理想幅がまだ回転前の値のことがあるため、計測値の更新時
+    /// (`leftFrame`/`rightFrame`/`rightIdeal`)にも同じ行を出して鮮度を区別できるようにした。
+    /// 未計測の値は 0 のまま出る。純粋なログ出力のみ(状態は書かない)。
+    private func logBandFrame(container: CGSize, left: CGRect, right: CGRect,
+                              rightIdealW: CGFloat, trigger: String) {
+        let layout = DisplayViewport.bandLayout(container: container)
+        guard layout.placement == .reservedSide else { return }
+        let availW = layout.sideWidth - 12   // `.padding(6)` の左右分
+        let containerText = String(format: "container=%.1fx%.1f", container.width, container.height)
+        let numbers = String(format:
+            "leftFrame=(%.1f,%.1f,%.1f) rightFrame=(%.1f,%.1f,%.1f) "
+            + "leftAvailW=%.1f rightAvailW=%.1f rightIdealW=%.1f",
+            left.minX, left.maxX, left.width,
+            right.minX, right.maxX, right.width,
+            availW, availW, rightIdealW)
+        mx68k_log("[Swift][iOS][P835-BANDFRAME] \(containerText) mode=\(layout.placement) \(numbers) trigger=\(trigger)")
+    }
+
+    /// P840(D-81、診断専用) —— ソフトキーボード帯の上下余白非対称(H1: 背景色のセーフエリア
+    /// 自動延長)を判別する 1 行。子(`SoftKeyboardView`)と帯自身の safeAreaInsets を同じ行に
+    /// 並べ、派生値(scale/scaledSize/bandHeight/needsVScroll)の生入力(rootSize/measuredSize)も
+    /// 併記する。未計測の値は 0 のまま出る(`trigger=` で鮮度を区別)。純粋なログ出力のみ。
+    private func logSoftKeyboardBandGeometry(rootSize: CGSize, rootSafeArea: EdgeInsets,
+                                             childSafeArea: EdgeInsets, scale: CGFloat,
+                                             scaledSize: CGSize, bandFrame: CGRect,
+                                             bandSafeArea: EdgeInsets, bandHeight: CGFloat,
+                                             needsVScroll: Bool, trigger: String) {
+        func insets(_ e: EdgeInsets) -> String {
+            String(format: "(%.1f,%.1f,%.1f,%.1f)", e.top, e.leading, e.bottom, e.trailing)
+        }
+        let root = String(format: "rootSize=%.1fx%.1f", rootSize.width, rootSize.height)
+        let measured = String(format: "measuredSize=%.1fx%.1f",
+                              measuredKeyboardSize.width, measuredKeyboardSize.height)
+        let scaled = String(format: "scale=%.4f scaledSize=%.1fx%.1f",
+                            scale, scaledSize.width, scaledSize.height)
+        let band = String(format: "bandFrame=(%.1f,%.1f,%.1f,%.1f)",
+                          bandFrame.minX, bandFrame.maxX, bandFrame.minY, bandFrame.maxY)
+        let height = String(format: "bandHeight=%.1f", bandHeight)
+        mx68k_log("[Swift][iOS][P839-SKBDGEOM] \(root) rootSafeArea=\(insets(rootSafeArea)) "
+                  + "\(measured) childSafeArea=\(insets(childSafeArea)) \(scaled) "
+                  + "\(band) bandSafeArea=\(insets(bandSafeArea)) \(height) "
+                  + "needsVScroll=\(needsVScroll ? 1 : 0) trigger=\(trigger)")
+    }
+
+    /// P835(診断専用) —— 付与先ビューの `.global` フレームを初回表示時と変化時に通知する。
+    /// タップを奪わないよう `allowsHitTesting(false)`。
+    private func bandFrameProbe(onFrame: @escaping (CGRect) -> Void) -> some View {
+        GeometryReader { g in
+            Color.clear
+                .onAppear { onFrame(g.frame(in: .global)) }
+                .onChange(of: g.frame(in: .global)) { frame in onFrame(frame) }
+        }
+        .allowsHitTesting(false)
     }
 
     /// P710 自己反証可能性 —— 幅ゲートの判定を出す 1 行。

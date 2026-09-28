@@ -86,6 +86,72 @@ void mx68k_midi_set_output_device(int idx);
 int  mx68k_midi_get_input_device_count(void);
 bool mx68k_midi_get_input_device_name(int idx, char* buf, int len);
 void mx68k_midi_set_input_device(int idx);
+/* P825/P826: MIDI 出力先の排他切替。0 = 外部 CoreMIDI, 1 = 内蔵 MT-32(Bridge/mt32_bridge.c),
+ * 2 = 内蔵 SC-55(Bridge/sc55_bridge.c)。範囲外は 0 扱い。即時反映。
+ * MIDI ボード自体の装着(mx68k_set_midi_enabled)とは独立した軸。実装は Bridge/midi_coremidi.c。 */
+void mx68k_set_midi_output_destination(int destination);
+/* P825: 内蔵 MIDI 音源(MT-32 / mt32emu)。実装は Bridge/mt32_bridge.c。 */
+/* 内蔵 MT-32 の再構成を要求する(メインスレッドから、fire-and-forget)。実際の
+ * context 作成/破棄・ROM 読込は次のフレーム境界でエミュレーションスレッドが行う。
+ * sample_rate は AudioUnit に実際に設定済みの出力レート(Swift の
+ * AudioEngine.currentSampleRate)を渡すこと。パスはファイル名を仮定しない。
+ * partial_count は最大パーシャル数(既定32=実機準拠)。次回 open 時にのみ反映される。 */
+void mx68k_request_mt32_reconfigure(bool enabled, const char* control_rom_path,
+                                    const char* pcm_rom_path, int32_t sample_rate,
+                                    int32_t partial_count);
+/* CoreAudio 実時間コールバックから呼ぶ。MT-32 出力を stereo_buf(L/R インターリーブ
+ * Int16、frames フレーム)へ飽和加算する。再構成中・無効時は何もしない(ブロックしない)。 */
+void mx68k_mt32_render_mix(int16_t* stereo_buf, int32_t frames);
+/* 設定画面向けの状態。0 = 無効, 1 = 動作中, 2 = 要求の適用待ち,
+ * 負値 = 直近の適用失敗コード(mt32emu の MT32EMU_RC_*、例: -2 ファイル無し, -4 ROM 不足)。 */
+int32_t mx68k_mt32_get_status(void);
+
+/* ---- P826: 内蔵 MIDI 音源(SC-55 / Nuked-SC55)。実装は Bridge/sc55_bridge.c ----
+ * ★スレッド規約: Nuked-SC55 コアは全呼び出しの直列化を要求するため、下の「ワーカー専用」
+ *   関数は SC55Worker(MX68K/App/Services/SC55Worker.swift)の直列キュー上からだけ呼ぶこと。
+ *   他スレッドとは入出力 2 本の SPSC リングでのみつながる(ロック無し)。
+ * iOS では全関数がスタブ(内蔵 SC-55 は macOS 限定)。 */
+/* 出力リングの容量(フレーム)。実効容量は 1 少ない。= 内蔵 SC-55 音声の遅延の上限。 */
+#define MX68K_SC55_OUTPUT_RING_FRAMES 2048
+/* [ワーカー専用] 5 つの ROM ファイルを読み込みコアへ渡す。成功で status=2(warm-up 待ち)。
+ * 失敗時 status は -1(ファイル無し/読込失敗)または -2(サイズ不正)。パスは名前を仮定しない。 */
+bool mx68k_sc55_load(const char* control_path, const char* pcm_path,
+                     const char* wave1_path, const char* wave2_path, const char* wave3_path);
+/* [ワーカー専用] 無効化・他出力先への切替・停止時に呼ぶ。入力受付停止 + 未処理入力と
+ * 出力リングの破棄 + コアのリセット。status=0。 */
+void mx68k_sc55_reset(void);
+/* [ワーカー専用] 入力リングから最大 max_bytes バイトを 1024 バイト単位でコアへ渡す。
+ * コアの受信バッファが満杯なら残りは次回へ持ち越す。戻り値 = 実際に渡したバイト数。 */
+int  mx68k_sc55_pump_input(int max_bytes);
+/* [ワーカー専用] コアで frames フレーム(64kHz、1..8192)生成する。 */
+bool mx68k_sc55_render(float* left, float* right, int frames);
+/* [ワーカー専用] 変換後の Int16 L/R インターリーブを出力リングへ積む。空きが足りなければ
+ * そのチャンク全体を破棄して 0 を返す。戻り値 = 積んだフレーム数。 */
+int  mx68k_sc55_output_push(const int16_t* stereo, int frames);
+/* [ワーカー専用] 出力リングの空きフレーム数(push 前の事前チェック・占有率計算用)。 */
+int  mx68k_sc55_output_free_frames(void);
+/* [ワーカー専用] 読込直後のファームウェア起動待ち(64kHz で 4 秒分を空回し)。完了で status=1、
+ * 入力受付を開始する。読込に成功していなければ何もしない。 */
+void mx68k_sc55_warmup(void);
+/* [ワーカー専用・診断用] MX68K_TEST_SC55_RECONF 用。入力リングを通さずコアへ直接送る。 */
+bool mx68k_sc55_test_inject_midi(const uint8_t* bytes, int count);
+/* 設定画面向けの状態。0 = 未読込/無効, 1 = 動作中, 2 = 適用中(warm-up 中),
+ * -1 = ROM ファイルが無い/読めない, -2 = ROM のサイズ不正。 */
+int32_t mx68k_sc55_get_status(void);
+/* CoreAudio 実時間コールバックから呼ぶ。出力リングから読めるだけ読み stereo_buf へ飽和加算する
+ * (足りなければその分は無音のまま)。ロック無し・ブロックしない。 */
+void mx68k_sc55_render_mix(int16_t* stereo_buf, int32_t frames);
+/* 診断カウンタ(get-and-reset)。入力リング満杯で捨てたバイト数 / 出力リング満杯で捨てた
+ * チャンク数 / 動作中に出力リングが足りなかったコールバック数。 */
+uint32_t mx68k_sc55_get_and_reset_input_drop_bytes(void);
+uint32_t mx68k_sc55_get_and_reset_output_drop_chunks(void);
+uint32_t mx68k_sc55_get_and_reset_underrun_callbacks(void);
+/* 停止要求フラグを立てる(mx68k_shutdown() と SC55Worker.stop() から呼ぶ、冪等)。
+ * ワーカーは各反復の冒頭でこれを確認し、立っていれば自分を再投入しない。 */
+void mx68k_sc55_shutdown(void);
+bool mx68k_sc55_stop_requested(void);
+/* エミュレーション再起動(電源 ON)時にワーカーを再開する前に呼ぶ。 */
+void mx68k_sc55_clear_stop_request(void);
 
 /* ---- P693: MIDI Viewer(MIDIボード状態モニタ)向けの読み出し API ---- */
 /* 送受信の累積カウンタ(セッション累積、リセットされない)。実体は

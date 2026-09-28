@@ -20,6 +20,7 @@
 #include "fdd_timing_shim.h"
 #include "opm_shadow.h"   /* P479: m68000_bridge.c が書き込む OPM レジスタのシャドウ */
 #include "mercury_opn_shadow.h"   /* P491: m68000_bridge.c が書き込む Mercury OPN レジスタのシャドウ */
+#include "mt32_bridge.h"          /* P825: 内蔵 MT-32 の再構成(フレーム境界)とシャットダウン */
 
 /* P509 (D-48): m68000_bridge.c 定義の診断プローブ。本サイクルの変更を
  * Bridge の 2 ファイルに閉じるため、宣言をヘッダではなくここに置く。
@@ -1936,6 +1937,8 @@ void mx68k_shutdown(void) {
     free(MEM); MEM = NULL;
     free(IPL); IPL = NULL;
     free(FONT); FONT = NULL;
+    mx68k_mt32_shutdown();   /* P825: 内蔵 MT-32 の context を明示的に close + free */
+    mx68k_sc55_shutdown();   /* P826: 内蔵 SC-55 ワーカーへ停止要求(フラグのみ。ワーカー自体は Swift 側が所有) */
 
     if (debug_log_file) {
         fclose(debug_log_file);
@@ -3342,6 +3345,12 @@ static void p367_dma_write_check(int ch, uint32_t dst_before, uint16_t mtc_befor
  * 一時停止中(設定シート表示等)は mx68k_pump_pending() 経由でこの関数だけが
  * 呼ばれるため、pending 操作がシートを閉じるまで滞留しない。 */
 static int consume_pending_ops(void) {
+    /* P825: 内蔵 MT-32 の再構成要求をフレーム境界で消費する。MIDI 投入
+     * (p633_midi_send_bytes)と同じエミュレーションスレッドで逐次実行することで
+     * 両者の競合を原理的に無くす。ゲスト状態に触れないため return せず
+     * fall-through する(1 フレームを潰さない、SASI キャッシュ無効化と同じ扱い)。
+     * 先頭に置くのは、他の pending 操作の早期 return で 1 フレーム遅れないため。 */
+    mx68k_mt32_apply_pending_reconfigure();
     /* P503 (c2): SRAM ゼロクリアを hard/soft reset より**先**にチェックする。
      * 旧順序(hard_reset が先)では「Clear SRAM → ⌘R」を連続操作したとき、
      * hard reset が先に消費され(mx68k_reset_hard() は SRAM を再読込/再クリア

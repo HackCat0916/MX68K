@@ -220,6 +220,22 @@ struct ExtensionsConfig: Codable {
     var midiDelayMs: Int = 0         // 0..1000(Stage 1 の既定 0 を維持)
     var midiOutDeviceIndex: Int = 0
     var midiInDeviceIndex: Int = 0
+    // P826: MIDI 出力先(排他 3 択)。0 = 外部 CoreMIDI(従来動作), 1 = 内蔵 MT-32(P825),
+    // 2 = 内蔵 SC-55(P826、macOS のみ)。P825 の midiInternalSynthEnabled(Bool)を置き換える
+    // (旧キーからの移行は init(from:) の LegacyKeys を参照)。Apply 直後に反映、ハードリセット不要。
+    var midiOutputDestination: Int = 0
+    // P825: 内蔵 MT-32 の ROM パス。ファイル名を仮定しない(機種は mt32emu が SHA1 で判定)。空 = 未選択。
+    var mt32ControlRomPath: String = ""
+    var mt32PcmRomPath: String = ""
+    // P827: 内蔵 MT-32 の最大パーシャル数(mt32emu_set_partial_count)。既定 32 = 実機 MT-32 と同じ上限。
+    // 増やすと発音数超過による音切れを軽減できる場合があるが実機とは異なる挙動になる。UI 範囲 1〜256。
+    var mt32PartialCount: Int = 32
+    // P826: 内蔵 SC-55(Nuked-SC55)の ROM パス 5 種。空 = 未選択。
+    var sc55Rom1Path: String = ""
+    var sc55Rom2Path: String = ""
+    var sc55WaveRom1Path: String = ""
+    var sc55WaveRom2Path: String = ""
+    var sc55WaveRom3Path: String = ""
     // P200: SASI HDD (.hdf) イメージパス。空 = 未装着。論理 unit 0..7 が
     // Bridge で SASI device 0-7(Config.HDImage[unit*2])にマップされる。
     // LUN1(奇数 index)は使わない — Human68k は device ID 単位で probe するため
@@ -280,6 +296,12 @@ struct ExtensionsConfig: Codable {
 
     init() {}   // init(from:) を書くとメンバワイズ init が消えるため必須
 
+    /// P826: 自動合成の CodingKeys から消えた旧キーを読むための専用キー。
+    /// 書き出しは自動合成のまま新キー midiOutputDestination のみ(旧キーは次回保存時に消える)。
+    private enum LegacyKeys: String, CodingKey {
+        case midiInternalSynthEnabled
+    }
+
     // P194 教訓: 自動生成の init(from:) はプロパティ既定値を使わずキー欠落で throw し、
     // ConfigManager.load が try? で握り潰して設定全体を初期値にリセットしてしまう。
     // 新キー(P200 の hdd0Path/hdd1Path、P455 の hdd2Path〜hdd7Path)を含む
@@ -296,6 +318,28 @@ struct ExtensionsConfig: Codable {
         midiDelayMs        = try c.decodeIfPresent(Int.self, forKey: .midiDelayMs) ?? 0
         midiOutDeviceIndex = try c.decodeIfPresent(Int.self, forKey: .midiOutDeviceIndex) ?? 0
         midiInDeviceIndex  = try c.decodeIfPresent(Int.self, forKey: .midiInDeviceIndex) ?? 0
+        // P826: 優先順位 (1) 新キー midiOutputDestination、(2) 無ければ P825 の旧キー
+        // midiInternalSynthEnabled(true → 1、false/欠落 → 0)、(3) 0/1/2 以外は 0 に丸める。
+        if let dest = try c.decodeIfPresent(Int.self, forKey: .midiOutputDestination) {
+            midiOutputDestination = dest
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            let wasInternal =
+                try legacy.decodeIfPresent(Bool.self, forKey: .midiInternalSynthEnabled) ?? false
+            midiOutputDestination = wasInternal ? 1 : 0
+        }
+        if !(0...2).contains(midiOutputDestination) { midiOutputDestination = 0 }
+        // P825: 既存 config.json には存在しないため decodeIfPresent 必須。
+        mt32ControlRomPath = try c.decodeIfPresent(String.self, forKey: .mt32ControlRomPath) ?? ""
+        mt32PcmRomPath     = try c.decodeIfPresent(String.self, forKey: .mt32PcmRomPath) ?? ""
+        // P827: 新キー。手編集で範囲外(0 以下など)になった値は mt32emu へ渡さないよう 1〜256 に丸める。
+        mt32PartialCount   = min(max(try c.decodeIfPresent(Int.self, forKey: .mt32PartialCount) ?? 32, 1), 256)
+        // P826: 新キー。既存 config.json には存在しないため decodeIfPresent 必須。
+        sc55Rom1Path     = try c.decodeIfPresent(String.self, forKey: .sc55Rom1Path) ?? ""
+        sc55Rom2Path     = try c.decodeIfPresent(String.self, forKey: .sc55Rom2Path) ?? ""
+        sc55WaveRom1Path = try c.decodeIfPresent(String.self, forKey: .sc55WaveRom1Path) ?? ""
+        sc55WaveRom2Path = try c.decodeIfPresent(String.self, forKey: .sc55WaveRom2Path) ?? ""
+        sc55WaveRom3Path = try c.decodeIfPresent(String.self, forKey: .sc55WaveRom3Path) ?? ""
         hdd0Path    = try c.decodeIfPresent(String.self, forKey: .hdd0Path) ?? ""
         hdd1Path    = try c.decodeIfPresent(String.self, forKey: .hdd1Path) ?? ""
         hdd2Path    = try c.decodeIfPresent(String.self, forKey: .hdd2Path) ?? ""

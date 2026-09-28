@@ -52,6 +52,50 @@ struct DisplayGeometry: Equatable {
 enum DisplayViewport {
     static let targetAspect: CGFloat = 4.0 / 3.0
 
+    /// P834(D-80) — 帯(iOS版の操作帯・状態帯オーバーレイ)が実用的なタップ領域を
+    /// 持つための最小厚み。Apple HIG 最小タップ領域 44pt + 帯の内側 `.padding(6)` の
+    /// 両側分 6×2 = 56pt。旧 `MX68KiOSApp.swift` の `minSideBandWidth` を移設した
+    /// (値は変更なし)。P837 以降は `.stacked` 分岐の垂直判定にのみ使う
+    /// (側方帯の判定・幅は `minSideBandContentWidth`)。
+    static let minBandThickness: CGFloat = 56.0
+
+    /// P837(D-80継続) — 側方帯(左右とも)の内容が実際に必要とする最小幅。
+    /// `minBandThickness`(56pt、`.stacked`分岐の垂直判定にのみ使う)とは
+    /// 意味が異なる——後者はP834が新設した時点で誤って左帯(ボタン)の
+    /// タップ領域要件だけから流用され、右帯(状態表示テキスト)の実際の
+    /// 必要幅を反映していなかった(P835/Fable5監査で判明)。
+    /// 導出: "CPU: 200MHz"(プリセット最大、SF Mono 10pt)実測68.00pt
+    /// + `.padding(6)`×2(12pt)= 80.0pt。詳細は `.mx68k_cycles/P837_plan.md`。
+    static let minSideBandContentWidth: CGFloat = 80.0
+
+    /// P834(D-80) — iOS 版の帯配置モード。
+    enum BandPlacement: Equatable {
+        case side
+        case stacked
+        case reservedSide
+    }
+
+    struct BandLayout: Equatable {
+        let placement: BandPlacement
+        /// side/reservedSide 時の帯幅(片側)。stacked 時は 0。
+        let sideWidth: CGFloat
+    }
+
+    /// P834(D-80) — 帯配置の判定を 1 箇所に集約した純関数。
+    /// ★重なりゼロの幾何保証: side は `face().x` という自然な余白、reservedSide は
+    ///   Metal ビュー自体を `sideWidth` 分 `.padding()` で縮めて確保した余白へ帯を置く。
+    ///   stacked は `face().y >= minBandThickness`(上下に実際の余白がある)場合のみ選ぶ。
+    static func bandLayout(container: CGSize) -> BandLayout {
+        let f = face(container: container)
+        if f.x >= minSideBandContentWidth {
+            return BandLayout(placement: .side, sideWidth: f.x)
+        }
+        if f.y >= minBandThickness {
+            return BandLayout(placement: .stacked, sideWidth: 0)
+        }
+        return BandLayout(placement: .reservedSide, sideWidth: minSideBandContentWidth)
+    }
+
     /// container 座標系での 4:3 レターボックス「面」(originX, originY, width, height)。
     /// P212 の固定 4:3 面そのもの(標準的な画面モードは全て物理モニタ上で同一の矩形を
     /// 占める = テクニカルデータブック 表2-10/表2-12、P592/P595 調査で確定)。

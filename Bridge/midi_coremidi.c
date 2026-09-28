@@ -59,6 +59,8 @@
 #include "px68k_compat.h"                  /* menu_items -> mx68k_menu_items */
 #include "midi_shadow.h"                   /* P693: MIDI Viewer 用の送受信カウンタ */
 #include "EmulatorBridge.h"                /* P693: mx68k_midi_get_* の宣言と照合するため */
+#include "mt32_bridge.h"                   /* P825: mt32_bridge_send_bytes() */
+#include "sc55_bridge.h"                   /* P826: sc55_bridge_send_bytes() */
 
 /* ---- CoreMIDI 側の状態(移設元 midi_darwin.c:20-34 と同じ役割) ----
  * 移設元では非 static のグローバルだったが、外部から参照する利用者は
@@ -105,6 +107,22 @@ _Atomic(unsigned long long) g_midi_rx_messages = 0;
 _Atomic(unsigned long long) g_midi_rx_bytes    = 0;
 _Atomic(uint32_t)           g_midi_rx_last     = 0;
 
+/* P825/P826: MIDI 出力先。0 = 外部 CoreMIDI、1 = 内蔵 MT-32(Bridge/mt32_bridge.c)、
+ * 2 = 内蔵 SC-55(Bridge/sc55_bridge.c)。 */
+static _Atomic(int) g_midi_output_destination = 0;
+
+/* P832: p633_midi_send_bytes() の到達確認用診断ログの出力回数(先頭 MIDI_P832_LOG_MAX 回のみ出力)。 */
+#define MIDI_P832_LOG_MAX 20
+static _Atomic(uint32_t) g_p832_midi_tx_log_count = 0;
+
+void mx68k_set_midi_output_destination(int destination)
+{
+	if (destination < 0 || destination > 2) {
+		destination = 0;
+	}
+	atomic_store_explicit(&g_midi_output_destination, destination, memory_order_relaxed);
+}
+
 /* 直近 1 メッセージを 1 ワードへ畳む(midi_shadow.h のパッキング契約の実装)。
  * 呼び出し側は data != NULL かつ len >= 1 を保証すること。
  *
@@ -148,6 +166,34 @@ p633_midi_send_bytes(const uint8_t *data, uint32_t len)
 	atomic_fetch_add_explicit(&g_midi_tx_messages, 1, memory_order_relaxed);
 	atomic_store_explicit(&g_midi_tx_last, p693_pack_last_msg(data, len),
 	                      memory_order_relaxed);
+
+	/* P832: 内蔵/外部の分岐前に到達を記録する(ログが 1 行も無ければ本関数自体が呼ばれていない)。 */
+	{
+		uint32_t n = atomic_fetch_add_explicit(&g_p832_midi_tx_log_count, 1,
+		                                       memory_order_relaxed);
+		if (n < MIDI_P832_LOG_MAX) {
+			debug_log("[P832-MIDITX] destination=%d len=%u tx_messages=%llu tx_bytes=%llu (count=%u)\n",
+			          atomic_load_explicit(&g_midi_output_destination, memory_order_relaxed),
+			          len,
+			          (unsigned long long)atomic_load_explicit(&g_midi_tx_messages, memory_order_relaxed),
+			          (unsigned long long)atomic_load_explicit(&g_midi_tx_bytes, memory_order_relaxed),
+			          n + 1);
+		}
+	}
+
+	/* P825/P826: 出力先が内蔵音源なら外部 CoreMIDI へは送らない(排他、MPX68K と同じ UX)。
+	 * ★上の tx_messages / tx_last は内蔵・外部どちらのルートでも共通に計上するが、
+	 *   tx_bytes は「CoreMIDI へ実際に渡したバイト数」なので内蔵ルートでは増えない。 */
+	switch (atomic_load_explicit(&g_midi_output_destination, memory_order_relaxed)) {
+	case 1:
+		mt32_bridge_send_bytes(data, len);
+		return;
+	case 2:
+		sc55_bridge_send_bytes(data, len);
+		return;
+	default:
+		break;   /* 0 = 外部。下の CoreMIDI 送出へ進む */
+	}
 
 	if (mid_out_port == 0 || mid_endpoint == 0) {
 		return;	/* デバイス未オープン(移設元は無効な endpoint へ送っていた) */
@@ -314,6 +360,9 @@ mid_outDevList(LPHMIDIOUT phmo)
 	err_sts = MIDIClientCreate(CFSTR("px68k"), NULL, NULL, &mid_client);
 	if (err_sts != noErr) {
 		p6logd("MIDI:CoreMIDI: No out client created.\n");
+		debug_log("[P832-MIDIDEV] reason=client_fail err_sts=%d destination=%d\n",
+		          (int)err_sts,
+		          atomic_load_explicit(&g_midi_output_destination, memory_order_relaxed));
 		return Device_num;
 	}
 
@@ -321,6 +370,9 @@ mid_outDevList(LPHMIDIOUT phmo)
 	err_sts = MIDIOutputPortCreate(mid_client, CFSTR("px68k MIDI out_Port"), &mid_out_port);
 	if (err_sts != noErr) {
 		p6logd("MIDI:CoreMIDI: No out port created.\n");
+		debug_log("[P832-MIDIDEV] reason=port_fail err_sts=%d destination=%d\n",
+		          (int)err_sts,
+		          atomic_load_explicit(&g_midi_output_destination, memory_order_relaxed));
 		return Device_num;
 	}
 
@@ -328,7 +380,40 @@ mid_outDevList(LPHMIDIOUT phmo)
 	mid_endpoint = 0;
 	uint32_t core_mid_num = (uint32_t)MIDIGetNumberOfDestinations();	/* 仮想ポート含む */
 	if (core_mid_num == 0) {
-		return Device_num;	/* 見つからない */
+		debug_log("[P832-MIDIDEV] reason=zero_dest core_mid_num=0 destination=%d\n",
+		          atomic_load_explicit(&g_midi_output_destination, memory_order_relaxed));
+		/* P833(D-79): 出力先が内蔵MT-32/SC-55のときは、外部CoreMIDI出力先が
+		 * 0件でも hOut を有効化する。外部への実送出が起きないのは主として
+		 * p633_midi_send_bytes() の destination スイッチ自体が case 1/2 で
+		 * 即座に return し、外部 CoreMIDI 送出コードへ一歩も進まないため
+		 * (下記スイッチ参照)。実行時に destination が 0(外部)へ切り替わった
+		 * 場合の保険として、mid_out_port==0/mid_endpoint==0 判定(既存、
+		 * 本修正では変更しない)も独立に効く——ここでは mid_endpoint は
+		 * 0 のまま(下のデバイス列挙ループを通らないため)なので、その
+		 * 経路でも誤送出しない。*phmo に代入する mid_name は既存の成功パス
+		 * (本関数の末尾)・mid_inDevList() と同じダミー非NULLポインタの
+		 * 再利用。
+		 *
+		 * ★Code Review指摘により追加: この早期returnは、本来この分岐へ
+		 * 到達した際に実行されるはずだった menu_items[8] のリセット
+		 * (Core/px68k/x68k/midi.c の else節「No Device Found.」書込み)を
+		 * バイパスしてしまう。MIDI_Init()はApply/ハードリセットのたびに
+		 * MIDI_Cleanup()(hOutを0へ戻す)→MIDI_Init()の順で毎回呼ばれる
+		 * (Bridge/EmulatorBridge.c:1658/1672・2452/2459、「常に呼ぶ」と
+		 * コメント済み)ため、「外部機器を接続してdestination=0で使用→
+		 * 機器を外してdestination=1/2へ切替・Apply」という手順で
+		 * menu_items[8][0]に古いデバイス名が残存し続ける経路が実在する。
+		 * これを防ぐため、bypass時も menu_items[8][0] を明示的に空にする。 */
+		int destination = atomic_load_explicit(&g_midi_output_destination,
+		                                        memory_order_relaxed);
+		if (destination == 1 || destination == 2) {
+			menu_items[8][0][0] = '\0';	/* 外部デバイス一覧の陳腐化防止(Code Review指摘) */
+			*phmo = (HANDLE)mid_name;
+			debug_log("[P833-MIDIFORCE] forced hOut for internal destination=%d (core_mid_num=0)\n",
+			          destination);
+			return 1;
+		}
+		return Device_num;	/* 外部destination選択時は従来どおり見つからない扱い */
 	}
 
 	/* MIDI 出力ポート一覧を格納 */
@@ -348,6 +433,9 @@ mid_outDevList(LPHMIDIOUT phmo)
 		*phmo = (HANDLE)mid_name;	/* MIDI Active!(ダミーを代入しておく) */
 	}
 
+	debug_log("[P832-MIDIDEV] reason=ok core_mid_num=%u destination=%d\n",
+	          core_mid_num,
+	          atomic_load_explicit(&g_midi_output_destination, memory_order_relaxed));
 	return core_mid_num;
 }
 

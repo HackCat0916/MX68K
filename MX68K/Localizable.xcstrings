@@ -1,6 +1,436 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "External MIDI": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "外部 MIDI"
+          }
+        }
+      }
+    },
+    "Internal MT-32": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内蔵 MT-32"
+          }
+        }
+      }
+    },
+    "Internal SC-55": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内蔵 SC-55"
+          }
+        }
+      }
+    },
+    "MT-32 Control ROM": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 コントロールROM"
+          }
+        }
+      }
+    },
+    "MT-32 PCM ROM": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 PCM ROM"
+          }
+        }
+      }
+    },
+    "MT-32 status: Applying…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 ステータス: 適用中…"
+          }
+        }
+      }
+    },
+    "MT-32 status: Error (code %d)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 ステータス: エラー (コード %d)"
+          }
+        }
+      }
+    },
+    "MT-32 status: Error — ROM file not found": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 ステータス: エラー — ROMファイルが見つかりません"
+          }
+        }
+      }
+    },
+    "MT-32 status: Error — ROM not recognized": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 ステータス: エラー — ROMが認識されません"
+          }
+        }
+      }
+    },
+    "MT-32 status: Error — both a Control ROM and a PCM ROM are required": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 ステータス: エラー — コントロールROMとPCM ROMの両方が必要です"
+          }
+        }
+      }
+    },
+    "MT-32 status: Error — the Control ROM and PCM ROM do not match": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 ステータス: エラー — コントロールROMとPCM ROMが一致しません"
+          }
+        }
+      }
+    },
+    "MT-32 status: Not loaded (press Apply)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 ステータス: 未読込み(「適用」を押してください)"
+          }
+        }
+      }
+    },
+    "MT-32 status: Running": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MT-32 ステータス: 動作中"
+          }
+        }
+      }
+    },
+    "Max Partials: %lld": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最大パーシャル数: %lld"
+          }
+        }
+      }
+    },
+    "Output": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出力"
+          }
+        }
+      }
+    },
+    "SC-55 ROM 1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 ROM 1"
+          }
+        }
+      }
+    },
+    "SC-55 ROM 2": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 ROM 2"
+          }
+        }
+      }
+    },
+    "SC-55 Wave ROM 1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 波形ROM 1"
+          }
+        }
+      }
+    },
+    "SC-55 Wave ROM 2": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 波形ROM 2"
+          }
+        }
+      }
+    },
+    "SC-55 Wave ROM 3": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 波形ROM 3"
+          }
+        }
+      }
+    },
+    "SC-55 status: Error (code %d)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 ステータス: エラー (コード %d)"
+          }
+        }
+      }
+    },
+    "SC-55 status: Error — a ROM file has the wrong size": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 ステータス: エラー — ROMファイルのサイズが不正です"
+          }
+        }
+      }
+    },
+    "SC-55 status: Error — a ROM file was not found or could not be read": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 ステータス: エラー — ROMファイルが見つからないか読み込めません"
+          }
+        }
+      }
+    },
+    "SC-55 status: Not loaded (press Apply)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 ステータス: 未読込み(「適用」を押してください)"
+          }
+        }
+      }
+    },
+    "SC-55 status: Running": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 ステータス: 動作中"
+          }
+        }
+      }
+    },
+    "SC-55 status: Starting up…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SC-55 ステータス: 起動中…"
+          }
+        }
+      }
+    },
+    "%@: Not selected": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: 未選択"
+          }
+        }
+      }
+    },
+    "%@: %lld bytes": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %lld バイト"
+          }
+        }
+      }
+    },
+    "%@: %lld bytes — unexpected size for this SC-55 ROM (it will likely be rejected)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %lld バイト — このSC-55 ROMには想定外のサイズです(おそらく拒否されます)"
+          }
+        }
+      }
+    },
+    "%@: %lld bytes — unusual size for this ROM type (it is accepted only if MT-32 emulation recognizes it)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@: %lld バイト — このROM種別としては珍しいサイズです(MT-32エミュレーションが認識した場合のみ受理されます)"
+          }
+        }
+      }
+    },
+    "⚠ For the SC-55, setting Reset Command to GS is recommended (the default, LA, is for the MT-32).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ SC-55を使用する場合はReset CommandをGSに設定することを推奨します(既定のLAはMT-32用です)。"
+          }
+        }
+      }
+    },
+    "⚠ Output and internal-synth ROM changes take effect immediately after pressing Apply — no hard reset needed.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 出力先および内蔵音源ROMの変更は「適用」を押すと即座に反映されます(ハードリセット不要)。"
+          }
+        }
+      }
+    },
+    "⚠ Roland MT-32 / CM-32L ROMs are not included. Select your own Control and PCM ROM files; the file names do not matter (the ROM type is identified by its contents).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ Roland MT-32 / CM-32LのROMは同梱されていません。お手持ちのコントロールROM・PCM ROMファイルを選択してください(ファイル名は問いません — ROM種別は内容から判定されます)。"
+          }
+        }
+      }
+    },
+    "⚠ Roland SC-55 (mk1) ROMs are not included. Select your own five ROM files (typically sc55_rom1.bin, sc55_rom2.bin, sc55_waverom1.bin–sc55_waverom3.bin).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ Roland SC-55(mk1)のROMは同梱されていません。お手持ちの5つのROMファイル(通常sc55_rom1.bin、sc55_rom2.bin、sc55_waverom1.bin〜sc55_waverom3.bin)を選択してください。"
+          }
+        }
+      }
+    },
+    "⚠ Takes effect after pressing Apply. 32 (the default) matches the real MT-32 hardware. Increasing it can reduce notes cutting off when too many partials play at once, but no longer matches real hardware behavior.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 「適用」を押すと反映されます。既定値の32は実機のMT-32ハードウェアに準拠した値です。増やすと同時発音数が多いときのノート欠けを減らせますが、実機の挙動とは一致しなくなります。"
+          }
+        }
+      }
+    },
+    "⚠ The SC-55 is silent for about 0.3 seconds right after it is enabled and right after a hard reset, while its firmware starts up.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ SC-55は有効化直後およびハードリセット直後、ファームウェアの起動中の約0.3秒間は無音になります。"
+          }
+        }
+      }
+    },
+    "Control ROM": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コントロールROM"
+          }
+        }
+      }
+    },
+    "PCM ROM": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PCM ROM"
+          }
+        }
+      }
+    },
+    "ROM 1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ROM 1"
+          }
+        }
+      }
+    },
+    "ROM 2": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ROM 2"
+          }
+        }
+      }
+    },
+    "Wave ROM 1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "波形ROM 1"
+          }
+        }
+      }
+    },
+    "Wave ROM 2": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "波形ROM 2"
+          }
+        }
+      }
+    },
+    "Wave ROM 3": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "波形ROM 3"
+          }
+        }
+      }
+    },
     "Failed to extract the archive": {
       "localizations": {
         "ja": {
@@ -3527,6 +3957,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "⚠ 参考値: XM6 の既定は 84 ms(TypeG 版は 28 ms)。0 = 遅延なし(MX68K の既定)。"
+          }
+        }
+      }
+    },
+    "⚠ External MIDI device selection is not available on iOS. Use Internal MT-32 or SC-55.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ iOS では外部 MIDI デバイスを選択できません。内蔵 MT-32 または SC-55 を使用してください。"
+          }
+        }
+      }
+    },
+    "⚠ The SC-55 is a full firmware emulation and is CPU-intensive. On some iPad models it may stutter or drop notes — if so, switch to Internal MT-32.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ SC-55 はファームウェア全体をエミュレートするため負荷が高く、一部の iPad 機種では音切れやノート落ちが発生することがあります。その場合は内蔵 MT-32 へ切り替えてください。"
           }
         }
       }

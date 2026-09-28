@@ -1,0 +1,21 @@
+mt32emu (Roland MT-32 / CM-32L / LAPC-I emulation library) — MX68K vendored copy
+
+Upstream:   https://github.com/munt/munt  (subdirectory mt32emu/)
+Commit:     6e7c01fba7e1d50c8fa705834889fd0eac136075 (2026-06-22)
+Version:    libmt32emu 2.8.3
+License:    LGPL-2.1-or-later (COPYING.LESSER.txt).
+            src/sha1/sha1.{cpp,h}: BSD-3-Clause-style (Micael Hildenborg), see its file header.
+
+Contents: only the core synthesis library sources as listed in upstream
+mt32emu/CMakeLists.txt (libmt32emu_CPP_SOURCES + libmt32emu_C_SOURCES +
+libmt32emu_INTERNAL_RESAMPLER_SOURCES) and the headers they use.
+Excluded: tests (src/test), SOXR/libsamplerate adapters, VersionTagging.cpp
+(shared-library only), CMake/pkg-config files, other munt subprojects.
+
+MX68K-authored file (not from upstream): src/config.h
+  (hand-expanded from upstream src/config.h.in for a static build,
+   EXPORTS_TYPE=3, MT32EMU_SHARED undefined, no version tagging).
+
+Required compile definitions: MT32EMU_WITH_INTERNAL_RESAMPLER, MT32EMU_WITH_STD_SNPRINTF
+Header search path: ThirdParty/mt32emu/src
+Upstream sources are unmodified.

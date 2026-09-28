@@ -1,0 +1,32 @@
+Nuked-SC55 (Roland SC-55 mk1 emulator by nukeykt) — MX68K vendored copy
+
+Source:     MPX68K (https://github.com/YosAwed/MPX68K), directory "X68000 Shared/SC55/"
+Commit:     3e286a025bdde55b71109edfa3336e8c54e7ae28 (2026-09-25, "Prepare version 4.4 for App Store release")
+            Verified with:
+              gh api repos/YosAwed/MPX68K/commits/3e286a025bdde55b71109edfa3336e8c54e7ae28 --jq .sha
+Upstream:   Nuked-SC55 (https://github.com/nukeykt/Nuked-SC55). MPX68K's copy is based on
+            upstream pin 9c98ab97 with MPX68K's own modifications dated 2026-09-07
+            (headless, serialized host API "X68SC55_*"; no SDL, no ROM file I/O — see the
+            "Modified for MPX68K" header line in core/mcu.cpp etc.). MX68K takes the
+            MPX68K-modified files as-is.
+License:    GPL-2.0-or-later (LICENSE; per-file headers in core/*.cpp).
+
+Contents (15 files, directory layout preserved — core/mcu.cpp includes "../SC55Bridge.h"):
+  SC55Bridge.h                                   (host API declarations)
+  LICENSE                                        (GPL-2 full text)
+  core/mcu.{cpp,h}, core/mcu_interrupt.{cpp,h}, core/mcu_opcodes.{cpp,h},
+  core/mcu_timer.{cpp,h}, core/pcm.{cpp,h}, core/submcu.{cpp,h}, core/lcd.h
+
+Excluded: SC55Synthesizer.swift and README.md (MPX68K's own Swift integration layer and
+its notes; MX68K has its own integration in Bridge/sc55_bridge.c and
+MX68K/App/Services/SC55Worker.swift), MPX68K tests/sc55/.
+
+MX68K-authored file (not from MPX68K): this MX68K_VENDOR.txt.
+
+Build notes (MX68K):
+  - The 6 core/*.cpp files are compiled into the macOS target (MX68K) only.
+  - Per-file COMPILER_FLAGS = -O2 on all 6 (also in Debug): the core emulates the MCU
+    instruction by instruction and is real-time sensitive (MPX68K SC55/README.md says the
+    same; the P826 performance spike was measured with -O2).
+  - Header search path: ThirdParty/nuked_sc55 (macOS target only).
+Vendored sources are unmodified.

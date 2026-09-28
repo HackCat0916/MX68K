@@ -50,6 +50,28 @@ component here is misattributed or mislicensed, please open an issue.
   `Bridge/EmulatorBridge.c` includes a verbatim port from uraraworks'
   px68k-libretro fork PR#2 (merge `cd88e2ea…`), noted in-file.
 
+- **mt32emu** (Roland MT-32 / CM-32L emulation, from munt) —
+  `ThirdParty/mt32emu/`. <https://github.com/munt/munt> commit
+  `6e7c01fba7e1d50c8fa705834889fd0eac136075`, libmt32emu 2.8.3, upstream
+  sources unmodified. **LGPL-2.1-or-later** — full text in
+  `ThirdParty/mt32emu/COPYING.LESSER.txt` (also `LICENSES/LGPL-2.1.txt`),
+  except `src/sha1/sha1.{cpp,h}`: Copyright (c) 2011 Micael Hildenborg,
+  **BSD-3-Clause** (full notice reproduced in `NOTICE-THIRD-PARTY.md`).
+  `src/config.h` is written by MX68K (not from upstream). LGPL-2.1 §3 permits
+  incorporating it into MX68K's GPL-2.0-or-later combined work. **No Roland
+  ROMs are included** — users must supply their own.
+
+- **Nuked-SC55** (Roland SC-55 mk1 emulation, by nukeykt) —
+  `ThirdParty/nuked_sc55/`. Copyright (C) 2021, 2024 nukeykt
+  (<https://github.com/nukeykt/Nuked-SC55>). Taken as modified by MPX68K
+  (headless, serialized host API `X68SC55_*`; header `SC55Bridge.h` by MPX68K)
+  from <https://github.com/YosAwed/MPX68K> commit
+  `3e286a025bdde55b71109edfa3336e8c54e7ae28`, directory `X68000 Shared/SC55/`;
+  the MPX68K modifications are marked at the top of the affected files. MX68K
+  takes these sources unmodified (see `ThirdParty/nuked_sc55/MX68K_VENDOR.txt`).
+  **GPL-2.0-or-later** — full text in `ThirdParty/nuked_sc55/LICENSE`. macOS
+  target only. **No Roland ROMs are included** — users must supply their own.
+
 - **ZIPFoundation** — <https://github.com/weichsel/ZIPFoundation>. MIT.
   Swift Package dependency, `MX68K-iOS` target only.
 

@@ -185,6 +185,23 @@ class EmulatorViewModel: ObservableObject {
     let engine = EmulatorEngine()
     let audio = AudioEngine()
 
+    /// P825: 内蔵 MT-32 の最新設定。hardReset() は config を持たないため、pushConfig() で
+    /// 控えた値を再構成要求に使う。
+    private var mt32Enabled = false
+    private var mt32ControlRomPath = ""
+    private var mt32PcmRomPath = ""
+    private var mt32PartialCount = 32
+    /// P826: 内蔵 SC-55 の最新設定(MT-32 と同じく hardReset() 用に控える)。
+    private var sc55Enabled = false
+    private var sc55Rom1Path = ""
+    private var sc55Rom2Path = ""
+    private var sc55WaveRom1Path = ""
+    private var sc55WaveRom2Path = ""
+    private var sc55WaveRom3Path = ""
+    /// P826: 内蔵 SC-55 の専用ワーカー。初めて有効化されたとき(または診断フック
+    /// MX68K_TEST_SC55_RECONF 設定時)に生成する。
+    private var sc55Worker: SC55Worker?
+
     var onFDDMounted: ((Int, String) -> Void)?
     /// P191 — mountFDD と対称。イジェクトを config に永続化するために発火する。
     var onFDDEjected: ((Int) -> Void)?
@@ -323,6 +340,8 @@ class EmulatorViewModel: ObservableObject {
         // と mx68k_init(:191)は既に完了しているため、読み戻し値は確定している。
         let sr = Double(mx68k_get_audio_sample_rate())
         audio.initialize(sampleRate: sr)
+        requestMT32Reconfigure()   // P825: 起動時。pushConfig で控えた保存済み設定を使う。
+        requestSC55Reconfigure()   // P826: 同上。
         audio.enabled = config.audio.enabled
         audio.volume = Float(config.audio.volume)
         // P512: config に永続化されたチップ別音量を Core へ反映する。ここは Core 初期化
@@ -656,6 +675,21 @@ class EmulatorViewModel: ObservableObject {
         mx68k_set_midi_delay_ms(Int32(config.extensions.midiDelayMs))
         mx68k_midi_set_output_device(Int32(config.extensions.midiOutDeviceIndex))
         mx68k_midi_set_input_device(Int32(config.extensions.midiInDeviceIndex))
+        // P825/P826: MIDI 出力先(外部 CoreMIDI / 内蔵 MT-32 / 内蔵 SC-55)の切替は即時反映。
+        // 内蔵音源の再構成は AudioUnit のレート確定後に requestMT32Reconfigure() /
+        // requestSC55Reconfigure() で要求する。
+        let midiDest = config.extensions.midiOutputDestination
+        mx68k_set_midi_output_destination(Int32(midiDest))
+        mt32Enabled = (midiDest == 1)
+        mt32ControlRomPath = config.extensions.mt32ControlRomPath
+        mt32PcmRomPath = config.extensions.mt32PcmRomPath
+        mt32PartialCount = config.extensions.mt32PartialCount
+        sc55Enabled = (midiDest == 2)
+        sc55Rom1Path = config.extensions.sc55Rom1Path
+        sc55Rom2Path = config.extensions.sc55Rom2Path
+        sc55WaveRom1Path = config.extensions.sc55WaveRom1Path
+        sc55WaveRom2Path = config.extensions.sc55WaveRom2Path
+        sc55WaveRom3Path = config.extensions.sc55WaveRom3Path
         // P493: 内蔵 SRAM 64KB 化。Mercury/MIDI と同じく値は Bridge 側で「設定値」として
         // 保持され、配線はハードリセット（⌘R）で確定する。
         mx68k_set_sram_64k_enabled(config.extensions.sram64kEnabled)
@@ -717,6 +751,10 @@ class EmulatorViewModel: ObservableObject {
     func applySettings(_ config: EmulatorConfig) {
         guard isRunning else { return }   // 初回（エミュ未起動）は config 保存のみ。startEmulation が起動時に適用。
         pushConfig(config)
+        // P825: 内蔵 MT-32 はハードリセット不要で、次のフレーム境界で反映される。
+        requestMT32Reconfigure()
+        // P826: 内蔵 SC-55 もハードリセット不要(ワーカーが読込 + warm-up を行う)。
+        requestSC55Reconfigure()
         // P238: 「適用」時の強制ハードリセットを廃止。クロックは毎フレーム
         // 反映されるので即時、機種/メモリ/FPU/BIOS は次回の手動リセット（⌘R）で
         // 反映される（各タブのキャプションで告知済み）。homing はリセット時のみ
@@ -749,6 +787,9 @@ class EmulatorViewModel: ObservableObject {
         engine.stop()
         audio.stop()
         audio.teardown()
+        // P826: SC-55 ワーカーを止める。debug.log を閉じる mx68k_shutdown() より前に呼ぶ
+        // (停止時の診断行を書けるように)。
+        sc55Worker?.stop()
         mx68k_shutdown()
         isRunning = false
         EmulatorRunState.shared.isRunning = isRunning        // P546: メニューゲート用の軽量ミラー
@@ -776,11 +817,45 @@ class EmulatorViewModel: ObservableObject {
         audio.stop()
         audio.teardown()
         audio.initialize(sampleRate: Double(mx68k_get_audio_sample_rate()))
+        // P825: AudioUnit の出力レートがここで切り替わり得るため、MT-32 も新レートで作り直す
+        // (怠ると MT-32 だけ旧レートのまま鳴り、ピッチがずれる)。
+        requestMT32Reconfigure()
+        // P826: SC-55 も新レートで変換器を作り直し、音源自体も読込 + warm-up からやり直す
+        // (実機の電源投入相当。直後の約 0.3 秒は無音)。
+        requestSC55Reconfigure()
         audio.start()
         mx68k_schedule_hard_reset()   // フレーム境界で安全にリセット(直接 mx68k_reset_hard は run_frame とレース)。
         resumeIfPausedByDebugger()    // P749: リセットは Core 側のデバッガ停止を消すので Swift 側も同期させる。
         InputManager.shared.requestMouseHoming()   // P196: reset でゲストポインタ位置が失われるため原点合わせ。
         showTransientMessage(String(localized: "Hard Reset"))
+    }
+
+    /// P825: 内蔵 MT-32 の再構成を要求する(fire-and-forget、実行は次のフレーム境界)。
+    /// サンプルレートは必ず AudioUnit に実際に設定済みの `audio.currentSampleRate` を渡す。
+    private func requestMT32Reconfigure() {
+        let rate = Int32(audio.currentSampleRate)
+        let partials = Int32(mt32PartialCount)
+        mt32ControlRomPath.withCString { control in
+            mt32PcmRomPath.withCString { pcm in
+                mx68k_request_mt32_reconfigure(mt32Enabled, control, pcm, rate, partials)
+            }
+        }
+    }
+
+    /// P826: 内蔵 SC-55 の再構成を要求する(fire-and-forget、実行はワーカー上)。
+    /// サンプルレートは MT-32 と同じく `audio.currentSampleRate` を渡す。
+    private func requestSC55Reconfigure() {
+        if sc55Worker == nil && (sc55Enabled || SC55Worker.selfTestRequested) {
+            sc55Worker = SC55Worker()
+        }
+        sc55Worker?.requestReconfigure(SC55Worker.Settings(
+            enabled: sc55Enabled,
+            rom1Path: sc55Rom1Path,
+            rom2Path: sc55Rom2Path,
+            waveRom1Path: sc55WaveRom1Path,
+            waveRom2Path: sc55WaveRom2Path,
+            waveRom3Path: sc55WaveRom3Path,
+            sampleRate: audio.currentSampleRate))
     }
 
     func softReset() {

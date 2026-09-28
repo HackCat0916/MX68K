@@ -68,6 +68,8 @@ struct MIDIMonitorView: View {
                 // ---- TX(ゲスト → 実 MIDI デバイス) ----
                 Text("TX (guest → device)").font(.subheadline)
                 row("messages:", "\(midi.txMessages)")
+                // P825: 出力先が内蔵 MT-32 のときは messages/last は増えるが bytes は増えない
+                // (bytes は CoreMIDI へ実送出したバイト数のみを数える)。送出層の故障ではない。
                 row("bytes:", "\(midi.txBytes)")
                 lastMessageRows(txLast, packed: midi.txLast)
 

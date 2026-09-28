@@ -97,6 +97,8 @@ final class EmulatorMTKView_iOS: MTKView {
             // ★`keyboard` と違い所有者はこのビューではない(SwiftUI のオーバーレイと
             //   共有するシングルトン)ため `self` を介さず直接呼ぶ。
             TouchJoystickInput.shared.releaseVirtualPad(reason: "didEnterBackground")
+            // P824 — 物理ゲームパッドも同じ契機・同じ理由(共有シングルトン)で解除する。
+            IOSGamepadInput.shared.releaseAllPorts(reason: "didEnterBackground")
         }
     }
 

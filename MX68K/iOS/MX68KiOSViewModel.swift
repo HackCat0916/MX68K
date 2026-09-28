@@ -100,6 +100,23 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// ままなので、設定を Apply したあとアプリを再起動せずに再試行できる(§R-4)。
     private var didStart = false
 
+    /// P830 — 内蔵 MT-32 の設定値(macOS `EmulatorViewModel` の同名 private プロパティと同型)。
+    /// pushConfig で config から写し、requestMT32Reconfigure() で Bridge へ渡す。
+    private var mt32Enabled = false
+    private var mt32ControlRomPath = ""
+    private var mt32PcmRomPath = ""
+    private var mt32PartialCount = 32
+
+    /// P831 — 内蔵 SC-55 の設定値・ワーカー(macOS `EmulatorViewModel` の
+    /// 同名 private プロパティ・`sc55Worker`と同型)。
+    private var sc55Enabled = false
+    private var sc55Rom1Path = ""
+    private var sc55Rom2Path = ""
+    private var sc55WaveRom1Path = ""
+    private var sc55WaveRom2Path = ""
+    private var sc55WaveRom3Path = ""
+    private var sc55Worker: SC55Worker?
+
     // MARK: - 起動
     //
     // ★P706: パスは **すべて config 由来**になった。P703 が持っていた
@@ -210,6 +227,11 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         // レートを読み戻してから AudioUnit を作る(Swift 側にレート集合を複製しない)。
         let sr = Double(mx68k_get_audio_sample_rate())
         audio.initialize(sampleRate: sr)
+        // P830: 内蔵 MT-32 を AudioUnit の確定レートで構成する(macOS
+        // `EmulatorViewModel.startEmulation` の audio.initialize 直後と同じ位置)。
+        // これが無いと再起動後、Apply かハードリセットまで MT-32 が無効のままになる。
+        requestMT32Reconfigure()
+        requestSC55Reconfigure()   // P831: 内蔵 SC-55 も同じ位置で構成する
         audio.enabled = config.audio.enabled
         audio.volume = Float(config.audio.volume)
         // チップ別音量は macOS 側では EmulatorViewModel 専用の 1 行ラッパー
@@ -283,6 +305,10 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             return
         }
         pushConfig(config)
+        // P830: 内蔵 MT-32 はハードリセット不要で、次のフレーム境界で反映される
+        // (macOS `EmulatorViewModel.applySettings` と同じ)。
+        requestMT32Reconfigure()
+        requestSC55Reconfigure()   // P831: 内蔵 SC-55 も同じくハードリセット不要
         mx68k_log("[Swift][iOS] applySettings -> config pushed (pending reset)")
     }
 
@@ -384,7 +410,41 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     ///   アプリ再起動で反映される(タブの「takes effect at next launch」表記どおり)。
     func hardReset() {
         mx68k_log("[Swift][iOS] hardReset() -> schedule hard reset")
+        // P830: macOS `EmulatorViewModel.hardReset()` と同じく、リセット予約の前に
+        // 内蔵 MT-32 を再構成する(macOS は AudioEngine 再初期化の直後に呼ぶが、
+        // iOS はその再初期化を持たないため、対応位置は mx68k_schedule_hard_reset の直前)。
+        requestMT32Reconfigure()
+        requestSC55Reconfigure()   // P831: 内蔵 SC-55 も同じ位置で再構成する
         mx68k_schedule_hard_reset()
+    }
+
+    /// P830 — macOS `EmulatorViewModel.requestMT32Reconfigure()` の逐語移植。
+    /// 内蔵 MT-32 の再構成を要求する(fire-and-forget、実行は次のフレーム境界)。
+    /// サンプルレートは必ず AudioUnit に実際に設定済みの `audio.currentSampleRate` を渡す。
+    private func requestMT32Reconfigure() {
+        let rate = Int32(audio.currentSampleRate)
+        let partials = Int32(mt32PartialCount)
+        mt32ControlRomPath.withCString { control in
+            mt32PcmRomPath.withCString { pcm in
+                mx68k_request_mt32_reconfigure(mt32Enabled, control, pcm, rate, partials)
+            }
+        }
+    }
+
+    /// P831 — macOS `EmulatorViewModel.requestSC55Reconfigure()` の逐語移植。
+    /// 内蔵 SC-55 の再構成を要求する(fire-and-forget、実行はワーカー上)。
+    private func requestSC55Reconfigure() {
+        if sc55Worker == nil && (sc55Enabled || SC55Worker.selfTestRequested) {
+            sc55Worker = SC55Worker()
+        }
+        sc55Worker?.requestReconfigure(SC55Worker.Settings(
+            enabled: sc55Enabled,
+            rom1Path: sc55Rom1Path,
+            rom2Path: sc55Rom2Path,
+            waveRom1Path: sc55WaveRom1Path,
+            waveRom2Path: sc55WaveRom2Path,
+            waveRom3Path: sc55WaveRom3Path,
+            sampleRate: audio.currentSampleRate))
     }
 
     /// macOS `ToolbarView` の Soft Reset ボタンと同じく**確認ダイアログ無し**で即時実行
@@ -665,8 +725,10 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// だけを抜き出した小関数。★iOS 用に新しい既定値・新しい写像を発明しない。
     ///
     /// P712 — SASI / 内蔵SCSI / MO / CD の再送を追加した(下半分)。
-    /// MIDI / Mercury / Windrv 系の setter は引き続き **呼ばない**
+    /// Mercury / Windrv 系の setter は引き続き **呼ばない**
     /// (iOS 未対応、P706 §0-2 非ゴールのうち P712 でも扱わない残り)。
+    /// P830 — MIDI ボード・出力先・内蔵 MT-32 の setter を追加した(CoreMIDI デバイス
+    /// 選択は引き続き iOS 非対応)。P831 — 内蔵 SC-55 の設定値も写すようにした。
     private func pushConfig(_ config: EmulatorConfig) {
         config.bios.iplromPath.withCString { ipl in
             config.bios.cgromPath.withCString { cg in
@@ -707,6 +769,26 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         //   いるのは SCSI/SASI/MIDI/Mercury/Windrv 系であり、この 2 本は含まれない。
         mx68k_set_ext_fdd_enabled(config.extensions.externalFDDUnit)   // P686
         mx68k_set_sram_64k_enabled(config.extensions.sram64kEnabled)   // P493
+        // P830 — MIDI ボード(CZ-6BM1)と出力先(macOS `EmulatorViewModel.pushConfig`
+        // :669-686 と同内容)。CoreMIDI デバイス index(midi_set_output/input_device)
+        // は iOS 非対応のため送らない(内蔵 SC-55 は P831 で対応)。装着・リセット送信・音源種別は
+        // ハードリセットで確定、送信遅延と出力先は即時反映。
+        mx68k_set_midi_enabled(config.extensions.midiEnabled)
+        mx68k_set_midi_reset_enabled(config.extensions.midiResetOnInit)
+        mx68k_set_midi_reset_type(Int32(config.extensions.midiResetType))
+        mx68k_set_midi_delay_ms(Int32(config.extensions.midiDelayMs))
+        let midiDest = config.extensions.midiOutputDestination
+        mx68k_set_midi_output_destination(Int32(midiDest))
+        mt32Enabled = (midiDest == 1)
+        mt32ControlRomPath = config.extensions.mt32ControlRomPath
+        mt32PcmRomPath = config.extensions.mt32PcmRomPath
+        mt32PartialCount = config.extensions.mt32PartialCount
+        sc55Enabled = (midiDest == 2)
+        sc55Rom1Path = config.extensions.sc55Rom1Path
+        sc55Rom2Path = config.extensions.sc55Rom2Path
+        sc55WaveRom1Path = config.extensions.sc55WaveRom1Path
+        sc55WaveRom2Path = config.extensions.sc55WaveRom2Path
+        sc55WaveRom3Path = config.extensions.sc55WaveRom3Path
         // P762 — ターボの目標倍率を config から復元する(macOS
         // `EmulatorViewModel.pushConfig`:669-677 と同内容)。ターボ ON/OFF 自体は
         // 永続化しないため、ここで反映されるのは「次に ON にしたときの倍率」。

@@ -517,7 +517,12 @@ struct SoftKeyboardView: View {
         }
         .frame(width: canvasWidth, height: canvasHeight)
         .padding(12)
-        .background(panelBackground)
+        // P840/D-81(H1仮説・未実測) —— `Color` を `.background()` へ渡すと iOS 15+ では既定
+        // `ignoresSafeAreaEdges: .all` のオーバーロードに解決され、ビューがセーフエリア境界に
+        // 接すると背景色だけがセーフエリア内まで自動延長される。iOS の帯は
+        // `ZStack(alignment: .bottom)` で画面下端(セーフエリア下端)に接するため、
+        // `[]` を明示してこの自動延長を無効化し、キーの上下余白を揃える。
+        .background(panelBackground, ignoresSafeAreaEdges: [])
         .onAppear {
             state.startLEDPolling()
         }
