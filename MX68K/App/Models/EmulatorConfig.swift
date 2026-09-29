@@ -223,10 +223,12 @@ struct ExtensionsConfig: Codable {
     // P826: MIDI 出力先(排他 3 択)。0 = 外部 CoreMIDI(従来動作), 1 = 内蔵 MT-32(P825),
     // 2 = 内蔵 SC-55(P826、macOS のみ)。P825 の midiInternalSynthEnabled(Bool)を置き換える
     // (旧キーからの移行は init(from:) の LegacyKeys を参照)。Apply 直後に反映、ハードリセット不要。
-    // P843: iOS には「外部 CoreMIDI」の選択肢自体が無い(デバイス選択の配線が無く
-    // 選んでも鳴らないため、Output Picker から tag(0) を除去済み)。新規
-    // config.json(この既定値が使われるケース)でいきなり無音状態にならないよう、
-    // iOS 版の既定値だけ内蔵 MT-32(1)にする。
+    // P843: 新規 config.json(この既定値が使われるケース)でいきなり無音状態に
+    // ならないよう、iOS 版の既定値だけ内蔵 MT-32(1)にする(MIDI 機器を持たない
+    // ユーザーが大半のため、すぐ音が出る内蔵音源を既定とする)。
+    // P844: iOS 版でも外部 CoreMIDI(0)は Output Picker から選択可能に戻した
+    // (CoreMIDI デバイス一覧からの選択 UI は無く、検出された最初の destination
+    // へ自動送出)。既定値はこの P843 の判断のまま据え置く。
     #if os(iOS)
     var midiOutputDestination: Int = 1
     #else
@@ -337,13 +339,9 @@ struct ExtensionsConfig: Codable {
             midiOutputDestination = wasInternal ? 1 : 0
         }
         if !(0...2).contains(midiOutputDestination) { midiOutputDestination = 0 }
-        #if os(iOS)
-        // P843: 既存(macOS由来・iCloud同期等)のconfig.jsonが外部CoreMIDI(0)を
-        // 保持していた場合も、iOS版のOutput Pickerにはその選択肢が無いため
-        // 内蔵MT-32へ補正する(選択肢除去に伴う無音化を防ぐ、上のプロパティ既定値
-        // と同じ理由)。
-        if midiOutputDestination == 0 { midiOutputDestination = 1 }
-        #endif
+        // P844: P843 で iOS 版に入れていた「0(外部 CoreMIDI)→ 1(内蔵 MT-32)」の
+        // 強制補正は削除した。iOS 版でも External MIDI を再び選択できるようになったため、
+        // 残すとユーザーが明示的に選んで保存した値を次回起動時に無断で書き換えてしまう。
         // P825: 既存 config.json には存在しないため decodeIfPresent 必須。
         mt32ControlRomPath = try c.decodeIfPresent(String.self, forKey: .mt32ControlRomPath) ?? ""
         mt32PcmRomPath     = try c.decodeIfPresent(String.self, forKey: .mt32PcmRomPath) ?? ""

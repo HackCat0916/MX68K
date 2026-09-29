@@ -113,6 +113,7 @@ iOS版（iPhone/iPad）はmacOS版と同じエミュレーションコア・設�
 - **物理キーボード** — Bluetooth等で接続したハードウェアキーボードからの入力（キーリピート対応）
 - **物理ゲームパッド** — Bluetooth/MFi対応コントローラ
 - **内蔵MIDI音源** — Roland MT-32（mt32emu）・Roland SC-55（Nuked-SC55）(macOS版と同じソフトウェアエミュレーション、ROMファイルは別途ご用意ください)
+- **外部MIDI出力** — USB-C/Lightning接続のUSB MIDIインターフェース経由で外部MIDI音源へ演奏可能。macOS版と同じ出力/入力デバイス選択UIに対応（実機hands-on確認済み）
 - **ステートセーブ/ロード** — ワンタップでの即時保存と、保存済み一覧からの読込
 - **ZIP圧縮FDイメージ** — ZIP内のFDイメージを展開してマウント（複数イメージ格納時は選択シート表示）
 - **HDD/SCSI/MO/CD-ROMのマウント** — ファイルをアプリ内へコピーせず、選択した元の場所を参照してマウント
@@ -129,7 +130,6 @@ iOS版（iPhone/iPad）はmacOS版と同じエミュレーションコア・設�
 - FDDの書込み禁止切替
 - FD2/FD3の挿入・イジェクト
 - Mercury Unit（macOS版のみ）
-- 外部MIDI出力先デバイスの選択（CoreMIDIデバイス一覧、macOS版のみ——MIDIボード[CZ-6BM1]自体のON/OFFはiOS版でも可能ですが、出力先「External MIDI」の選択肢自体がiOS版には表示されません。内蔵MT-32/SC-55はiOS版でも利用可能です）
 - 電源ボタン・ゲストソフトからの電源OFF要求の検出（現状macOS版のみ）
 
 **English:**
@@ -144,6 +144,7 @@ The iOS version (iPhone/iPad) shares the same emulation core and settings screen
 - **Physical Keyboard** — input from a hardware keyboard connected via Bluetooth etc. (with key repeat)
 - **Physical Gamepad** — Bluetooth/MFi-compatible controllers
 - **Internal MIDI Synthesizers** — Roland MT-32 (mt32emu) and Roland SC-55 (Nuked-SC55), the same software emulation as the macOS version (you must supply your own ROM files)
+- **External MIDI Output** — play external MIDI gear via a USB-C/Lightning USB MIDI interface, with the same output/input device picker as the macOS version (verified hands-on)
 - **State Save / Load** — one-tap instant save, and loading from a list of saved states
 - **ZIP-compressed FD Images** — extracts and mounts FD images inside a ZIP (a selection sheet appears for multi-image archives)
 - **HDD/SCSI/MO/CD-ROM Mounting** — mounts the selected file in place, without copying it into the app
@@ -160,7 +161,6 @@ The iOS version (iPhone/iPad) shares the same emulation core and settings screen
 - FDD write-protect toggle
 - Inserting/ejecting FD2/FD3
 - Mercury Unit (macOS only)
-- Selecting an external MIDI output/input device (the CoreMIDI device list, macOS only — the MIDI board (CZ-6BM1) itself can still be toggled on/off on iOS, but there is no "External MIDI" output option shown on iOS at all — only Internal MT-32/SC-55, which are available on iOS)
 - The power button and detection of guest power-off requests (currently macOS only)
 
 ---

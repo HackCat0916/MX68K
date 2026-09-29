@@ -7,6 +7,10 @@ import SwiftUI
 // P830: 上記のうち MIDI ボード・内蔵 MT-32 関連は iOS でも表示するよう分割した
 // (除外は Mercury Unit・CoreMIDI デバイス選択のみ)。
 // P831: 内蔵 SC-55 も iOS で表示するようにした(iOS では性能警告文を追加表示)。
+// P844: macOS 限定なのは Mercury Unit と CoreMIDI デバイス「一覧」選択のみ。
+// 出力先 External MIDI の選択自体は iOS でも可能(検出された最初の destination へ送出)。
+// P846: iOS 版にも CoreMIDI デバイス一覧選択(Output/Input Device)を追加。macOS 限定は
+// Mercury Unit のみ(空一覧時の案内文だけは OS 別の文言に分岐)。
 struct AudioSettingsView: View {
     @EnvironmentObject var settingsViewModel: SettingsViewModel
     #if os(macOS)
@@ -104,8 +108,10 @@ struct AudioSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 // P761: Mercury Unit は macOS 限定。
                 // P830: MIDI ボード・出力先・内蔵 MT-32・リセット/遅延設定は iOS でも表示する
-                // (いずれも CoreMIDI デバイス一覧に依存しない)。CoreMIDI デバイス選択
+                // (いずれも CoreMIDI デバイス一覧に依存しない)。CoreMIDI デバイス一覧選択
                 // だけを `#if os(macOS)` に残す(内蔵 SC-55 は P831 で iOS 対応)。
+                // P844: 出力先 External MIDI の選択は iOS でも可能(一覧選択 UI のみ macOS 限定)。
+                // P846: 一覧選択 UI も iOS 対応済み。以下の `#if os(macOS)` は Mercury Unit のみ。
                 #if os(macOS)
                 Toggle("Mercury Unit (16-bit linear PCM)", isOn: $settingsViewModel.mercuryUnit)
                     .disabled(settingsViewModel.midiEnabled)
@@ -153,11 +159,16 @@ struct AudioSettingsView: View {
                 if settingsViewModel.midiEnabled {
                     // P825/P826: 出力先の排他選択(外部 CoreMIDI / 内蔵 MT-32 / 内蔵 SC-55)。
                     // P831: 内蔵 SC-55 は iOS でも選択できる(P830 までは macOS 専用だった)。
-                    // P843: iOS には CoreMIDI デバイス選択が無く外部 MIDI は鳴らないため選択肢から除外。
+                    // P844: P843 で iOS から除外していた External MIDI を復活。iOS でも
+                    // Bridge/midi_coremidi.c はビルドされており、USB-C/Lightning 接続の
+                    // class-compliant MIDI インターフェースは CoreMIDI destination として
+                    // 認識される。
+                    // P846: iOS 版にもデバイス一覧選択(下の Output/Input Device Picker)を
+                    // 追加したため、P844 の「index 0 固定で送出」警告文は削除した
+                    // (iPad では OS が自動生成する仮想ポート「Network:Session 1」が
+                    // 物理デバイスより先に列挙されることがあり、選択手段が必要だった)。
                     Picker("Output", selection: $settingsViewModel.midiOutputDestination) {
-                        #if os(macOS)
                         Text("External MIDI").tag(0)
-                        #endif
                         Text("Internal MT-32").tag(1)
                         Text("Internal SC-55").tag(2)
                     }
@@ -190,43 +201,56 @@ struct AudioSettingsView: View {
                         .font(.subheadline).foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    #if os(macOS)
-                    // ★空リスト時のガード:デバイス一覧は Core 側が MIDI_Init() 実行時に
-                    //   埋めるため、MIDI を有効化した直後(ハードリセット前)や CoreMIDI に
-                    //   ポートが 1 つも無い環境では空になる。空の Picker は選択肢ゼロで
-                    //   操作不能かつ選択中インデックスの表示も破綻するため、案内文へ差し替える。
-                    if emulatorViewModel.midiOutputDeviceNames.isEmpty
-                        && emulatorViewModel.midiInputDeviceNames.isEmpty {
-                        // 配線済みで一覧が空 = このMac自体にMIDIポートが無い。この場合は
-                        // 何度ハードリセットしても一覧は増えないため、案内文を分ける。
-                        if emulatorViewModel.midiWired {
-                            Text("⚠ No MIDI destination is available on this Mac. Enable the IAC Driver in Audio MIDI Setup, or connect a MIDI interface.")
-                                .font(.subheadline).foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                    // P847: Output/Input Device(CoreMIDIデバイス選択)は External MIDI
+                    // (destination==0)選択時のみ意味を持つ(内蔵MT-32/SC-55では
+                    // p633_midi_send_bytes()が即returnし到達しないno-op設定のため)。
+                    // mt32RomRows/sc55RomRowsと同じ条件表示パターンに揃える。
+                    if settingsViewModel.midiOutputDestination == 0 {
+                        // ★空リスト時のガード:デバイス一覧は Core 側が MIDI_Init() 実行時に
+                        //   埋めるため、MIDI を有効化した直後(ハードリセット前)や CoreMIDI に
+                        //   ポートが 1 つも無い環境では空になる。空の Picker は選択肢ゼロで
+                        //   操作不能かつ選択中インデックスの表示も破綻するため、案内文へ差し替える。
+                        // P846: macOS/iOS 共通化(データ源は下の *Resolved computed property)。
+                        if midiOutputDeviceNamesResolved.isEmpty
+                            && midiInputDeviceNamesResolved.isEmpty {
+                            // 配線済みで一覧が空 = 端末自体にMIDIポートが無い。この場合は
+                            // 何度ハードリセットしても一覧は増えないため、案内文を分ける。
+                            if midiWiredResolved {
+                                // P846: "Audio MIDI Setup"/"IAC Driver" は macOS 専用のため、
+                                // iOS では物理/Bluetooth MIDI 機器の接続を案内する別文言にする。
+                                #if os(macOS)
+                                Text("⚠ No MIDI destination is available on this Mac. Enable the IAC Driver in Audio MIDI Setup, or connect a MIDI interface.")
+                                    .font(.subheadline).foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                #else
+                                Text("⚠ No MIDI destination detected. Connect a MIDI interface (USB-C/Lightning) or a Bluetooth MIDI device.")
+                                    .font(.subheadline).foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                #endif
+                            } else {
+                                Text("⚠ No MIDI devices detected. Reopen this tab after a hard reset (⌘R) and the list will be refreshed.")
+                                    .font(.subheadline).foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         } else {
-                            Text("⚠ No MIDI devices detected. Reopen this tab after a hard reset (⌘R) and the list will be refreshed.")
-                                .font(.subheadline).foregroundColor(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    } else {
-                        if !emulatorViewModel.midiOutputDeviceNames.isEmpty {
-                            Picker("Output Device", selection: $settingsViewModel.midiOutDeviceIndex) {
-                                ForEach(Array(emulatorViewModel.midiOutputDeviceNames.enumerated()),
-                                        id: \.offset) { i, name in
-                                    Text(name).tag(i)
+                            if !midiOutputDeviceNamesResolved.isEmpty {
+                                Picker("Output Device", selection: $settingsViewModel.midiOutDeviceIndex) {
+                                    ForEach(Array(midiOutputDeviceNamesResolved.enumerated()),
+                                            id: \.offset) { i, name in
+                                        Text(name).tag(i)
+                                    }
                                 }
                             }
-                        }
-                        if !emulatorViewModel.midiInputDeviceNames.isEmpty {
-                            Picker("Input Device", selection: $settingsViewModel.midiInDeviceIndex) {
-                                ForEach(Array(emulatorViewModel.midiInputDeviceNames.enumerated()),
-                                        id: \.offset) { i, name in
-                                    Text(name).tag(i)
+                            if !midiInputDeviceNamesResolved.isEmpty {
+                                Picker("Input Device", selection: $settingsViewModel.midiInDeviceIndex) {
+                                    ForEach(Array(midiInputDeviceNamesResolved.enumerated()),
+                                            id: \.offset) { i, name in
+                                        Text(name).tag(i)
+                                    }
                                 }
                             }
                         }
                     }
-                    #endif
                 }
             }
         }
@@ -234,8 +258,36 @@ struct AudioSettingsView: View {
         // MIDI 有効時に既定高さを超えるこのタブは、P579 の外側 `ScrollView` ではなく
         // このスタイルでスクロールする。
         .formStyle(.grouped)
+        .onAppear {
+            // P846: iOS でもタブ表示時にデバイス一覧を読み直す。
+            #if os(macOS)
+            emulatorViewModel.refreshMidiDeviceList()
+            #else
+            iosViewModel.refreshMidiDeviceList()
+            #endif
+        }
+    }
+
+    // ---- P846: CoreMIDI デバイス一覧のデータ源(macOS/iOS の ViewModel 差を吸収) ----
+    private var midiOutputDeviceNamesResolved: [String] {
         #if os(macOS)
-        .onAppear { emulatorViewModel.refreshMidiDeviceList() }
+        emulatorViewModel.midiOutputDeviceNames
+        #else
+        iosViewModel.midiOutputDeviceNames
+        #endif
+    }
+    private var midiInputDeviceNamesResolved: [String] {
+        #if os(macOS)
+        emulatorViewModel.midiInputDeviceNames
+        #else
+        iosViewModel.midiInputDeviceNames
+        #endif
+    }
+    private var midiWiredResolved: Bool {
+        #if os(macOS)
+        emulatorViewModel.midiWired
+        #else
+        iosViewModel.midiWired
         #endif
     }
 

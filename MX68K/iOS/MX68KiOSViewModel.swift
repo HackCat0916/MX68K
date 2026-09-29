@@ -86,6 +86,14 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// (macOS の `RootView`(MX68KApp.swift:37-49)と同じ形)。
     @Published var needsConfiguration: Bool = false
 
+    /// P846 — CoreMIDI デバイス一覧(macOS `EmulatorViewModel.midiOutputDeviceNames`/
+    /// `midiInputDeviceNames`/`midiWired`/`refreshMidiDeviceList()`と同型)。
+    /// Bridge 側のデバイス列挙・選択 API はプラットフォーム非依存のため、iOS でも
+    /// macOS と同じ選択式 UI(Audio 設定タブの Output/Input Device Picker)を提供する。
+    @Published var midiOutputDeviceNames: [String] = []
+    @Published var midiInputDeviceNames: [String] = []
+    @Published var midiWired: Bool = false
+
     let engine = EmulatorEngine()
 
     /// P757 — macOS `EmulatorViewModel.audio` と同型。
@@ -721,6 +729,32 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         }
     }
 
+    /// P846 — Core が保持する MIDI 入出力デバイス名一覧を Swift 側へ取り込む
+    /// (macOS `EmulatorViewModel.refreshMidiDeviceList()` の逐語移植)。
+    /// 一覧は MIDI_Init()(init / ハードリセット)でしか更新されないため、
+    /// 設定画面を開いたタイミングで読み直せば足りる。未装着時は count=0 で空になる。
+    func refreshMidiDeviceList() {
+        midiWired = mx68k_midi_is_wired()
+        func names(count: Int32, fetch: (Int32, UnsafeMutablePointer<CChar>, Int32) -> Bool) -> [String] {
+            var result: [String] = []
+            var buf = [CChar](repeating: 0, count: 256)
+            for i in 0..<count {
+                let ok = buf.withUnsafeMutableBufferPointer { p -> Bool in
+                    fetch(i, p.baseAddress!, Int32(p.count))
+                }
+                guard ok else { break }
+                result.append(String(cString: buf))
+            }
+            return result
+        }
+        midiOutputDeviceNames = names(count: mx68k_midi_get_output_device_count()) {
+            mx68k_midi_get_output_device_name($0, $1, $2)
+        }
+        midiInputDeviceNames = names(count: mx68k_midi_get_input_device_count()) {
+            mx68k_midi_get_input_device_name($0, $1, $2)
+        }
+    }
+
     /// P706 §D-3 — macOS `EmulatorViewModel.pushConfig(_:)` の BIOS + ハードウェア部分
     /// だけを抜き出した小関数。★iOS 用に新しい既定値・新しい写像を発明しない。
     ///
@@ -729,6 +763,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// (iOS 未対応、P706 §0-2 非ゴールのうち P712 でも扱わない残り)。
     /// P830 — MIDI ボード・出力先・内蔵 MT-32 の setter を追加した(CoreMIDI デバイス
     /// 選択は引き続き iOS 非対応)。P831 — 内蔵 SC-55 の設定値も写すようにした。
+    /// P846 — CoreMIDI デバイス index(出力/入力)も macOS と同じ経路で送るようにした。
     private func pushConfig(_ config: EmulatorConfig) {
         config.bios.iplromPath.withCString { ipl in
             config.bios.cgromPath.withCString { cg in
@@ -770,15 +805,19 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         mx68k_set_ext_fdd_enabled(config.extensions.externalFDDUnit)   // P686
         mx68k_set_sram_64k_enabled(config.extensions.sram64kEnabled)   // P493
         // P830 — MIDI ボード(CZ-6BM1)と出力先(macOS `EmulatorViewModel.pushConfig`
-        // :669-686 と同内容)。CoreMIDI デバイス index(midi_set_output/input_device)
-        // は iOS 非対応のため送らない(内蔵 SC-55 は P831 で対応)。装着・リセット送信・音源種別は
+        // :669-686 と同内容)。内蔵 SC-55 は P831 で対応。装着・リセット送信・音源種別は
         // ハードリセットで確定、送信遅延と出力先は即時反映。
+        // P846 — CoreMIDI デバイス index(midi_set_output/input_device)も、iOS 版に
+        // デバイス一覧選択 UI を追加したのに合わせて macOS と同じ経路で送る
+        // (macOS `EmulatorViewModel.pushConfig`:676-677 と同内容)。
         mx68k_set_midi_enabled(config.extensions.midiEnabled)
         mx68k_set_midi_reset_enabled(config.extensions.midiResetOnInit)
         mx68k_set_midi_reset_type(Int32(config.extensions.midiResetType))
         mx68k_set_midi_delay_ms(Int32(config.extensions.midiDelayMs))
         let midiDest = config.extensions.midiOutputDestination
         mx68k_set_midi_output_destination(Int32(midiDest))
+        mx68k_midi_set_output_device(Int32(config.extensions.midiOutDeviceIndex))
+        mx68k_midi_set_input_device(Int32(config.extensions.midiInDeviceIndex))
         mt32Enabled = (midiDest == 1)
         mt32ControlRomPath = config.extensions.mt32ControlRomPath
         mt32PcmRomPath = config.extensions.mt32PcmRomPath

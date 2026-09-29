@@ -112,7 +112,7 @@ _Atomic(uint32_t)           g_midi_rx_last     = 0;
 static _Atomic(int) g_midi_output_destination = 0;
 
 /* P832: p633_midi_send_bytes() の到達確認用診断ログの出力回数(先頭 MIDI_P832_LOG_MAX 回のみ出力)。 */
-#define MIDI_P832_LOG_MAX 20
+#define MIDI_P832_LOG_MAX 2000
 static _Atomic(uint32_t) g_p832_midi_tx_log_count = 0;
 
 void mx68k_set_midi_output_destination(int destination)
@@ -424,6 +424,7 @@ mid_outDevList(LPHMIDIOUT phmo)
 			                         menu_items[8][Device_num],
 			                         sizeof(menu_items[8][Device_num]));
 			p6logd("Find MIDI out:%s\n", menu_items[8][Device_num]);
+			debug_log("[P845-MIDIDEVNAME] index=%u name=\"%s\"\n", Device_num, menu_items[8][Device_num]);
 			Device_num++;
 		}
 	}

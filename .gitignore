@@ -9,6 +9,12 @@ DerivedData/
 # BIOS（絶対に含めない）
 *.DAT
 *.dat
+# P825: Roland MT-32 / CM-32L ROM(内蔵 MIDI 音源用、ユーザー持込・絶対に含めない)
+*.ROM
+*.rom
+# P826: Roland SC-55 ROM(sc55_rom1.bin 等、内蔵 MIDI 音源用、ユーザー持込・絶対に含めない)
+*.bin
+*.BIN
 IPLROM*
 CGROM*
 iplrom*

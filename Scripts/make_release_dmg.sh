@@ -1,23 +1,41 @@
 #!/bin/bash
-# Scripts/make_release_dmg.sh  [--no-build]
+# Scripts/make_release_dmg.sh  [--no-build] [--no-notarize] [--keychain-profile NAME]
 # ---------------------------------------------------------------------------
-# P680: Build a distributable .dmg of MX68K (unsigned / ad-hoc distribution).
+# Build a distributable, notarized .dmg of MX68K.
 #
-# WHY THIS EXISTS:
-#   Public releases on github.com/HackCat0916/MX68K ship a prebuilt .app. There
-#   is no Apple Developer Program membership, so there is no Developer ID
-#   signature and no notarization — Xcode's Release build is nevertheless
-#   ad-hoc signed automatically (codesign: Signature=adhoc, TeamIdentifier=not
-#   set), which is what makes it runnable on Apple Silicon at all. This script
-#   only VERIFIES that ad-hoc signature; it never signs anything itself.
+# P680 originally built an ad-hoc-signed .dmg (no Apple Developer Program
+# membership at the time). Since then a paid membership was obtained and the
+# MX68K target's Release configuration now signs with a "Developer ID
+# Application" certificate (see project.pbxproj: CODE_SIGN_IDENTITY[sdk=
+# macosx*] / DEVELOPMENT_TEAM[sdk=macosx*]). This script now:
+#   1. verifies the built .app carries a Developer ID Application signature
+#      (never signs anything itself — signing happens via Xcode/xcodebuild
+#      using the project's own settings);
+#   2. builds the .dmg;
+#   3. submits it to Apple's notary service and waits for the result
+#      (`xcrun notarytool submit --wait`);
+#   4. staples the notarization ticket to the .dmg (`xcrun stapler staple`)
+#      so it also verifies offline.
 #
-#   Consequence, by design and already agreed: a downloaded .dmg carries the
-#   quarantine attribute, so `spctl -a --type execute` reports "rejected" and
-#   Gatekeeper shows a warning. Users open it via right-click -> Open (this is
-#   documented in the public README, not solvable here).
+# Consequence: a downloaded, notarized .dmg opens normally (no more
+# right-click -> Open workaround) — see the public README update that
+# accompanies this change.
+#
+# NOTARIZATION CREDENTIALS:
+#   Uses a keychain profile created once via:
+#     xcrun notarytool store-credentials "mx68k-notary" \
+#       --apple-id <Apple ID> --team-id SHRK77GS48
+#   (interactive; prompts for an app-specific password from
+#   appleid.apple.com — never pass the password on the command line).
+#   Override the profile name with --keychain-profile if a different one
+#   was used.
 #
 # CONTRACT:
-#   Exit 0 = .dmg created.   Exit 1 = build failure.   Exit 2 = setup error.
+#   Exit 0 = .dmg created, notarized, and stapled.
+#   Exit 1 = build failure.
+#   Exit 2 = setup error (missing/wrong signature, missing files, etc).
+#   Exit 3 = notarization or stapling failure (the .dmg was built but is
+#            not a valid, notarized release artifact — do not publish it).
 #
 #   `-e` is intentionally NOT set (same convention as smoke_test.sh): failures
 #   are checked explicitly so cleanup and diagnostics always run.
@@ -29,10 +47,19 @@
 set -u
 
 DO_BUILD=1
+DO_NOTARIZE=1
+KEYCHAIN_PROFILE="mx68k-notary"
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-build) DO_BUILD=0 ;;
-        *) echo "unknown arg: $1" >&2; echo "usage: $0 [--no-build]" >&2; exit 2 ;;
+        --no-notarize) DO_NOTARIZE=0 ;;
+        --keychain-profile)
+            shift
+            KEYCHAIN_PROFILE="${1:-}"
+            ;;
+        *) echo "unknown arg: $1" >&2
+           echo "usage: $0 [--no-build] [--no-notarize] [--keychain-profile NAME]" >&2
+           exit 2 ;;
     esac
     shift
 done
@@ -79,13 +106,23 @@ if [ -z "$BUILT_PRODUCTS_DIR" ] || [ ! -x "$APP/Contents/MacOS/MX68K" ]; then
 fi
 echo "==> app: $APP"
 
-# --- 3. Verify the ad-hoc signature (verification only, never signs) ------
-if codesign -dv "$APP" 2>&1 | grep -q "Signature=adhoc"; then
-    echo "==> codesign: Signature=adhoc (expected — no Developer ID / notarization)"
+# --- 3. Verify the Developer ID Application signature (verification only,
+#        never signs anything itself — signing happens via the project's own
+#        Release build settings) -------------------------------------------
+CODESIGN_OUT=$(codesign -dv --verbose=4 "$APP" 2>&1)
+if echo "$CODESIGN_OUT" | grep -q "Authority=Developer ID Application"; then
+    echo "==> codesign: Developer ID Application signature confirmed"
+    echo "$CODESIGN_OUT" | grep "^Authority=" | sed 's/^/    /'
+elif echo "$CODESIGN_OUT" | grep -q "Signature=adhoc"; then
+    echo "## MX68K release dmg: SETUP ERROR (app is ad-hoc signed, expected Developer ID Application)"
+    echo "--- codesign -dv --verbose=4 output ---"
+    echo "$CODESIGN_OUT"
+    echo "- hint: check project.pbxproj Release config: CODE_SIGN_IDENTITY[sdk=macosx*] / DEVELOPMENT_TEAM[sdk=macosx*]"
+    exit 2
 else
-    echo "## MX68K release dmg: SETUP ERROR (app is not ad-hoc signed)"
-    echo "--- codesign -dv output ---"
-    codesign -dv "$APP" 2>&1
+    echo "## MX68K release dmg: SETUP ERROR (unexpected/no signature)"
+    echo "--- codesign -dv --verbose=4 output ---"
+    echo "$CODESIGN_OUT"
     exit 2
 fi
 
@@ -116,7 +153,7 @@ echo "==> hdiutil create (UDZO)"
 hdiutil create -volname "MX68K" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
 HDIUTIL_RC=$?
 
-# --- 7. Clean up staging, report ------------------------------------------
+# --- 7. Clean up staging ---------------------------------------------------
 rm -rf "$STAGING"
 
 if [ "$HDIUTIL_RC" -ne 0 ] || [ ! -f "$DMG" ]; then
@@ -124,10 +161,51 @@ if [ "$HDIUTIL_RC" -ne 0 ] || [ ! -f "$DMG" ]; then
     exit 1
 fi
 
+# --- 8. Notarize + staple ---------------------------------------------------
+if [ "$DO_NOTARIZE" -eq 1 ]; then
+    echo "==> notarytool submit --wait (keychain profile: $KEYCHAIN_PROFILE; this can take a few minutes)"
+    SUBMIT_OUT=$(xcrun notarytool submit "$DMG" --keychain-profile "$KEYCHAIN_PROFILE" --wait 2>&1)
+    SUBMIT_RC=$?
+    echo "$SUBMIT_OUT"
+    if [ "$SUBMIT_RC" -ne 0 ] || ! echo "$SUBMIT_OUT" | grep -q "status: Accepted"; then
+        echo "## MX68K release dmg: FAIL (notarization not accepted)"
+        SUBMIT_ID=$(echo "$SUBMIT_OUT" | awk -F': ' '/^[[:space:]]*id:/{print $2; exit}')
+        if [ -n "$SUBMIT_ID" ]; then
+            echo "--- notarytool log ($SUBMIT_ID) ---"
+            xcrun notarytool log "$SUBMIT_ID" --keychain-profile "$KEYCHAIN_PROFILE" 2>&1
+        fi
+        echo "- dmg (unnotarized, do NOT publish): $DMG"
+        exit 3
+    fi
+    echo "==> notarytool: Accepted"
+
+    echo "==> stapler staple"
+    STAPLE_OUT=$(xcrun stapler staple "$DMG" 2>&1)
+    STAPLE_RC=$?
+    echo "$STAPLE_OUT"
+    if [ "$STAPLE_RC" -ne 0 ]; then
+        echo "## MX68K release dmg: FAIL (stapler staple rc=$STAPLE_RC)"
+        echo "- dmg (notarized but not stapled, do NOT publish): $DMG"
+        exit 3
+    fi
+
+    echo "==> spctl verify (offline, post-staple)"
+    SPCTL_OUT=$(spctl -a -t open --context context:primary-signature -v "$DMG" 2>&1)
+    echo "$SPCTL_OUT"
+    if ! echo "$SPCTL_OUT" | grep -q "accepted"; then
+        echo "## MX68K release dmg: FAIL (spctl did not accept the stapled dmg)"
+        exit 3
+    fi
+    SIGNING_LINE="Developer ID Application (notarized, stapled)"
+else
+    echo "==> --no-notarize: skipping notarytool submit / stapler (dmg is signed but NOT notarized — do not publish)"
+    SIGNING_LINE="Developer ID Application (NOT notarized — --no-notarize was given)"
+fi
+
 echo
 echo "## MX68K release dmg: OK"
 echo "- dmg:     $DMG"
 echo "- size:    $(du -h "$DMG" | awk '{print $1}') ($(stat -f%z "$DMG") bytes)"
 echo "- version: $VERSION"
-echo "- signing: ad-hoc only (Gatekeeper warns after download — right-click > Open)"
+echo "- signing: $SIGNING_LINE"
 exit 0

@@ -1,6 +1,26 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "⚠ No MIDI destination detected. Connect a MIDI interface (USB-C/Lightning) or a Bluetooth MIDI device.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ MIDI 出力先が見つかりません。MIDI インターフェース(USB-C/Lightning)または Bluetooth MIDI 機器を接続してください。"
+          }
+        }
+      }
+    },
+    "⚠ Unlike the macOS version, there is no device list to choose from — output is sent automatically to the first CoreMIDI destination detected. Connect only one external MIDI device.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ macOS版のようなデバイス一覧からの選択は無く、検出された最初のCoreMIDI出力先へ自動的に送出されます。外部MIDI機器は1台のみ接続してください。"
+          }
+        }
+      }
+    },
     "External MIDI": {
       "localizations": {
         "ja": {
