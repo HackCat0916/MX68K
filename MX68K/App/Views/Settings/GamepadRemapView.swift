@@ -80,11 +80,27 @@ struct GamepadRemapView: View {
                 }
                 // P853: TRIG1/TRIG2 の連射(オートファイア)ON/OFF。iOS 版と同じく対象は
                 // 基礎バンクの 2 ボタンのみで、プロファイルに関わらず常時表示する。
+                // ★実機hands-on確認で発覚・特定した不具合(石井さん報告、2026-10-02):
+                //   上の「基本」Section と本 Section が同一 List 内で同じ
+                //   Identifiable 要素(GamepadFunction.trig1/trig2、既定 id=rawValue)を
+                //   それぞれ ForEach で使うと、SwiftUI がビューIDの衝突により本 Section 側の
+                //   Toggle を上の Picker のビューと誤って同一視し、Picker の見た目
+                //   (選択値+矢印)がそのまま表示されてしまう(SwiftUIのビュー差分アルゴリズムの
+                //   既知の制約と見られる(Apple公式ドキュメントに基づく確定事実ではなく、
+                //   実機での4段階アブレーション実験——マーカー→最小Toggle→直接
+                //   バインディング→.id()付与——で特定した経験的知見)——同一 List 内で
+                //   同じ id を持つ複数行が存在すると識別できない)。
+                //   `.id("autofire-\(function.id)")` で本 Section 側の行にだけ別名前空間の
+                //   一意な id を与えることで、Picker 側のビューキャッシュと衝突しなくなり
+                //   正しく Toggle として描画される。コードレビューでは検出できなかった
+                //   (静的なコードは正しく Toggle を使っており、実機での見た目確認でのみ
+                //   発覚する種類の不具合)。
                 Section(header: Text("Auto-Fire")) {
                     ForEach(GamepadFunction.baseRows) { function in
                         Toggle(isOn: autoFireBinding(for: function)) {
                             Text(verbatim: function.displayName)
                         }
+                        .id("autofire-\(function.id)")
                     }
                 }
                 if !extraRows.isEmpty {
