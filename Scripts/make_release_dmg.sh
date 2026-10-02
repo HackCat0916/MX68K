@@ -189,11 +189,28 @@ if [ "$DO_NOTARIZE" -eq 1 ]; then
         exit 3
     fi
 
-    echo "==> spctl verify (offline, post-staple)"
-    SPCTL_OUT=$(spctl -a -t open --context context:primary-signature -v "$DMG" 2>&1)
+    # ★spctl検証は dmg ファイル自体ではなく、中の .app に対して行う。
+    #   `spctl -a -t open` を dmg 自体へ直接かけると、dmg コンテナ自体には
+    #   コード署名が無い(署名されるのは中の .app だけ、これは通常の dmg
+    #   配布として正しい)ため "rejected: source=no usable signature" に
+    #   なる——これは dmg 自体が quarantine 属性を持たないローカル生成物
+    #   であることに起因する spctl 側の限界であり、実際のユーザー体験
+    #   (ダウンロード→マウント→.app起動)を代表しない。実際にGatekeeperが
+    #   評価する対象は展開後の .app であり、これが `source=Notarized
+    #   Developer ID` として accepted になることが実質的な合格基準。
+    echo "==> mount dmg and spctl verify the .app inside (offline, post-staple)"
+    MOUNT_OUT=$(hdiutil attach "$DMG" -nobrowse -readonly 2>&1)
+    MOUNT_POINT=$(echo "$MOUNT_OUT" | grep -oE "/Volumes/[^ ]*" | tail -1)
+    if [ -z "$MOUNT_POINT" ] || [ ! -d "$MOUNT_POINT/MX68K.app" ]; then
+        echo "## MX68K release dmg: FAIL (could not mount dmg or find MX68K.app inside)"
+        echo "$MOUNT_OUT"
+        exit 3
+    fi
+    SPCTL_OUT=$(spctl -a -vvv -t execute "$MOUNT_POINT/MX68K.app" 2>&1)
     echo "$SPCTL_OUT"
+    hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1
     if ! echo "$SPCTL_OUT" | grep -q "accepted"; then
-        echo "## MX68K release dmg: FAIL (spctl did not accept the stapled dmg)"
+        echo "## MX68K release dmg: FAIL (spctl did not accept the app inside the dmg)"
         exit 3
     fi
     SIGNING_LINE="Developer ID Application (notarized, stapled)"
