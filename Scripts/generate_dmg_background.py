@@ -25,15 +25,39 @@ FONT_JP = "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc"
 FONT_EN_BOLD = "/System/Library/Fonts/Helvetica.ttc"
 
 
-def draw_arrow(draw, x1, y1, x2, y2, color, width):
-    draw.line([(x1, y1), (x2, y2)], fill=color, width=width)
+def draw_arrow(draw, x1, y1, x2, y2, color, shaft_width):
+    """矢印を1つの閉じたポリゴン(本体の矩形+矢じりの三角形)として描画する。
+    直線を3本(本体+矢じり2本)個別に描くと、線の太さを増したときに
+    継ぎ目がカクついて見える問題があったため、塗りつぶし形状に変更した
+    (石井さんの指摘、2026-10-02)。"""
     angle = math.atan2(y2 - y1, x2 - x1)
-    head_len = width * 3.2
-    head_w = width * 2.0
-    for sign in (1, -1):
-        hx = x2 - head_len * math.cos(angle) + sign * head_w * math.sin(angle)
-        hy = y2 - head_len * math.sin(angle) - sign * head_w * math.cos(angle)
-        draw.line([(x2, y2), (hx, hy)], fill=color, width=width)
+    head_len = shaft_width * 3.2
+    head_w = shaft_width * 2.4
+
+    # 矢じりの付け根(本体の終点)
+    base_x = x2 - head_len * math.cos(angle)
+    base_y = y2 - head_len * math.sin(angle)
+
+    # 進行方向に垂直な単位ベクトル
+    perp_x = -math.sin(angle)
+    perp_y = math.cos(angle)
+
+    shaft_half = shaft_width / 2
+    shaft_poly = [
+        (x1 + perp_x * shaft_half, y1 + perp_y * shaft_half),
+        (base_x + perp_x * shaft_half, base_y + perp_y * shaft_half),
+        (base_x - perp_x * shaft_half, base_y - perp_y * shaft_half),
+        (x1 - perp_x * shaft_half, y1 - perp_y * shaft_half),
+    ]
+    draw.polygon(shaft_poly, fill=color)
+
+    head_half = head_w / 2
+    head_poly = [
+        (base_x + perp_x * head_half, base_y + perp_y * head_half),
+        (x2, y2),
+        (base_x - perp_x * head_half, base_y - perp_y * head_half),
+    ]
+    draw.polygon(head_poly, fill=color)
 
 
 def main():
@@ -51,11 +75,17 @@ def main():
         b = int(top[2] + (bottom[2] - top[2]) * t)
         draw.line([(0, y), (w, y)], fill=(r, g, b))
 
-    # 矢印(アイコン位置→Applications位置の中間を水平に)
+    # 矢印(アイコン位置→Applications位置の中間を水平に)。
+    # ★2026-10-02改訂: 石井さんの実機確認で「矢印の先端がフォルダアイコンに
+    # 対してズレて見える」との指摘。こちらの環境でFinderの実際のbounds座標に
+    # 合わせて正確に検証した結果、座標計算自体にズレは無かった(矢印中心Y=197
+    # vs フォルダ本体中心Y=194、ほぼ一致)が、表示環境(ディスプレイ解像度等)
+    # による見え方の差があり得るため、多少のズレでも破綻しにくいよう矢印を
+    # 短く・太くし、アイコンとの間隔を広げる方向でより頑健なデザインへ変更。
     arrow_y = ICON_Y * SCALE
-    arrow_x1 = (ICON_X + 70) * SCALE
-    arrow_x2 = (APP_X - 70) * SCALE
-    draw_arrow(draw, arrow_x1, arrow_y, arrow_x2, arrow_y, GOLD, 6 * SCALE)
+    arrow_x1 = (ICON_X + 85) * SCALE
+    arrow_x2 = (APP_X - 85) * SCALE
+    draw_arrow(draw, arrow_x1, arrow_y, arrow_x2, arrow_y, GOLD, 8 * SCALE)
 
     # 案内文言(日本語+英語)
     font_jp = ImageFont.truetype(FONT_JP, 20 * SCALE)
