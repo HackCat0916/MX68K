@@ -45,6 +45,9 @@ build*.log
 # Test scripts (build_c68k.sh is committed)
 Scripts/*.py
 Scripts/test_*
+# P849: dmg背景画像の生成スクリプトは使い捨てテストではなく、将来デザインを
+# 調整する際の再現性のために同梱する正式な開発ツール
+!Scripts/generate_dmg_background.py
 
 # Backup directories
 *.backup/

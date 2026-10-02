@@ -142,22 +142,112 @@ fi
 DMG="$DISTDIR/MX68K-$VERSION.dmg"
 echo "==> version: $VERSION -> $DMG"
 
-# --- 5. Staging directory (drag-and-drop installer layout) ----------------
+# --- 5. Staging directory (drag-and-drop installer layout with custom
+#        Finder background, P849) ------------------------------------------
 rm -rf "$STAGING"
-mkdir -p "$STAGING" || { echo "## MX68K release dmg: SETUP ERROR (cannot create $STAGING)"; exit 2; }
+mkdir -p "$STAGING/.background" || { echo "## MX68K release dmg: SETUP ERROR (cannot create $STAGING)"; exit 2; }
 cp -R "$APP" "$STAGING/" || { echo "## MX68K release dmg: SETUP ERROR (app copy failed)"; rm -rf "$STAGING"; exit 2; }
 ln -s /Applications "$STAGING/Applications" || { echo "## MX68K release dmg: SETUP ERROR (Applications symlink failed)"; rm -rf "$STAGING"; exit 2; }
+cp "$PROJ/Scripts/dmg_background.png" "$STAGING/.background/dmg_background.png" \
+    || { echo "## MX68K release dmg: SETUP ERROR (background image copy failed)"; rm -rf "$STAGING"; exit 2; }
 
-# --- 6. Create the compressed disk image ----------------------------------
-echo "==> hdiutil create (UDZO)"
-hdiutil create -volname "MX68K" -srcfolder "$STAGING" -ov -format UDZO "$DMG"
+# --- 6. Build a read-write dmg first so the Finder window layout (background
+#        image, icon positions, window size) can be customized via
+#        AppleScript, then convert to the final compressed read-only image
+#        (P849; previously a single `hdiutil create -format UDZO` step
+#        produced a plain, uncustomized Finder window). ---------------------
+RW_DMG="$DISTDIR/.MX68K-$VERSION-rw.dmg"
+rm -f "$RW_DMG"
+echo "==> hdiutil create (UDRW, temporary — for Finder layout customization)"
+hdiutil create -volname "MX68K" -srcfolder "$STAGING" -ov -fs HFS+ -format UDRW "$RW_DMG"
+if [ $? -ne 0 ]; then
+    echo "## MX68K release dmg: FAIL (hdiutil create rw failed)"
+    rm -rf "$STAGING"
+    rm -f "$RW_DMG"
+    exit 1
+fi
+
+echo "==> mount rw dmg and customize Finder window layout"
+MOUNT_OUT=$(hdiutil attach -readwrite -noverify -noautoopen "$RW_DMG" 2>&1)
+MOUNT_POINT=$(echo "$MOUNT_OUT" | grep -oE "/Volumes/[^ ]*" | tail -1)
+if [ -z "$MOUNT_POINT" ]; then
+    echo "## MX68K release dmg: FAIL (could not mount rw dmg for layout customization)"
+    echo "$MOUNT_OUT"
+    rm -rf "$STAGING"
+    rm -f "$RW_DMG"
+    exit 1
+fi
+
+# ★Code Review 1周目REVISE対応: osascriptのFinder自動化がTCC許可ダイアログで
+# ブロックしてハングした場合でも、マウント済みボリュームが残り続けて次回実行の
+# 冪等性を壊さないよう、trapで確実にdetachする(どの経路で終了してもtrapが効く)。
+trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1' EXIT
+
+# osascript自体も有限時間でラップする(TCC許可ダイアログがブロックして返って
+# 来ないケースでも、Build & Testエージェントが無期限停止しないようにする)。
+# ★Code Review 2周目REVISE対応: GNU coreutilsの`timeout`コマンドはstock
+# macOSに存在しない(このプロジェクトの実行環境で実機確認済み、brew版
+# coreutilsも未インストール)ため、sleep+kill+waitによるウォッチドッグ
+# パターンへ置き換える(bashビルトインのみ、新規外部コマンド不要)。
+SCPT_FILE="$DISTDIR/.mx68k_dmg_layout.applescript"
+cat > "$SCPT_FILE" <<'APPLESCRIPT'
+tell application "Finder"
+    tell disk "MX68K"
+        open
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set the bounds of container window to {400, 100, 1060, 500}
+        set theViewOptions to the icon view options of container window
+        set arrangement of theViewOptions to not arranged
+        set icon size of theViewOptions to 128
+        set background picture of theViewOptions to file ".background:dmg_background.png"
+        set position of item "MX68K.app" of container window to {165, 165}
+        set position of item "Applications" of container window to {495, 165}
+        close
+        open
+        update without registering applications
+        delay 2
+    end tell
+end tell
+APPLESCRIPT
+osascript "$SCPT_FILE" &
+OSASCRIPT_PID=$!
+( sleep 90; kill -9 "$OSASCRIPT_PID" 2>/dev/null ) &
+WATCHDOG_PID=$!
+wait "$OSASCRIPT_PID" 2>/dev/null
+OSASCRIPT_RC=$?
+kill "$WATCHDOG_PID" 2>/dev/null
+wait "$WATCHDOG_PID" 2>/dev/null
+rm -f "$SCPT_FILE"
+
+sync
+hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1
+sleep 1
+trap - EXIT
+
+if [ "$OSASCRIPT_RC" -ne 0 ]; then
+    if [ "$OSASCRIPT_RC" -ge 128 ]; then
+        echo "## MX68K release dmg: FAIL (osascript was killed by the 90s watchdog, rc=$OSASCRIPT_RC — likely blocked on a TCC/Automation permission dialog; grant Finder automation access once interactively and retry)"
+    else
+        echo "## MX68K release dmg: FAIL (osascript layout customization failed, rc=$OSASCRIPT_RC)"
+    fi
+    rm -rf "$STAGING"
+    rm -f "$RW_DMG"
+    exit 1
+fi
+
+echo "==> hdiutil convert (UDZO, final)"
+rm -f "$DMG"
+hdiutil convert "$RW_DMG" -format UDZO -o "$DMG"
 HDIUTIL_RC=$?
 
 # --- 7. Clean up staging ---------------------------------------------------
 rm -rf "$STAGING"
+rm -f "$RW_DMG"
 
 if [ "$HDIUTIL_RC" -ne 0 ] || [ ! -f "$DMG" ]; then
-    echo "## MX68K release dmg: FAIL (hdiutil rc=$HDIUTIL_RC)"
+    echo "## MX68K release dmg: FAIL (hdiutil convert rc=$HDIUTIL_RC)"
     exit 1
 fi
 
