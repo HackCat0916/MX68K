@@ -21,6 +21,7 @@
 #include "opm_shadow.h"   /* P479: m68000_bridge.c が書き込む OPM レジスタのシャドウ */
 #include "mercury_opn_shadow.h"   /* P491: m68000_bridge.c が書き込む Mercury OPN レジスタのシャドウ */
 #include "mt32_bridge.h"          /* P825: 内蔵 MT-32 の再構成(フレーム境界)とシャットダウン */
+#include "mx_cpu_iface.h"         /* P860: CPUコア抽象層(ステート/モニタのレジスタアクセス) */
 
 /* P509 (D-48): m68000_bridge.c 定義の診断プローブ。本サイクルの変更を
  * Bridge の 2 ファイルに閉じるため、宣言をヘッダではなくここに置く。
@@ -595,7 +596,7 @@ void mx68k_debug_get_status(MX68KDebugStatus* out) {
     out->stopped      = g_mx68k_dbg_stopped;
     out->stop_reason  = g_mx68k_dbg_stop_reason;
     out->stop_pc      = g_mx68k_dbg_stop_pc;
-    out->cpu_halted   = mx68k_debug_cpu_halted();   /* m68000_bridge.c 側の小関数、C68K を直接見る */
+    out->cpu_halted   = mx68k_debug_cpu_halted();   /* m68000_bridge.c 側の小関数、CPUの実行状態は mx_cpu_is_halted() 経由で得る(P860) */
     out->bp_hit_count = g_mx68k_dbg_bp_hits;
     out->step_count   = g_mx68k_dbg_steps;
     out->armed_chunks = g_mx68k_dbg_armed_chunks;
@@ -6553,7 +6554,8 @@ static uint32_t state_timing_block(uint8_t* buf, int save) {
 }
 
 /* CPU ブロック: 21 x uint32 = 84 バイト、固定順。
- * D0-D7, A0-A7, SR, USP, PC, C68K.Status, C68K.IRQLine。 */
+ * D0-D7, A0-A7, SR, USP, PC, CPU実行状態の生値(2語: 実行ステータス, IRQライン)。
+ * P860: 読み書きは mx_cpu_iface.h 経由。ファイル形式は変えていない。 */
 #define STATE_CPU_BYTES (21u * 4u)
 
 /* P198: TextDrawWork は TVRAM_Write() 内で write-through に再構築される「派生」テキストプレーン
@@ -6575,38 +6577,38 @@ extern uint8_t BGCHR16[16 * 16 * 256];
 
 static void state_cpu_save(uint8_t* buf) {
     uint32_t w[21]; int i = 0;
-    for (int r = M68K_D0; r <= M68K_D7; r++) w[i++] = m68000_get_reg(r);
-    for (int r = M68K_A0; r <= M68K_A7; r++) w[i++] = m68000_get_reg(r);
-    w[i++] = m68000_get_reg(M68K_SR);
-    w[i++] = m68000_get_reg(M68K_USP);
-    w[i++] = m68000_get_reg(M68K_PC);
-    w[i++] = (uint32_t)C68K.Status;
-    w[i++] = (uint32_t)C68K.IRQLine;
+    for (int n = 0; n < 8; n++) w[i++] = mx_cpu_get_dreg(n);
+    for (int n = 0; n < 8; n++) w[i++] = mx_cpu_get_areg(n);
+    w[i++] = mx_cpu_get_sr();
+    w[i++] = mx_cpu_get_usp();
+    w[i++] = mx_cpu_get_pc();
+    w[i++] = mx_cpu_state_get_run_status();
+    w[i++] = (uint32_t)mx_cpu_state_get_irq_line();
     memcpy(buf, w, STATE_CPU_BYTES);
 }
 
 static void state_cpu_load(const uint8_t* buf) {
     uint32_t w[21];
     memcpy(w, buf, STATE_CPU_BYTES);
-    /* 順序が重要(C68k_Set_USP は flag_S で分岐する):
-     * D0-D7, A0-A6, SR, 次に A7 + USP, 生の Status/IRQLine, PC は最後。 */
+    /* 順序が重要(USP設定の結果は SR の S ビットに依存する——c68k では USP 設定関数が flag_S で分岐):
+     * D0-D7, A0-A6, SR, 次に A7 + USP, 生の実行状態(ステータス/IRQライン), PC は最後。 */
     int i = 0;
-    for (int r = M68K_D0; r <= M68K_D7; r++) m68000_set_reg(r, w[i++]);
+    for (int n = 0; n < 8; n++) mx_cpu_set_dreg(n, w[i++]);
     /* ここでは A0-A6、A7 は SR の後 */
-    for (int r = M68K_A0; r <= M68K_A6; r++) m68000_set_reg(r, w[i++]);
+    for (int n = 0; n < 7; n++) mx_cpu_set_areg(n, w[i++]);
     uint32_t a7  = w[i++];
     uint32_t sr  = w[i++];
     uint32_t usp = w[i++];
     uint32_t pc  = w[i++];
     uint32_t status  = w[i++];
     int32_t  irqline = (int32_t)w[i++];
-    m68000_set_reg(M68K_SR, sr);
-    m68000_set_reg(M68K_A7, a7);
-    m68000_set_reg(M68K_USP, usp);
-    C68K.Status  = status;
-    C68K.IRQLine = irqline;
-    /* 派生値の fetch/basepc は、下の set_reg(PC) + cpu_setOPbase24 により PC から再構築される */
-    m68000_set_reg(M68K_PC, pc);
+    mx_cpu_set_sr(sr);
+    mx_cpu_set_areg(7, a7);
+    mx_cpu_set_usp(usp);
+    /* ★生の代入のみ(IRQ設定関数は使わない——実行中断・HALT解除の副作用を避ける) */
+    mx_cpu_state_restore_run(status, irqline);
+    /* 派生値の fetch/basepc は、下の set_pc(24bitマスク付き)により PC から再構築される */
+    mx_cpu_set_pc(pc);
 }
 
 /* サイズタグ付きブロックの書出し */
@@ -9604,14 +9606,15 @@ void mx68k_joy_set1(int port, uint8_t bits) {
 void mx68k_get_status(MX68KStatus* status) {
     if (!status) return;
     memset(status, 0, sizeof(*status));
-    status->pc = C68k_Get_PC(&C68K);
+    /* P860: CPUレジスタは mx_cpu_iface.h 経由で取得する */
+    status->pc = mx_cpu_get_pc();
     for (int i = 0; i < 8; i++) {
-        status->d[i] = C68k_Get_DReg(&C68K, i);
-        status->a[i] = C68k_Get_AReg(&C68K, i);
+        status->d[i] = mx_cpu_get_dreg(i);
+        status->a[i] = mx_cpu_get_areg(i);
     }
-    status->sr = (uint16_t)C68k_Get_SR(&C68K);
-    status->usp = C68k_Get_USP(&C68K);
-    status->isp = C68k_Get_MSP(&C68K);
+    status->sr = (uint16_t)mx_cpu_get_sr();
+    status->usp = mx_cpu_get_usp();
+    status->isp = mx_cpu_get_ssp();
     status->clock_mhz = g_clock_mhz;
     status->machine_type = g_machine_type;
     status->memory_mb = g_memory_size_mb;
@@ -9731,7 +9734,7 @@ void mx68k_get_int_regs_status(MX68KIntRegsStatus* status) {
     status->ioc_int_stat = IOC_IntStat;
     status->ioc_int_vect = IOC_IntVect;
     memcpy(status->sysport, SysPort, sizeof(status->sysport));
-    status->cpu_irq_line = C68K.IRQLine;
+    status->cpu_irq_line = mx_cpu_get_irq_line();   /* P860: mx_cpu_iface.h 経由 */
 }
 
 void mx68k_get_vc_status(MX68KVCStatus* status) {

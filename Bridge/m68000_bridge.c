@@ -19,6 +19,7 @@
 #include "mercury_opn_shadow.h"        /* P491: EmulatorBridge.c と共有する Mercury OPN レジスタシャドウ */
 #include "sram_ext_bridge.h"           /* P494: SRAM 64KB 化の Fetch シャドウ配線/同期 */
 #include "windrv_bridge.h"             /* P642: Windrv($E9F000/$E9F001)の MMIO フック */
+#include "mx_cpu_iface.h"              /* P860: CPUコア抽象層(実装はファイル末尾の「mx_cpu_* 実装」節) */
 #include <string.h>                    /* P47-D: リセット用の memset */
 #include <stdio.h>                     /* P214-R2: プローブの1行サマリ用 snprintf */
 #include <time.h>                      /* P518: p424_now_ns() 用の clock_gettime/struct timespec */
@@ -30073,10 +30074,10 @@ static void mx68k_dbg_stop(int reason, uint32_t pc) {
               (unsigned long long)g_mx68k_dbg_armed_chunks);
 }
 
-/* EmulatorBridge.c は C68K を持たないため、HALT/WAIT 状態の取得だけここに置く。
+/* デバッガ表示用の HALT/WAIT 状態取得。CPUの実行状態は mx_cpu_is_halted() 経由で得る(P860)。
  * 読み取り専用・副作用ゼロ。 */
 int mx68k_debug_cpu_halted(void) {
-    return (C68K.Status & (C68K_HALTED | C68K_WAITING)) ? 1 : 0;
+    return mx_cpu_is_halted();
 }
 
 // P14-FIX: per-chunk PC ガード用の chunk サイズ (性能のため十分大きく、
@@ -34142,4 +34143,31 @@ void m68000_p57a_dump_summary(void) {
     }
     debug_log("[P57A-SUMMARY-DECISION] path=%s reason=\"%s\"\n", path, reason);
 #endif
+}
+
+/* ===== mx_cpu_* 実装(P860)— c68kバックエンド =====
+ * Bridge/mx_cpu_iface.h の実装。ステートセーブ/ロードとモニタ機能だけが使う。
+ * 中身は既存の m68000_get_reg/m68000_set_reg と同じ c68k 関数を同じ引数で呼ぶだけで、
+ * 挙動は変えない。★新しいグローバル/静的変数は追加しない(データ配置を変えないため)。
+ * 2つ目のバックエンド(030用コア)を足すサイクルで、この節を独立ファイルへ切り出す。 */
+uint32_t mx_cpu_get_dreg(int n) { return C68k_Get_DReg(&C68K, (uint32_t)n); }
+uint32_t mx_cpu_get_areg(int n) { return C68k_Get_AReg(&C68K, (uint32_t)n); }
+uint32_t mx_cpu_get_pc(void)    { return C68k_Get_PC(&C68K); }
+uint32_t mx_cpu_get_sr(void)    { return C68k_Get_SR(&C68K); }
+uint32_t mx_cpu_get_usp(void)   { return C68k_Get_USP(&C68K); }
+uint32_t mx_cpu_get_ssp(void)   { return C68k_Get_MSP(&C68K); }
+void mx_cpu_set_dreg(int n, uint32_t v) { C68k_Set_DReg(&C68K, (uint32_t)n, v); }
+void mx_cpu_set_areg(int n, uint32_t v) { C68k_Set_AReg(&C68K, (uint32_t)n, v); }
+void mx_cpu_set_sr(uint32_t v)  { C68k_Set_SR(&C68K, v); }
+void mx_cpu_set_usp(uint32_t v) { C68k_Set_USP(&C68K, v); }
+/* ★24bitマスクは m68000_set_reg(M68K_PC) と同じ */
+void mx_cpu_set_pc(uint32_t v)  { C68k_Set_PC(&C68K, v & 0x00FFFFFFu); }
+int32_t mx_cpu_get_irq_line(void) { return C68K.IRQLine; }
+int     mx_cpu_is_halted(void)    { return (C68K.Status & (C68K_HALTED | C68K_WAITING)) ? 1 : 0; }
+uint32_t mx_cpu_state_get_run_status(void) { return C68K.Status; }
+int32_t  mx_cpu_state_get_irq_line(void)   { return C68K.IRQLine; }
+/* ★生の代入のみ。C68k_Set_IRQ は呼ばない(実行中断・HALT解除の副作用を起こさない) */
+void mx_cpu_state_restore_run(uint32_t run_status, int32_t irq_line) {
+    C68K.Status  = run_status;
+    C68K.IRQLine = irq_line;
 }
