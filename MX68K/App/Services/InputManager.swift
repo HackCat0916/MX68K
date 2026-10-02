@@ -3,6 +3,7 @@ import Carbon
 import AppKit
 import GameController
 import CoreGraphics
+import os
 
 /// P500: 多ボタンパッドのプロファイル。
 /// 実機の X68000 は 8番ピン(PPI PortC bit4/5)のストローブ L/H による静的 2 バンク
@@ -221,6 +222,54 @@ class InputManager: ObservableObject {
     //   解決済みの `GamepadPhysicalButton` を不変値としてキャプチャする(port/profile と同方針)。
     private var gamepadOverrides: [String: String] = [:]
 
+    // P853: ゲームパッドの連射(オートファイア)ON/OFF(config.input.gamepadAutoFire の
+    // ライブ複製)。キー形式は gamepadOverrides と同一("\(port):\(function.rawValue)")。
+    // 対象は TRIG1/TRIG2 のみ。★この辞書も valueChangedHandler クロージャ内からは参照しない
+    // — ハンドラ登録時に解決済みの Bool を不変値としてキャプチャする(gamepadOverrides と同方針)。
+    private var gamepadAutoFireOverrides: [String: Bool] = [:]
+
+    // P853: 連射の Timer(ボタン単位、キー = "\(port):trig1" 等)。
+    // ★メインスレッドからのみ読み書きする(Timer / RunLoop の制約)。iOS 版
+    //   `TouchJoystickInput.autoFireTimers` と同じくボタンごとに独立した Timer を持つ。
+    private var autoFireTimers: [String: Timer] = [:]
+
+    // P853: 直近のフェーズ(true = 押下 / false = 解放)。キーは autoFireTimers と同一。
+    // valueChangedHandler(任意スレッド)からの読み取りと Timer tick(メインスレッド)からの
+    // 書き込みが競合するため、★読み書き双方を必ず autoFirePhaseLock 越しに行う。
+    // エントリが無い場合は「押下フェーズ」とみなす(押した瞬間に即時押下を送出するため —
+    // iOS 版 startAutoFire が開始直後に pressed: true を送るのと同じ挙動)。
+    private var autoFirePhase: [String: Bool] = [:]
+
+    // P853: autoFirePhase 保護用の os_unfair_lock。Swift の格納プロパティに直接
+    // os_unfair_lock を置くとアドレスが安定しない(lock の値コピーが起き得る)ため、
+    // ヒープに確保したポインタ越しに使う。InputManager はシングルトンで解放されないが、
+    // 念のため deinit で解放する。
+    private let autoFirePhaseLock: UnsafeMutablePointer<os_unfair_lock> = {
+        let p = UnsafeMutablePointer<os_unfair_lock>.allocate(capacity: 1)
+        p.initialize(to: os_unfair_lock())
+        return p
+    }()
+
+    // P853: ポートごとのハンドラ世代番号(メインスレッド限定)。installGamepadHandler /
+    // clearGamepadPort / stopGamepadMonitoring のたびに進める。valueChangedHandler から
+    // DispatchQueue.main.async で遅れて届く updateAutoFireTimers が「既に再登録・解除された
+    // 古いハンドラ」由来だった場合に Timer を生成しないためのガード(再登録時に古い割当で
+    // 動き続ける Timer を残さない)。
+    private var gamepadHandlerGeneration: [Int32: Int] = [:]
+
+    /// P853: 連射フェーズ 1 回分の継続時間(フルサイクルはこの 2 倍 ≒ 66ms ≒ 15.2Hz)。
+    /// iOS 版 `TouchJoystickInput.autoFirePhaseInterval`(P724)と同値。実機の X68000 には
+    /// 連射機構が無く、模倣元の一次情報源は無い(ホスト側 UI 規約)。
+    private static let autoFirePhaseInterval: TimeInterval = 0.033
+
+    /// P853: 連射対象の機能(iOS 版と同様 TRIG1/TRIG2 のみ)。
+    private static let autoFireFunctions: [GamepadFunction] = [.trig1, .trig2]
+
+    deinit {
+        autoFirePhaseLock.deinitialize(count: 1)
+        autoFirePhaseLock.deallocate()
+    }
+
     // P227: ゲームパッド(GameController framework)。負論理
     // (idle=0xFF・押下でビットをクリア)。bit0=Up bit1=Down bit2=Left
     // bit3=Right bit5=TRIG2(0x20) bit6=TRIG1(0x40)、bit4/bit7 は常時1。
@@ -292,6 +341,65 @@ class InputManager: ObservableObject {
         }
     }
 
+    // MARK: - P853: ゲームパッドの連射(オートファイア)
+
+    /// P853: 指定ポート・機能の連射が有効かを解決する(`resolvedButton` と同型)。
+    /// 未設定なら false(連射なし)。
+    /// ★メインスレッドからのみ呼ぶ(呼出元は installGamepadHandler の登録処理)。
+    private func resolvedAutoFire(port: Int32, function: GamepadFunction) -> Bool {
+        gamepadAutoFireOverrides["\(port):\(function.rawValue)"] ?? false
+    }
+
+    /// P853: 指定ポート・機能の連射 ON/OFF を変更する(リマップ画面から呼ぶ)。
+    /// ハンドラは連射設定を不変キャプチャしているため、割当中のコントローラがあれば
+    /// 再登録して即時反映する(`setGamepadButtonMapping(_:function:port:)` と同型)。
+    /// config.json への保存は View 側の責務(既存分担を踏襲)。
+    func setGamepadAutoFire(_ enabled: Bool, function: GamepadFunction, port: Int32) {
+        guard port == 0 || port == 1 else { return }
+        gamepadAutoFireOverrides["\(port):\(function.rawValue)"] = enabled
+        if let pad = gamepadControllers[port]?.extendedGamepad {
+            installGamepadHandler(pad, port: port)
+        }
+    }
+
+    /// P853: 連射フェーズを読む(任意スレッド可・lock 越し)。エントリ無し = 押下フェーズ。
+    private func readAutoFirePhase(_ key: String) -> Bool {
+        os_unfair_lock_lock(autoFirePhaseLock)
+        defer { os_unfair_lock_unlock(autoFirePhaseLock) }
+        return autoFirePhase[key] ?? true
+    }
+
+    /// P853: 連射フェーズを反転する(Timer tick から呼ぶ・lock 越し)。
+    private func toggleAutoFirePhase(_ key: String) {
+        os_unfair_lock_lock(autoFirePhaseLock)
+        defer { os_unfair_lock_unlock(autoFirePhaseLock) }
+        autoFirePhase[key] = !(autoFirePhase[key] ?? true)
+    }
+
+    /// P853: 連射フェーズを初期状態(エントリ無し = 押下フェーズ)へ戻す(lock 越し)。
+    private func resetAutoFirePhase(_ key: String) {
+        os_unfair_lock_lock(autoFirePhaseLock)
+        defer { os_unfair_lock_unlock(autoFirePhaseLock) }
+        autoFirePhase.removeValue(forKey: key)
+    }
+
+    /// P853: 1 キー分の連射 Timer を停止・除去し、フェーズも初期化する。
+    /// ★メインスレッドからのみ呼ぶ。
+    private func stopAutoFireTimer(_ key: String) {
+        autoFireTimers[key]?.invalidate()
+        autoFireTimers.removeValue(forKey: key)
+        resetAutoFirePhase(key)
+    }
+
+    /// P853: 指定ポートの全連射キー("\(port):trig1" / "\(port):trig2")の Timer を停止する。
+    /// installGamepadHandler 冒頭・clearGamepadPort・stopGamepadMonitoring・
+    /// ゲームパッド無効化から呼ぶ。★メインスレッドからのみ呼ぶ。
+    private func stopAutoFireTimers(port: Int32) {
+        for function in Self.autoFireFunctions {
+            stopAutoFireTimer("\(port):\(function.rawValue)")
+        }
+    }
+
     /// P499b: 表示名(vendorName が無いコントローラ向けのフォールバック付き)。
     func gamepadDisplayName(_ controller: GCController) -> String {
         controller.vendorName ?? "Controller"
@@ -329,6 +437,10 @@ class InputManager: ObservableObject {
         gamepadPorts.removeValue(forKey: ObjectIdentifier(controller))
         gamepadControllers[port] = nil
         controller.extendedGamepad?.valueChangedHandler = nil
+        // P853: 切断・割当解除時に連射 Timer を止める(暴走連射の防止)。世代を進めて、
+        // 解除前のハンドラから遅れて届く updateAutoFireTimers も無効化する。
+        gamepadHandlerGeneration[port, default: 0] += 1
+        stopAutoFireTimers(port: port)
         mx68k_joy_set(port, 0xFF)
         idleGamepadBank1(port)   // P500: H 側バンクも押しっぱなしを残さない
     }
@@ -427,6 +539,8 @@ class InputManager: ObservableObject {
         keyboardOverrides = input.keyboardMap
         // P585: ゲームパッドのボタン割当上書きも同じタイミングで取り込む。
         gamepadOverrides = input.gamepadMap
+        // P853: 連射設定も同じタイミングで取り込む(gamepadOverrides と同型)。
+        gamepadAutoFireOverrides = input.gamepadAutoFire
         let wasEnabled  = mouseEnabled
         let wasAbsolute = mouseAbsolute
         mouseEnabled      = input.mouseEnabled
@@ -449,6 +563,10 @@ class InputManager: ObservableObject {
         let wasGamepad = gamepadEnabled
         gamepadEnabled = input.gamepadEnabled
         if wasGamepad && !gamepadEnabled {
+            // P853: 無効化中はハンドラが早期 return して updateAutoFireTimers に到達しない
+            // ため、ここで連射 Timer を明示的に止める(Timer tick 側も gamepadEnabled を見る)。
+            stopAutoFireTimers(port: 0)
+            stopAutoFireTimers(port: 1)
             mx68k_joy_set(0, 0xFF)
             mx68k_joy_set(1, 0xFF)   // P499: port1(2P)も同時に idle 化
             idleGamepadBank1(0)      // P500: H 側バンク(多ボタンプロファイル時のみ)
@@ -739,6 +857,13 @@ class InputManager: ObservableObject {
         for controller in GCController.controllers() {
             controller.extendedGamepad?.valueChangedHandler = nil
         }
+        // P853: clearGamepadPort を経由しないこの停止経路でも、port0/port1 両方の
+        // 全連射 Timer を止める(iOS 版 releaseVirtualPad と同じ「暴走連射」防止の配慮)。
+        // 世代を進め、遅れて届く updateAutoFireTimers による Timer 再生成も防ぐ。
+        for p: Int32 in [0, 1] {
+            gamepadHandlerGeneration[p, default: 0] += 1
+            stopAutoFireTimers(port: p)
+        }
         mx68k_joy_set(0, 0xFF)   // idle(押しっぱなし解放)
         mx68k_joy_set(1, 0xFF)   // P499: port1(2P)も idle 化
         idleGamepadBank1(0)      // P500: H 側バンク(多ボタンプロファイル時のみ)
@@ -766,6 +891,14 @@ class InputManager: ObservableObject {
     /// クロージャにキャプチャされる(ポート割当辞書をクロージャ内から参照しては
     /// ならない — valueChangedHandler は任意スレッドで発火しうるため)。
     private func installGamepadHandler(_ pad: GCExtendedGamepad, port: Int32) {
+        // P853: ★冒頭で、このポートの既存連射 Timer を全て止めてから新しいハンドラを設定する。
+        // 古い割当(ボタン・連射設定)をキャプチャした Timer が再登録後も動き続けるのを防ぐ。
+        // setGamepadButtonMapping / setGamepadAutoFire / setGamepadProfile / assignGamepadPort /
+        // registerGamepadHandler など、このメソッドを呼ぶ全経路がこれで自動的にカバーされる。
+        // 世代番号も進め、旧ハンドラから遅れて届く updateAutoFireTimers を無効化する。
+        gamepadHandlerGeneration[port, default: 0] += 1
+        let generation = gamepadHandlerGeneration[port] ?? 0
+        stopAutoFireTimers(port: port)
         // P500: プロファイルも port と同じく「登録時点の不変値」としてキャプチャする
         // (クロージャ内から @Published の辞書を触らない — 任意スレッド発火のため)。
         // 変更時は setGamepadProfile(_:forPort:) がハンドラを再登録する。
@@ -788,22 +921,18 @@ class InputManager: ObservableObject {
         let l4Button    = resolvedButton(port: port, function: .l4)
         let r4Button    = resolvedButton(port: port, function: .r4)
         let b4Button    = resolvedButton(port: port, function: .b4)
+        // P853: 連射設定もボタン割当と同じく登録時点で解決し、不変値としてキャプチャする
+        // (クロージャ内・composeGamepadByte 内から gamepadAutoFireOverrides を参照しない)。
+        // 設定変更時は setGamepadAutoFire(_:function:port:) がハンドラを再登録する。
+        let trig1AutoFire = resolvedAutoFire(port: port, function: .trig1)
+        let trig2AutoFire = resolvedAutoFire(port: port, function: .trig2)
         pad.valueChangedHandler = { [weak self] gamepad, _ in
             guard let self = self, self.gamepadEnabled else { return }
-            // 負論理: idle=0xFF を起点に、押下されたビットをクリアする。
-            var byte: UInt8 = 0xFF
-            let dz: Float = 0.5   // 左スティックのデッドゾーン閾値
-            // d-pad と左スティックを OR 合成(どちらを倒しても方向入力として有効)。
-            let up    = gamepad.dpad.up.isPressed    || gamepad.leftThumbstick.yAxis.value >  dz
-            let down  = gamepad.dpad.down.isPressed  || gamepad.leftThumbstick.yAxis.value < -dz
-            let left  = gamepad.dpad.left.isPressed  || gamepad.leftThumbstick.xAxis.value < -dz
-            let right = gamepad.dpad.right.isPressed || gamepad.leftThumbstick.xAxis.value >  dz
-            if up    { byte &= ~UInt8(0x01) }   // bit0 = Up
-            if down  { byte &= ~UInt8(0x02) }   // bit1 = Down
-            if left  { byte &= ~UInt8(0x04) }   // bit2 = Left
-            if right { byte &= ~UInt8(0x08) }   // bit3 = Right
-            if trig1Button.isPressed(gamepad) { byte &= ~UInt8(0x40) }   // bit6 = TRIG1
-            if trig2Button.isPressed(gamepad) { byte &= ~UInt8(0x20) }   // bit5 = TRIG2
+            // P853: bank0(方向 + TRIG1/TRIG2)の合成は composeGamepadByte へ抽出
+            // (連射 Timer の tick からも同じロジックで再計算するため)。
+            let byte = self.composeGamepadByte(gamepad: gamepad, port: port,
+                                               trig1Button: trig1Button, trig2Button: trig2Button,
+                                               trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire)
             // GamePad_SetState(呼出先)はアトミック実装済み → メインスレッドへの
             // ディスパッチ不要。valueChangedHandler は任意スレッドで呼ばれてよい。
             // P499: 送出先はハンドラ登録時にキャプチャした不変の port(0=JOY1 / 1=JOY2)。
@@ -815,6 +944,18 @@ class InputManager: ObservableObject {
             // mx68k_joy_set の呼出しタイミング・値は一切変えていない)。
             DispatchQueue.main.async { [weak self] in
                 self?.joyState[Int(port)] = byte
+            }
+
+            // P853: 連射 Timer の生成/破棄はメインスレッド限定のため、判断ごと
+            // メインスレッドへディスパッチする(このクロージャから直接 Timer を触らない)。
+            // 連射が両方無効なら Timer は存在し得ないので何もしない(既存挙動の完全維持)。
+            if trig1AutoFire || trig2AutoFire {
+                DispatchQueue.main.async { [weak self] in
+                    self?.updateAutoFireTimers(port: port, pad: gamepad,
+                                               trig1Button: trig1Button, trig2Button: trig2Button,
+                                               trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire,
+                                               generation: generation)
+                }
             }
 
             // P500: 多ボタンパッドの第2バンク(ストローブ High 側)。
@@ -859,6 +1000,111 @@ class InputManager: ObservableObject {
                 }
             }
         }
+    }
+
+    /// P853: bank0(方向 + TRIG1/TRIG2)の送出バイトを合成する(P853 以前は
+    /// valueChangedHandler 内にインラインで書かれていたロジックをそのまま抽出)。
+    /// valueChangedHandler(任意スレッド)と連射 Timer の tick(メインスレッド)の両方から呼ぶ。
+    ///
+    /// ★`trig1Button`/`trig2Button`/`trig1AutoFire`/`trig2AutoFire` はハンドラ登録時に
+    ///   解決された不変値を受け取る —— この関数内から gamepadOverrides /
+    ///   gamepadAutoFireOverrides(メインスレッド限定の辞書)を直接参照しない。
+    ///   参照するのは lock 保護された autoFirePhase のみ(readAutoFirePhase 経由)。
+    /// 連射が有効なトリガーは「押下中 かつ 押下フェーズ」のときだけビットを立てる。
+    /// 無効なトリガーは従来通り「押下中」のみで判定する(既存挙動と同一)。
+    private func composeGamepadByte(gamepad: GCExtendedGamepad, port: Int32,
+                                    trig1Button: GamepadPhysicalButton,
+                                    trig2Button: GamepadPhysicalButton,
+                                    trig1AutoFire: Bool,
+                                    trig2AutoFire: Bool) -> UInt8 {
+        // 負論理: idle=0xFF を起点に、押下されたビットをクリアする。
+        var byte: UInt8 = 0xFF
+        let dz: Float = 0.5   // 左スティックのデッドゾーン閾値
+        // d-pad と左スティックを OR 合成(どちらを倒しても方向入力として有効)。
+        let up    = gamepad.dpad.up.isPressed    || gamepad.leftThumbstick.yAxis.value >  dz
+        let down  = gamepad.dpad.down.isPressed  || gamepad.leftThumbstick.yAxis.value < -dz
+        let left  = gamepad.dpad.left.isPressed  || gamepad.leftThumbstick.xAxis.value < -dz
+        let right = gamepad.dpad.right.isPressed || gamepad.leftThumbstick.xAxis.value >  dz
+        if up    { byte &= ~UInt8(0x01) }   // bit0 = Up
+        if down  { byte &= ~UInt8(0x02) }   // bit1 = Down
+        if left  { byte &= ~UInt8(0x04) }   // bit2 = Left
+        if right { byte &= ~UInt8(0x08) }   // bit3 = Right
+        var trig1 = trig1Button.isPressed(gamepad)
+        if trig1 && trig1AutoFire {
+            trig1 = readAutoFirePhase("\(port):\(GamepadFunction.trig1.rawValue)")
+        }
+        var trig2 = trig2Button.isPressed(gamepad)
+        if trig2 && trig2AutoFire {
+            trig2 = readAutoFirePhase("\(port):\(GamepadFunction.trig2.rawValue)")
+        }
+        if trig1 { byte &= ~UInt8(0x40) }   // bit6 = TRIG1
+        if trig2 { byte &= ~UInt8(0x20) }   // bit5 = TRIG2
+        return byte
+    }
+
+    /// P853: 連射 Timer の生成/破棄を現在の押下状態に合わせる。
+    /// ★メインスレッドからのみ呼ぶ(valueChangedHandler から DispatchQueue.main.async 経由)。
+    /// 「連射対象 かつ 押下中」のキーは Timer が未生成のときだけ生成し、それ以外のキーは
+    /// 既存 Timer を invalidate して除去する(フェーズも初期化 = 次回押下は即時押下から)。
+    /// `generation` が現在のポート世代と異なる(= 既に再登録・解除された古いハンドラ由来の
+    /// 遅延呼び出し)場合は何もしない。
+    private func updateAutoFireTimers(port: Int32, pad: GCExtendedGamepad,
+                                      trig1Button: GamepadPhysicalButton,
+                                      trig2Button: GamepadPhysicalButton,
+                                      trig1AutoFire: Bool,
+                                      trig2AutoFire: Bool,
+                                      generation: Int) {
+        guard gamepadHandlerGeneration[port] == generation else { return }
+        guard gamepadEnabled else {
+            stopAutoFireTimers(port: port)
+            return
+        }
+        let entries: [(GamepadFunction, GamepadPhysicalButton, Bool)] = [
+            (.trig1, trig1Button, trig1AutoFire),
+            (.trig2, trig2Button, trig2AutoFire),
+        ]
+        for (function, button, autoFire) in entries {
+            let key = "\(port):\(function.rawValue)"
+            if autoFire && button.isPressed(pad) {
+                guard autoFireTimers[key] == nil else { continue }   // 二重生成しない
+                startAutoFireTimer(key: key, port: port, pad: pad,
+                                   trig1Button: trig1Button, trig2Button: trig2Button,
+                                   trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire)
+            } else if autoFireTimers[key] != nil {
+                stopAutoFireTimer(key)
+            }
+        }
+    }
+
+    /// P853: 1 キー分の連射 Timer を生成して `.common` モードへ 1 回だけ登録する。
+    /// ★メインスレッドからのみ呼ぶ。
+    ///
+    /// ★`Timer.scheduledTimer(...)` は生成と同時に現在の RunLoop へ `.default` モードで
+    ///   自動登録されるため、その後 `RunLoop.main.add(_:forMode: .common)` すると二重登録に
+    ///   なる(iOS 版 `TouchJoystickView.swift` が警告しているアンチパターン)。非自動登録の
+    ///   `Timer(timeInterval:repeats:block:)` で生成し、登録は 1 回だけ行う。
+    private func startAutoFireTimer(key: String, port: Int32, pad: GCExtendedGamepad,
+                                    trig1Button: GamepadPhysicalButton,
+                                    trig2Button: GamepadPhysicalButton,
+                                    trig1AutoFire: Bool,
+                                    trig2AutoFire: Bool) {
+        let timer = Timer(timeInterval: Self.autoFirePhaseInterval, repeats: true) { [weak self] _ in
+            // Timer はメインの RunLoop で発火する(= メインスレッド)。
+            guard let self = self, self.gamepadEnabled else { return }
+            // フェーズ反転(lock 越し)→ bank0 を再合成して送出(変化の有無に関わらず送出 —
+            // 既存 valueChangedHandler の「毎回全ビット再構築して送出」と同じ方針)。
+            self.toggleAutoFirePhase(key)
+            let byte = self.composeGamepadByte(gamepad: pad, port: port,
+                                               trig1Button: trig1Button, trig2Button: trig2Button,
+                                               trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire)
+            mx68k_joy_set(port, byte)
+            // 入力モニタ表示(joyState)も実際の送出ビットと同期させる(既にメインスレッド)。
+            self.joyState[Int(port)] = byte
+        }
+        // `.common` モードで登録 —— `.default` だとメニュー追跡/ウィンドウのライブリサイズ等
+        // `.eventTracking` モード中に発火が止まり得る。
+        RunLoop.main.add(timer, forMode: .common)
+        autoFireTimers[key] = timer
     }
 }
 

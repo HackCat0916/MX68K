@@ -1371,6 +1371,16 @@
         }
       }
     },
+    "Auto-Fire": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "連射"
+          }
+        }
+      }
+    },
     "Auto-fire A": {
       "localizations": {
         "ja": {

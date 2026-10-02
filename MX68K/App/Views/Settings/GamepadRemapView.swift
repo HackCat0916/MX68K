@@ -78,6 +78,15 @@ struct GamepadRemapView: View {
                         pickerRow(function)
                     }
                 }
+                // P853: TRIG1/TRIG2 の連射(オートファイア)ON/OFF。iOS 版と同じく対象は
+                // 基礎バンクの 2 ボタンのみで、プロファイルに関わらず常時表示する。
+                Section(header: Text("Auto-Fire")) {
+                    ForEach(GamepadFunction.baseRows) { function in
+                        Toggle(isOn: autoFireBinding(for: function)) {
+                            Text(verbatim: function.displayName)
+                        }
+                    }
+                }
                 if !extraRows.isEmpty {
                     Section(header: Text("Extra buttons")) {
                         ForEach(extraRows) { function in
@@ -130,6 +139,7 @@ struct GamepadRemapView: View {
         let hasOtherSection = !otherRows.isEmpty
         return 190 + CGFloat(rows.count) * 32
             + 30                                // 「基礎」Section ヘッダ(常時)
+            + 30 + 2 * 32                       // P853: 「Auto-Fire」Section(常時・ヘッダ + Toggle 2 行)
             + (hasExtraSection ? 30 : 0)
             + (hasOtherSection ? 30 : 0)
     }
@@ -148,6 +158,21 @@ struct GamepadRemapView: View {
                 // 同じく、config への書込みは View 側の責務。
                 InputManager.shared.setGamepadButtonMapping(newButton, function: function, port: port)
                 configManager.config.input.gamepadMap[key(function)] = newButton.rawValue
+                configManager.save()
+            }
+        )
+    }
+
+    /// P853: 連射 Toggle のバインディング(`binding(for:)` と同じパターン)。読み出しは
+    /// config を直接引き、未設定なら false。書込みはライブ適用(ハンドラ再登録)+ 保存。
+    private func autoFireBinding(for function: GamepadFunction) -> Binding<Bool> {
+        Binding<Bool>(
+            get: {
+                configManager.config.input.gamepadAutoFire[key(function)] ?? false
+            },
+            set: { enabled in
+                InputManager.shared.setGamepadAutoFire(enabled, function: function, port: port)
+                configManager.config.input.gamepadAutoFire[key(function)] = enabled
                 configManager.save()
             }
         )
