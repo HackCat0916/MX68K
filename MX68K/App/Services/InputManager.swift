@@ -257,6 +257,25 @@ class InputManager: ObservableObject {
     // 動き続ける Timer を残さない)。
     private var gamepadHandlerGeneration: [Int32: Int] = [:]
 
+    // P856: キーボードの連射(オートファイア)ON/OFF(config.input.keyboardAutoFire の
+    // ライブ複製)。キー = X68000 スキャンコードの 10 進文字列(例 "99" = 0x63 = F1)。
+    // ホストキーコードではなくスキャンコード単位なので、キー割当を変更しても追従する。
+    private var keyboardAutoFireOverrides: [String: Bool] = [:]
+
+    // P856: キーボード連射の Timer(スキャンコード単位)。ゲームパッド用の autoFireTimers
+    // ([String: Timer])とは別の辞書として持つ。
+    // ★P853 と異なりロック・世代番号は不要: handleKeyDown/handleKeyUp は NSView のキー
+    //   イベント(AppKit のレスポンダチェーン = 常にメインスレッド)から呼ばれ、Timer も
+    //   メインの RunLoop に登録するため、イベント源と Timer tick が同一スレッドになる。
+    //   (iOS 版 IOSKeyboardInput の P775 合成キーリピートと同じパターン。)
+    private var keyboardAutoFireTimers: [UInt8: Timer] = [:]
+
+    // P856: キーボード連射の直近フェーズ(true = 押下 / false = 解放)。キーは
+    // keyboardAutoFireTimers と同一。Timer ブロックはキャプチャした var を書き換えられない
+    // (@Sendable 制約)ため、iOS 版 TouchJoystickView.autoFirePhase と同様に self 側で持つ。
+    // メインスレッド限定(ロック不要の理由は keyboardAutoFireTimers と同じ)。
+    private var keyboardAutoFirePhase: [UInt8: Bool] = [:]
+
     /// P853: 連射フェーズ 1 回分の継続時間(フルサイクルはこの 2 倍 ≒ 66ms ≒ 15.2Hz)。
     /// iOS 版 `TouchJoystickInput.autoFirePhaseInterval`(P724)と同値。実機の X68000 には
     /// 連射機構が無く、模倣元の一次情報源は無い(ホスト側 UI 規約)。
@@ -541,6 +560,8 @@ class InputManager: ObservableObject {
         gamepadOverrides = input.gamepadMap
         // P853: 連射設定も同じタイミングで取り込む(gamepadOverrides と同型)。
         gamepadAutoFireOverrides = input.gamepadAutoFire
+        // P856: キーボード連射設定も同じタイミングで取り込む。
+        keyboardAutoFireOverrides = input.keyboardAutoFire
         let wasEnabled  = mouseEnabled
         let wasAbsolute = mouseAbsolute
         mouseEnabled      = input.mouseEnabled
@@ -581,6 +602,9 @@ class InputManager: ObservableObject {
         for (_, mapped) in heldKeys { mx68k_key_up(UInt8(mapped)) }
         heldKeys.removeAll()
         keyboardState.removeAll()
+        // P856: 保持中キーを解放したので連射 Timer も全て止める(止め忘れると、解放済みの
+        // キーが Timer tick で押下/解放を送り続ける「ゴースト入力」になる)。
+        for scancode in Array(keyboardAutoFireTimers.keys) { stopAutoFireTimer(scancode: scancode) }
 
         keyMapping = [
             // 数字・記号 行 (row1)
@@ -690,16 +714,79 @@ class InputManager: ObservableObject {
         heldKeys[raw] = mapped          // P194: 送出したコードを物理キー単位で記録
         keyboardState[mapped] = true
         mx68k_key_down(UInt8(mapped))
+        // P856: 連射対象のスキャンコードなら押下と同時に連射 Timer を開始する
+        // (macOS のキーリピートで繰り返し呼ばれても、関数側のガードで Timer は 1 本のみ)。
+        if keyboardAutoFireOverrides[String(mapped)] == true {
+            startAutoFireTimerIfNeeded(scancode: UInt8(mapped))
+        }
     }
 
     func handleKeyUp(_ event: NSEvent) {
         let raw = UInt16(event.keyCode)
         // P194: 押下時に送出したコードで解放する(現在の割当を引き直さない)。
         guard let mapped = heldKeys.removeValue(forKey: raw) else { return }
-        // 同じコードを別の物理キーがまだ保持している場合は解放しない。
+        // 同じコードを別の物理キーがまだ保持している場合は解放しない(連射も継続)。
         guard !heldKeys.values.contains(mapped) else { return }
         keyboardState[mapped] = false
         mx68k_key_up(UInt8(mapped))
+        // P856: 連射 Timer があれば止める(無ければ何もしない)。
+        stopAutoFireTimer(scancode: UInt8(mapped))
+    }
+
+    // MARK: - P856: キーボードの連射(オートファイア)
+
+    /// P856: 指定スキャンコードの連射 ON/OFF を変更する(キーリマップ画面から呼ぶ、
+    /// `setGamepadAutoFire` 相当)。そのキーが現在押されていれば即座に Timer を開始/停止する。
+    /// config.json への保存は View 側の責務(既存分担を踏襲)。★メインスレッドからのみ呼ぶ。
+    func setKeyboardAutoFire(_ enabled: Bool, scancode: UInt8) {
+        keyboardAutoFireOverrides[String(scancode)] = enabled
+        let isHeld = heldKeys.values.contains(UInt32(scancode))
+        if enabled {
+            if isHeld { startAutoFireTimerIfNeeded(scancode: scancode) }
+        } else if keyboardAutoFireTimers[scancode] != nil {
+            stopAutoFireTimer(scancode: scancode)
+            // ★直前の tick が解放フェーズだった場合、Core 側は「離した」状態のままなので、
+            //   物理キーがまだ押されていれば押下を再送して実際の状態に戻す。
+            if isHeld { keyboardState[UInt32(scancode)] = true; mx68k_key_down(scancode) }
+        }
+    }
+
+    /// P856: 1 スキャンコード分の連射 Timer を生成して `.common` モードへ 1 回だけ登録する。
+    /// ★メインスレッドからのみ呼ぶ。
+    ///
+    /// ★冒頭の既存 Timer ガードは必須: macOS のキーリピート(連射を使う「押し続ける」
+    ///   シナリオそのもの)で handleKeyDown が繰り返し呼ばれるため、ガードが無いと
+    ///   Timer が二重登録され、古い Timer が invalidate されないまま RunLoop に残る。
+    /// ★`Timer.scheduledTimer(...)` は使わない(自動登録 + `.common` 追加で二重登録になる —
+    ///   P853 の `startAutoFireTimer(key:...)` と同じ理由)。
+    private func startAutoFireTimerIfNeeded(scancode: UInt8) {
+        guard keyboardAutoFireTimers[scancode] == nil else { return }   // ★必須ガード(二重登録防止)
+        keyboardAutoFirePhase[scancode] = true   // 直前に mx68k_key_down 済み = 押下フェーズ
+        let timer = Timer(timeInterval: Self.autoFirePhaseInterval, repeats: true) { [weak self] _ in
+            // Timer はメインの RunLoop で発火する(= メインスレッド)。
+            guard let self = self else { return }
+            let phase = !(self.keyboardAutoFirePhase[scancode] ?? true)
+            self.keyboardAutoFirePhase[scancode] = phase
+            if phase {
+                self.keyboardState[UInt32(scancode)] = true
+                mx68k_key_down(scancode)
+            } else {
+                self.keyboardState[UInt32(scancode)] = false
+                mx68k_key_up(scancode)
+            }
+        }
+        // `.common` モードで登録 —— `.default` だとメニュー追跡等の `.eventTracking`
+        // モード中に発火が止まり得る(P853 と同方針)。
+        RunLoop.main.add(timer, forMode: .common)
+        keyboardAutoFireTimers[scancode] = timer
+    }
+
+    /// P856: 1 スキャンコード分の連射 Timer を停止・除去する(無ければ何もしない、冪等)。
+    /// ★メインスレッドからのみ呼ぶ。
+    private func stopAutoFireTimer(scancode: UInt8) {
+        keyboardAutoFireTimers[scancode]?.invalidate()
+        keyboardAutoFireTimers.removeValue(forKey: scancode)
+        keyboardAutoFirePhase.removeValue(forKey: scancode)
     }
 
     func handleFlagsChanged(_ event: NSEvent) {

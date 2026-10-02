@@ -97,6 +97,11 @@ struct InputConfig: Codable {
     // ("\(port):\(function.rawValue)"、例 "0:trig1")。対象は TRIG1/TRIG2 のみ。
     // 未設定のキーは false(連射なし = P853 以前の挙動)。
     var gamepadAutoFire: [String: Bool] = [:]
+    // P856: キーボードの連射(オートファイア)ON/OFF。キー = X68000 スキャンコード(UInt8)の
+    // 10 進文字列(例 "99" = 0x63 = F1)、値 = 連射 ON/OFF。ホストキーコードではなく
+    // スキャンコード単位にするのは、キー割当(keyboardMap)を後で変更しても連射設定が
+    // 追従するようにするため。未設定のキーは false(連射なし = P856 以前の挙動)。
+    var keyboardAutoFire: [String: Bool] = [:]
     // P194: 入力設定
     var arrowKeysAsNumpad: Bool = false   // カーソルキーをテンキー 8/2/4/6 として送る
     var mouseEnabled: Bool = true         // マウスエミュレーション
@@ -116,6 +121,8 @@ struct InputConfig: Codable {
         gamepadMap        = try c.decodeIfPresent([String: String].self, forKey: .gamepadMap) ?? [:]
         // P853: 旧 config.json(キーなし)でも設定全体がリセットされないよう既定値補完する。
         gamepadAutoFire   = try c.decodeIfPresent([String: Bool].self, forKey: .gamepadAutoFire) ?? [:]
+        // P856: キーボード連射設定も同様に既定値補完する。
+        keyboardAutoFire  = try c.decodeIfPresent([String: Bool].self, forKey: .keyboardAutoFire) ?? [:]
         arrowKeysAsNumpad = try c.decodeIfPresent(Bool.self, forKey: .arrowKeysAsNumpad) ?? false
         mouseEnabled      = try c.decodeIfPresent(Bool.self, forKey: .mouseEnabled) ?? true
         let s = try c.decodeIfPresent(Double.self, forKey: .mouseSensitivity) ?? 1.0

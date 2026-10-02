@@ -186,7 +186,7 @@ struct KeyRemapView: View {
             }
             .padding(16)
         }
-        .frame(width: 460, height: 520)
+        .frame(width: 500, height: 520)   // P856: 連射 Toggle 列の分だけ 460 → 500 へ拡大
         .onAppear { refreshBindings() }
         // シートがスワイプ / Close / ⌘W 等で閉じられたときにモニタを取り残さない。
         .onDisappear { stopCapture() }
@@ -216,6 +216,13 @@ struct KeyRemapView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
+                // P856: 連射(オートファイア)ON/OFF。スキャンコード単位で保存するため、
+                // ホストキーの割当を変更しても設定は追従する。
+                // ★単一の ForEach(Self.rows)内の Toggle であり、P855 の「同一 List 内の
+                //   複数 Section が同じ id を共有する」ビュー衝突条件には該当しない。
+                Toggle("", isOn: autoFireBinding(for: row.scancode))
+                    .labelsHidden()
+                    .help("Auto-Fire")
                 Button("Change") { startCapture(row.scancode) }
                     .disabled(capturingScancode != nil)
             }
@@ -251,6 +258,21 @@ struct KeyRemapView: View {
         if let monitor = monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         capturingScancode = nil
+    }
+
+    // MARK: - P856: 連射(オートファイア)
+
+    /// P856: 指定スキャンコードの連射 ON/OFF バインディング(`GamepadRemapView.autoFireBinding`
+    /// と同型)。ライブ適用は InputManager、config.json への保存は View 側で行う(既存分担)。
+    private func autoFireBinding(for scancode: UInt8) -> Binding<Bool> {
+        Binding<Bool>(
+            get: { configManager.config.input.keyboardAutoFire[String(scancode)] ?? false },
+            set: { enabled in
+                InputManager.shared.setKeyboardAutoFire(enabled, scancode: scancode)
+                configManager.config.input.keyboardAutoFire[String(scancode)] = enabled
+                configManager.save()
+            }
+        )
     }
 
     // MARK: - 保存 / 表示更新
