@@ -2111,6 +2111,16 @@
         }
       }
     },
+    "The checkbox next to each row's Change button turns Auto-Fire on for that key — holding the key down repeats it automatically.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各行の「変更」ボタンの横のチェックボックスは、そのキーの連射(押しっぱなしで自動的に繰り返し送出する機能)をONにします。"
+          }
+        }
+      }
+    },
     "Press a key…": {
       "localizations": {
         "ja": {

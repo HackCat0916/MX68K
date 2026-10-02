@@ -165,6 +165,11 @@ struct KeyRemapView: View {
                 Text("Choose which host key sends each X68000 key. SHIFT, CTRL and CAPS are not listed: macOS reports them as modifier flags, so they cannot be remapped here.")
                     .font(.subheadline).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                // P857: 連射チェックボックスの意味が画面上から読み取れないという石井さんの
+                // 実機hands-on指摘(P856 T-3)を受けて追加。
+                Text("The checkbox next to each row's Change button turns Auto-Fire on for that key — holding the key down repeats it automatically.")
+                    .font(.subheadline).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
@@ -186,7 +191,7 @@ struct KeyRemapView: View {
             }
             .padding(16)
         }
-        .frame(width: 500, height: 520)   // P856: 連射 Toggle 列の分だけ 460 → 500 へ拡大
+        .frame(width: 500, height: 550)   // P856: 連射 Toggle 列の分だけ幅 460 → 500 へ拡大 / P857: 連射説明文追加に伴い高さ 520 → 550
         .onAppear { refreshBindings() }
         // シートがスワイプ / Close / ⌘W 等で閉じられたときにモニタを取り残さない。
         .onDisappear { stopCapture() }
