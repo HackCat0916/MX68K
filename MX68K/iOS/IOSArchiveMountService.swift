@@ -80,6 +80,20 @@ enum IOSArchiveMountService {
         // 取りこぼしが起きやすいため、macOS版の設計をそのまま踏襲)。
         for entry in archive {
             let destURL = tempDir.appendingPathComponent(entry.path)
+            // パストラバーサル対策: ZIPFoundation自身が提供する
+            // isContained(in:)で展開先がtempDir配下に収まることを検証する。
+            // entry.pathはZIP内の生のファイル名文字列そのもので、
+            // サニタイズは無い(ZIPFoundationのextract(_:to:)内の
+            // コンテインメント検査はsymlinkエントリのみに適用され、通常
+            // ファイルには適用されない)。自作の正規化チェックではなく
+            // isContained(in:)を使うのは、先頭"/"+".."による二重スラッシュ
+            // 迂回(ZIPFoundation issue #281で開発元が文書化・対処済み、
+            // 素朴なstandardizedFileURL比較では素通りする)に対処済みの
+            // 実装をそのまま使うため。
+            guard destURL.isContained(in: tempDir) else {
+                emitLine("op=extract entry=\(entry.path) result=pathtraversal_rejected")
+                continue
+            }
             do {
                 _ = try archive.extract(entry, to: destURL)
             } catch {
