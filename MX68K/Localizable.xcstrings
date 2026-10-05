@@ -5597,6 +5597,46 @@
         }
       }
     },
+    "This state file was saved with a different CPU model (X68000 / X68030) and cannot be loaded.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このステートファイルは異なるCPUモデル(X68000 / X68030)で保存されたため、読み込めません。"
+          }
+        }
+      }
+    },
+    "X68030 (Experimental)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "X68030 (実験的)"
+          }
+        }
+      }
+    },
+    "X68030 requires IPLROM30.DAT to be set in the BIOS settings.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "X68030にはBIOS設定でIPLROM30.DATの指定が必要です。"
+          }
+        }
+      }
+    },
+    "FPU emulation is not yet supported for X68030.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "X68030でのFPU(数値演算プロセッサ)エミュレーションは現在未対応です。"
+          }
+        }
+      }
+    },
     "Could not read or write the state file.": {
       "localizations": {
         "ja": {
@@ -7085,6 +7125,66 @@
           "stringUnit": {
             "state": "translated",
             "value": "HDD: %@"
+          }
+        }
+      }
+    },
+    "High Memory": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハイメモリ"
+          }
+        }
+      }
+    },
+    "16MB (TS-6BE16 equivalent)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "16MB(TS-6BE16相当)"
+          }
+        }
+      }
+    },
+    "Takes effect after reset. A high-memory driver (e.g. TS16DRV.X) is needed to use it from Human68k. Save states are unavailable while enabled.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リセット後に反映。Human68kから使うにはハイメモリドライバ(TS16DRV.X等)が必要です。有効中はステートセーブを使えません。"
+          }
+        }
+      }
+    },
+    "State save/load is not available while high memory is enabled.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハイメモリ有効中はステートセーブ/ロードを使えません。"
+          }
+        }
+      }
+    },
+    "MEM: %lldMB+%lldMB": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "メモリ: %lldMB+%lldMB"
+          }
+        }
+      }
+    },
+    "MEM: %dMB+%dMB": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MEM: %dMB+%dMB"
           }
         }
       }

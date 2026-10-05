@@ -4,8 +4,8 @@ MX68K is a macOS/iOS port of the open-source Sharp X68000 emulator px68k. In
 addition to px68k, MX68K incorporates source code ported from other
 open-source X68000 emulators, listed below with their original copyright
 notices and license terms. For the complete list of all third-party
-components (px68k, C68K, fmgen, win32api, mt32emu, Nuked-SC55, ZIPFoundation,
-and the XM6 port below), see `ATTRIBUTION.md`; for the overall license structure, see
+components (px68k, C68K, fmgen, win32api, mt32emu, Nuked-SC55, Musashi,
+ZIPFoundation, and the XM6 port below), see `ATTRIBUTION.md`; for the overall license structure, see
 `LICENSE`.
 
 ---
@@ -177,3 +177,48 @@ corresponding source is included in this repository under
 **No Roland ROM images are included.** The SC-55 program and wave ROMs are
 copyrighted by Roland Corporation; users must provide their own legally
 obtained copies.
+
+---
+
+## Musashi (Motorola 680x0 emulator)
+
+`ThirdParty/Musashi/` is a vendored copy of Musashi by Karl Stenerud
+(<https://github.com/kstenerud/Musashi>, commit
+`313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd`), integrated as an alternative CPU
+core backend (`Bridge/mx_cpu_musashi.c`) that powers X68030 support. It is
+used at run time when the X68030 machine is selected; the default CPU core
+for X68000/X68000XVI remains C68K. The upstream files
+are unmodified except for one configuration line in `m68kconf.h`
+(`M68K_EMULATE_INT_ACK` turned on); `m68kops.c`/`m68kops.h` are generated from
+the MIT-licensed `m68k_in.c` by the upstream `m68kmake` tool.
+
+Not vendored: the upstream `softfloat/` directory (SoftFloat Release 2b),
+`m68kfpu.c` and `m68kmmu.h`. In their place, `m68kfpu.c`, `m68kmmu.h`,
+`softfloat/milieu.h` and `softfloat/softfloat.h` in `ThirdParty/Musashi/` are
+minimal stubs written by MX68K (each marked "MX68K作成のスタブ"), not upstream
+code. See `ThirdParty/Musashi/MX68K_VENDOR.txt` for the exact file selection
+and how to re-vendor (`Scripts/vendor_musashi.sh`).
+
+**Copyright:** Copyright © 1998-2001 Karl Stenerud.
+
+**License:** MIT (from `ThirdParty/Musashi/readme.txt`):
+
+```
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+```

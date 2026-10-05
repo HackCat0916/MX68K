@@ -21,6 +21,8 @@
 #include "opm_shadow.h"   /* P479: m68000_bridge.c が書き込む OPM レジスタのシャドウ */
 #include "mercury_opn_shadow.h"   /* P491: m68000_bridge.c が書き込む Mercury OPN レジスタのシャドウ */
 #include "mt32_bridge.h"          /* P825: 内蔵 MT-32 の再構成(フレーム境界)とシャットダウン */
+#include "mx_cpu_iface.h"         /* P860: CPUコア抽象層(ステート/モニタのレジスタアクセス) */
+#include "mx_cpu_musashi.h"       /* P887: ハイメモリ(mx_cpu_musashi_set_highmem 等) */
 
 /* P509 (D-48): m68000_bridge.c 定義の診断プローブ。本サイクルの変更を
  * Bridge の 2 ファイルに閉じるため、宣言をヘッダではなくここに置く。
@@ -384,6 +386,11 @@ extern void p82xu_tick(void);                      /* P82-X-U 毎フレームの
 extern void mx68k_diag_mfp_int(int32_t irq, const char* src); /* P47-D-DIAG-G ラッパ */
 extern uint32_t m68000_get_reg(int32_t regnum);   // P28-FIX
 extern void m68000_set_reg(int32_t regnum, uint32_t val); // P28-FIX
+/* P872: CPUコアの実行時切替(m68000_bridge.c で定義、Bridge内部用) */
+extern void     m68000_set_cpu_backend_model(int model);   /* 0=c68k、1=Musashi EC030 */
+extern int      m68000_cpu_env_override(void);             /* MX68K_CPU_CORE 設定時に1 */
+extern uint32_t m68000_get_cpu_state_id(void);             /* ステートのCPU識別子 */
+extern int      m68000_cpu_backend_is_musashi(void);
 
 /* P82-X-G: FDC/IOC レジスタアクセスのトレースプローブ — VERDICT の one-shot ダンプ。
  * m68000_bridge.c で定義(ファイルスコープの static ring)。frame>=95 に初めて
@@ -595,7 +602,7 @@ void mx68k_debug_get_status(MX68KDebugStatus* out) {
     out->stopped      = g_mx68k_dbg_stopped;
     out->stop_reason  = g_mx68k_dbg_stop_reason;
     out->stop_pc      = g_mx68k_dbg_stop_pc;
-    out->cpu_halted   = mx68k_debug_cpu_halted();   /* m68000_bridge.c 側の小関数、C68K を直接見る */
+    out->cpu_halted   = mx68k_debug_cpu_halted();   /* m68000_bridge.c 側の小関数、CPUの実行状態は mx_cpu_is_halted() 経由で得る(P860) */
     out->bp_hit_count = g_mx68k_dbg_bp_hits;
     out->step_count   = g_mx68k_dbg_steps;
     out->armed_chunks = g_mx68k_dbg_armed_chunks;
@@ -606,6 +613,27 @@ static int  g_machine_type    = 0;
  * まで旧機種のまま(P238)。HDD/SCSI insert バックストップはこの確定値で判定し、
  * 未リセットの pending 機種で正当な操作を誤って拒否しないようにする。 */
 static int  g_wired_machine_type = 0;
+/* P872: CPUモデル(0=MC68000/c68k、1=MC68EC030/Musashi=X68030)。g_machine_type と同じ2変数方式で、
+ * g_cpu_model は設定値(即時)、g_wired_cpu_model は mx68k_reset_hard() 冒頭でだけ確定する配線値。
+ * s_ipl_loaded_model は IPL[] に今入っているROM(0=IPLROM.DAT、1=IPLROM30.DAT、-1=未読込み)。 */
+static int  g_cpu_model = 0;
+static int  g_wired_cpu_model = 0;
+/* P887: X68030ハイメモリ(TS-6BE16相当、$01000000-$01FFFFFF の16MB固定)。g_cpu_model と同じ2変数方式で、
+ * g_himem_mb は設定値(0 or 16、即時)、g_wired_himem_mb は mx68k_reset_hard() でだけ確定する配線値。
+ * g_himem_buf はリセットでは解放・クリアしない(内容をリセット越しに保持、XEiJ XEiJ.java:8103-8123 準拠)。 */
+static int      g_himem_mb = 0;
+static int      g_wired_himem_mb = 0;
+static uint8_t *g_himem_buf = NULL;
+static int  s_ipl_loaded_model = -1;
+static char g_iplrom_path[4096];
+static char g_iplrom30_path[4096];   /* mx68k_set_bios_path_030 が保存し、reset_hard が読み込む */
+static bool load_ipl_file(const char *path);
+/* P872: [P872-CPUMODEL] ログ用。パスのファイル名部分(空なら "(none)") */
+static const char *p872_basename(const char *path) {
+    if (!path || !path[0]) return "(none)";
+    const char *s = strrchr(path, '/');
+    return s ? s + 1 : path;
+}
 int g_scsi_ext_board_wired = 0;  /* P506: 配線確定した外付けSCSIボード装着状態
                                   * (XM6 scsi.type==1相当)。設定値
                                   * g_scsi_ext_board_installedとは別に、
@@ -1358,7 +1386,8 @@ static void ensure_app_support_dir(void) {
 /* P221b: Config.XVIMode(SysPort $E8E00B の CPU/クロック・ニブル)を、設定された
  * クロックから導出する。SASI/SCSI の機種種別とは直交する(SUPER = SCSI + 10MHz は
  * 0xFF を読み、XVIMode がストレージバスを表していないことを示す。code inv §1)。
- * 10MHz->0 (0xFF)、16MHz->1 (0xFE)、それ以外->3 (0xDC/25MHz)。これは P146 の
+ * 10MHz級->0 (0xFF)、16/24/25MHz->1 (0xFE)(P879/D-82: 25MHz も 16MHz級へ統合)。
+ * X68030 選択時(cpu_model==1)は呼出し元でこの関数をバイパスし 3 (0xDC) を直接設定する。これは P146 の
  * ハードコード XVIMode=3 を置き換える。あれは si がどのクロックでも 030/25MHz と
  * 誤報告する原因だった(D-15)。Config.XVIMode は Core 内でちょうど1箇所(sysport.c:86)
  * でしか読まれず、クロック/サイクルのタイミングには関与しない——$E8E00B のバイトを変えるだけ。 */
@@ -1383,9 +1412,10 @@ static int p270_derive_xvimode(int clock_mhz) {
     switch (clock_mhz) {
         case 16:   /* 定格 SUPER/XVI/Compact */
         case 24:   /* RedZone(XVI改) */
+        case 25:   /* ★P879(D-82修正): 68000機種での25MHz手動設定は16MHz級へ寄せる。
+                    * X68030選択時は呼出し元でこの関数自体をバイパスする(3を直接返す、
+                    * mx68k_reset_hard 等の Config.XVIMode 設定箇所)ため、この分岐はもはや68000機種のみが到達する。 */
             return 1;   /* 0xFE, 16MHz級 */
-        case 25:   /* X68030定格(Phase5専用。現行SASI/SCSI 2値からは到達しない) */
-            return 3;   /* 0xDC */
         default:   /* 10(定格)/12(ACE改)/15(PRO改)/17(EXPERT改,17.4丸め)/20(Lucky!)
                     * 他すべて10MHz級 */
             return 0;   /* 0xFF */
@@ -1504,8 +1534,10 @@ int mx68k_init(void) {
     /* P221b: 設定されたクロックから XVIMode を導出する(init 既定は 16 -> 1)。
      * reset_hard は実際のクロックから再導出する。最初のハードリセットより前でも
      * SysPort のバイトが妥当であるようにする念のための措置。完全な根拠は
-     * p270_derive_xvimode / mx68k_reset_hard を参照。 */
-    Config.XVIMode = p270_derive_xvimode(g_clock_mhz);
+     * p270_derive_xvimode / mx68k_reset_hard を参照。
+     * P872: X68030機種の固定値(3)も reset_hard と同じ式で扱う(確定は直後の reset_hard)。 */
+    Config.XVIMode = (g_wired_cpu_model == 1 && !m68000_cpu_env_override())
+                   ? 3 : p270_derive_xvimode(g_clock_mhz);
 
 #if P53_ENABLE
     /* P53 — 再 init のシナリオが機能するよう、init のたびに冪等性フラグをリセットする。
@@ -1934,6 +1966,14 @@ void mx68k_shutdown(void) {
     g_scsi_ext_board_wired = 0;   /* P506: 同上 — 新設した配線確定値も cold 状態へ戻す
                                    * (「リセット/電源で戻らないグローバル状態」という
                                    *  D-30/D-31 と同じ欠陥クラスを新変数だけ破らないため)。 */
+    /* P872: IPL[] を解放するので、CPUモデルの配線確定値とIPLの中身の記録も cold 状態へ戻す
+     * (戻さないと、X68030で電源OFF→ONしたとき set_bios_path が読込みを保留してしまう) */
+    g_wired_cpu_model = 0;
+    s_ipl_loaded_model = -1;
+    /* P887: ハイメモリも cold 状態へ戻す(Musashi側の参照を先に外してから解放する) */
+    mx_cpu_musashi_set_highmem(NULL);
+    free(g_himem_buf); g_himem_buf = NULL;
+    g_wired_himem_mb = 0;
     free(MEM); MEM = NULL;
     free(IPL); IPL = NULL;
     free(FONT); FONT = NULL;
@@ -2000,6 +2040,80 @@ void mx68k_reset_hard(void) {
      * リセットもここを通る。NMI は時間会計を切らないので対象外。 */
     s_p808_carry = 0;
 
+    /* P872: CPUモデルの配線確定。IPL→MEMシャドウ(リセットベクタのコピー)とXVIMode導出より前に
+     * 置く必要がある。この区間ではCPUは実行されない(reset_hard はフレーム境界・エミュスレッド上)。
+     * 環境変数 MX68K_CPU_CORE が設定されていればそちらを優先し、コア・型・IPLには触らない
+     * (P868/P869の実験経路の挙動をそのまま保つ)。 */
+    int p872_override = m68000_cpu_env_override();
+    int p872_latched;
+    char p872_ipl[160] = "kept";   /* 読み込んだIPLファイル名と結果(読み込まなければ kept) */
+    bool p872_ipl30_fail = false;
+    if (p872_override) {
+        /* 表示・分類のみ: 実行中のコアが Musashi のEC030本番構成なら1 */
+        p872_latched = (m68000_get_cpu_state_id() == 0x0101u) ? 1 : 0;
+    } else {
+        p872_latched = g_cpu_model;
+        if (p872_latched == 1) {
+            if (s_ipl_loaded_model != 1) {
+                bool ok = load_ipl_file(g_iplrom30_path);
+                if (ok) s_ipl_loaded_model = 1;
+                snprintf(p872_ipl, sizeof(p872_ipl), "%.64s:%s",
+                         p872_basename(g_iplrom30_path), ok ? "OK" : "FAIL");
+            }
+            if (s_ipl_loaded_model != 1) {
+                p872_latched = 0;
+                p872_ipl30_fail = true;
+            }
+        }
+        /* IPL[] に IPLROM30 が入っているときだけ IPLROM.DAT へ戻す(未読込み=-1 のまま再試行して
+         * 既定経路のログを増やさない) */
+        if (p872_latched == 0 && s_ipl_loaded_model == 1 && g_iplrom_path[0]) {
+            bool ok = load_ipl_file(g_iplrom_path);
+            if (ok) s_ipl_loaded_model = 0;
+            size_t used = p872_ipl30_fail ? strlen(p872_ipl) : 0;
+            snprintf(p872_ipl + used, sizeof(p872_ipl) - used, "%s%.64s:%s",
+                     p872_ipl30_fail ? "," : "", p872_basename(g_iplrom_path), ok ? "OK" : "FAIL");
+        }
+        m68000_set_cpu_backend_model(p872_latched);
+    }
+    g_wired_cpu_model = p872_latched;
+
+    /* P887: ハイメモリの配線確定。m68000_set_cpu_backend_model → mx_cpu_musashi_set_model が
+     * アドレスマスクを24bitへ戻すので、必ずその後に置く。環境変数優先時は Musashi に一切触れない
+     * (P868/P869の実験経路を保つ、XVIMode と同じ扱い)。バッファはリセットでは保持(kept)する。 */
+    {
+        int want = (!p872_override && g_wired_cpu_model == 1 && g_himem_mb == 16) ? 16 : 0;
+        const char *buf_state = "none";
+        int alloc_fail = 0;
+        if (want) {
+            if (!g_himem_buf) {
+                g_himem_buf = (uint8_t *)calloc(1, 16u << 20);
+                buf_state = g_himem_buf ? "new" : "none";
+            } else {
+                buf_state = "kept";
+            }
+        } else if (g_himem_buf) {
+            free(g_himem_buf); g_himem_buf = NULL;
+            buf_state = "freed";
+        }
+        if (want && !g_himem_buf) { want = 0; alloc_fail = 1; }   /* 確保失敗→無効で起動 */
+        if (!p872_override) mx_cpu_musashi_set_highmem(want ? g_himem_buf : NULL);
+        g_wired_himem_mb = want;
+
+        debug_log("[P887-HIMEM] requested=%d cpu_wired=%d override=%d wired=%d buf=%s mask=0x%08x model_id=0x%02x frame=%d%s\n",
+                  g_himem_mb, g_wired_cpu_model, p872_override, g_wired_himem_mb, buf_state,
+                  (unsigned)mx_cpu_musashi_get_address_mask(), (unsigned)mx_cpu_musashi_get_model_id(),
+                  (int)g_mx68k_frame_num, alloc_fail ? " alloc_fail=1" : "");
+
+        /* テスト専用。IPL→MEMシャドウのコピーより前に置くので、復元が漏れてもMEM先頭は上書きされる */
+        const char *st = getenv("MX68K_HIMEM_SELFTEST");
+        if (st && strcmp(st, "1") == 0 && g_wired_cpu_model == 1 && !p872_override) {
+            char line[384];
+            mx_cpu_musashi_highmem_selftest(line, sizeof(line));
+            debug_log("%s", line);
+        }
+    }
+
     /* P146/P221b: Config.XVIMode は MX Bridge では一切初期化されない
      * (winx68k_compat.c の Config={0})ため、明示的に設定する必要がある。ゲストの
      * FF009C で IPLROM は btst #0,$E8E00B を行い、SysPort_Read は XVIMode==0 の
@@ -2016,7 +2130,21 @@ void mx68k_reset_hard(void) {
      * なければならない XVI 改造であり、EXPERT(17MHz)は 0xFF のままでなければ
      * ならない 10MHz クラス改造である。XM6 si の参照と上流 sysport.c:88 の
      * "XVI or RedZone" 注記については同関数のコメントを参照。 */
-    Config.XVIMode = p270_derive_xvimode(g_clock_mhz);
+    /* P872: X68030機種(本番経路)は機種で決め、クロックに依らず XVIMode=3($E8E00B=$DC)に固定する
+     * (XEiJ v0.26.01.08 MemoryMappedDevice.java:3381-3385 の isX68030()?0xdc と同方式)。
+     * 環境変数優先時と68000機種は従来どおりクロックから導出する(68000+25MHzの$DCはD-82)。 */
+    Config.XVIMode = (g_wired_cpu_model == 1 && !p872_override) ? 3 : p270_derive_xvimode(g_clock_mhz);
+
+    debug_log("[P872-CPUMODEL] reset_hard requested=%d env_core=%.32s override=%d latched=%d backend=%s "
+              "ipl=%s%s clock=%d xvimode=%d e8e00b=0x%02x frame=%d\n",
+              g_cpu_model,
+              getenv("MX68K_CPU_CORE") ? getenv("MX68K_CPU_CORE") : "(unset)",
+              p872_override, p872_latched,
+              m68000_cpu_backend_is_musashi() ? "musashi" : "c68k",
+              p872_ipl, p872_ipl30_fail ? " ipl30 FAIL -> fallback 68000" : "",
+              g_clock_mhz, Config.XVIMode,
+              (unsigned)SysPort_Read(0xe8e00b),   /* ゲストから見えるバイトを読み戻す(P221B_PROBEと同手法) */
+              (int)g_mx68k_frame_num);
 
 #if P221B_PROBE
     debug_log("[P221B-MACHINE] machine=%d clock=%d -> XVIMode=%d $E8E00B=0x%02x\n",
@@ -3456,6 +3584,9 @@ void mx68k_run_frame(void) {
     /* P82-G: 現在のフレーム番号を m68000_bridge.c の chunk ループのサンプラ
      * (Part B)向けに公開する。同サンプラには他にこれを知る手段がない。 */
     g_mx68k_frame_num = frame_num;
+#if P864_MUSASHI_IRQPROBE_ENABLE
+    p864_musashi_irqprobe_frame_tick((uint32_t)frame_num);
+#endif
 
 #if P220_PROBE
     /* P220 (c): ゲスト実行開始後、IPL が我々の値を上書きしたか?
@@ -6553,7 +6684,8 @@ static uint32_t state_timing_block(uint8_t* buf, int save) {
 }
 
 /* CPU ブロック: 21 x uint32 = 84 バイト、固定順。
- * D0-D7, A0-A7, SR, USP, PC, C68K.Status, C68K.IRQLine。 */
+ * D0-D7, A0-A7, SR, USP, PC, CPU実行状態の生値(2語: 実行ステータス, IRQライン)。
+ * P860: 読み書きは mx_cpu_iface.h 経由。ファイル形式は変えていない。 */
 #define STATE_CPU_BYTES (21u * 4u)
 
 /* P198: TextDrawWork は TVRAM_Write() 内で write-through に再構築される「派生」テキストプレーン
@@ -6575,38 +6707,38 @@ extern uint8_t BGCHR16[16 * 16 * 256];
 
 static void state_cpu_save(uint8_t* buf) {
     uint32_t w[21]; int i = 0;
-    for (int r = M68K_D0; r <= M68K_D7; r++) w[i++] = m68000_get_reg(r);
-    for (int r = M68K_A0; r <= M68K_A7; r++) w[i++] = m68000_get_reg(r);
-    w[i++] = m68000_get_reg(M68K_SR);
-    w[i++] = m68000_get_reg(M68K_USP);
-    w[i++] = m68000_get_reg(M68K_PC);
-    w[i++] = (uint32_t)C68K.Status;
-    w[i++] = (uint32_t)C68K.IRQLine;
+    for (int n = 0; n < 8; n++) w[i++] = mx_cpu_get_dreg(n);
+    for (int n = 0; n < 8; n++) w[i++] = mx_cpu_get_areg(n);
+    w[i++] = mx_cpu_get_sr();
+    w[i++] = mx_cpu_get_usp();
+    w[i++] = mx_cpu_get_pc();
+    w[i++] = mx_cpu_state_get_run_status();
+    w[i++] = (uint32_t)mx_cpu_state_get_irq_line();
     memcpy(buf, w, STATE_CPU_BYTES);
 }
 
 static void state_cpu_load(const uint8_t* buf) {
     uint32_t w[21];
     memcpy(w, buf, STATE_CPU_BYTES);
-    /* 順序が重要(C68k_Set_USP は flag_S で分岐する):
-     * D0-D7, A0-A6, SR, 次に A7 + USP, 生の Status/IRQLine, PC は最後。 */
+    /* 順序が重要(USP設定の結果は SR の S ビットに依存する——c68k では USP 設定関数が flag_S で分岐):
+     * D0-D7, A0-A6, SR, 次に A7 + USP, 生の実行状態(ステータス/IRQライン), PC は最後。 */
     int i = 0;
-    for (int r = M68K_D0; r <= M68K_D7; r++) m68000_set_reg(r, w[i++]);
+    for (int n = 0; n < 8; n++) mx_cpu_set_dreg(n, w[i++]);
     /* ここでは A0-A6、A7 は SR の後 */
-    for (int r = M68K_A0; r <= M68K_A6; r++) m68000_set_reg(r, w[i++]);
+    for (int n = 0; n < 7; n++) mx_cpu_set_areg(n, w[i++]);
     uint32_t a7  = w[i++];
     uint32_t sr  = w[i++];
     uint32_t usp = w[i++];
     uint32_t pc  = w[i++];
     uint32_t status  = w[i++];
     int32_t  irqline = (int32_t)w[i++];
-    m68000_set_reg(M68K_SR, sr);
-    m68000_set_reg(M68K_A7, a7);
-    m68000_set_reg(M68K_USP, usp);
-    C68K.Status  = status;
-    C68K.IRQLine = irqline;
-    /* 派生値の fetch/basepc は、下の set_reg(PC) + cpu_setOPbase24 により PC から再構築される */
-    m68000_set_reg(M68K_PC, pc);
+    mx_cpu_set_sr(sr);
+    mx_cpu_set_areg(7, a7);
+    mx_cpu_set_usp(usp);
+    /* ★生の代入のみ(IRQ設定関数は使わない——実行中断・HALT解除の副作用を避ける) */
+    mx_cpu_state_restore_run(status, irqline);
+    /* 派生値の fetch/basepc は、下の set_pc(24bitマスク付き)により PC から再構築される */
+    mx_cpu_set_pc(pc);
 }
 
 /* サイズタグ付きブロックの書出し */
@@ -6621,6 +6753,11 @@ static int state_w32(FILE* f, uint32_t v) { return fwrite(&v, 4, 1, f) == 1 ? 0 
 
 static int do_save_state(const char* path) {
     if (!path || !MEM) return -1;
+    /* P887: ハイメモリ有効中はステートセーブ非対応(16MBブロックを持たないため) */
+    if (g_wired_himem_mb) {
+        debug_log("[P887-STATE] himem active -> rc=-17\n");
+        return -17;
+    }
     FILE* f = fopen(path, "wb");
     if (!f) return -2;
 
@@ -6635,7 +6772,8 @@ static int do_save_state(const char* path) {
     /* ヘッダ */
     if (fwrite(MX68K_STATE_MAGIC, 1, 8, f) != 8) { rc = -3; goto done; }
     if (state_w32(f, MX68K_STATE_VERSION))       { rc = -3; goto done; }
-    if (state_w32(f, 0u /*flags*/))              { rc = -3; goto done; }
+    /* P872: flags の下位16bitにCPU識別子(c68kは0なので既定経路のファイルは従来とバイト単位で同一) */
+    if (state_w32(f, m68000_get_cpu_state_id() /*flags*/)) { rc = -3; goto done; }
 
     /* 設定ヘッダ */
     if (state_w32(f, (uint32_t)g_machine_type))  { rc = -3; goto done; }
@@ -6743,12 +6881,23 @@ static int do_load_state(const char* path) {
     c.base = fb; c.len = (size_t)fsz; c.pos = 0; c.err = 0;
 
     /* --- PASS 1: 全体を解析・検証する。エミュレータ状態は一切変更しない --- */
+    /* P887: ハイメモリ有効中はステートロード非対応。-16(CPU不一致)より優先する */
+    if (g_wired_himem_mb) {
+        debug_log("[P887-STATE] himem active -> rc=-17\n");
+        rc = -17; goto out;
+    }
     if (c.len < 16 || memcmp(c.base, MX68K_STATE_MAGIC, 8) != 0) { rc = -10; goto out; }
     c.pos = 8;
     memcpy(&version, c.base + c.pos, 4); c.pos += 4;
     memcpy(&flags,   c.base + c.pos, 4); c.pos += 4;
-    (void)flags;
     if (version != MX68K_STATE_VERSION) { rc = -11; goto out; }
+    /* P872: 保存したCPUコア/型と実行中のものが違えば拒否する。PASS 2 の設定不一致→自動再設定では
+     * CPUコアの不一致は直せないため、何も変更しないこの段階で弾く(旧ステートは flags=0=c68k) */
+    if ((flags & 0xFFFFu) != m68000_get_cpu_state_id()) {
+        debug_log("[P872-STATE] cpu_id mismatch file=0x%04x running=0x%04x -> rc=-16\n",
+                  (unsigned)(flags & 0xFFFFu), (unsigned)m68000_get_cpu_state_id());
+        rc = -16; goto out;
+    }
 
     /* 設定ヘッダ */
     if (c.pos + 16 > c.len) { rc = -10; goto out; }
@@ -7010,7 +7159,7 @@ static int do_load_state(const char* path) {
 
     /* CPUレジスタは最後に復元する(その中でもPCが最後) */
     state_cpu_load(blk_cpu);
-    cpu_setOPbase24((uint32_t)m68000_get_reg(M68K_PC));
+    cpu_setOPbase24(mx_cpu_get_pc());
 
     /* 保存されたイメージパスが現在のものと異なればFDDを再マウントする。
      * mx68k_fdd_insertはエミュレーションスレッドから呼んでも安全(パスの保存と
@@ -7095,8 +7244,6 @@ void mx68k_set_clock_mhz(int mhz) {
     g_clock_mhz = mhz;
 }
 
-static char g_iplrom30_path[4096];
-
 /* P241 Stage A: 外付けSCSI(CZ-6BS1)IPL ROM。SCSIIPL[]はCore/px68k/x68k/scsi.cで
  * 定義された非staticのグローバル(0x2000 = 8KB)。Coreを無改変に保つため
  * ここではextern経由で参照する。 */
@@ -7134,29 +7281,52 @@ void mx68k_set_scsi_ext_rom_path(const char* path) {
     debug_log("[MX68K] SCSIEXROM: %s -> OK (%zu bytes)\n", path, n);
 }
 
+/* P872: IPL ROM(IPLROM.DAT / IPLROM30.DAT、いずれも 0x20000 バイト)を IPL[] へ読み込む。
+ * 一時バッファへ読んで 0x20000 バイト揃ったときだけ IPL[](BEのまま)と s_ipl_fetch[](LE16スワップ)を
+ * 書き換えるので、読込みに失敗しても既存のIPL内容は壊れない。ログ行は従来と同一文字列。 */
+static bool load_ipl_file(const char *path) {
+    if (!path) return false;
+    FILE* fp = fopen(path, "rb");
+    if (!fp) {
+        debug_log( "[MX68K] IPLROM: %s -> fopen failed\n", path);
+        return false;
+    }
+    uint8_t* tmp = (uint8_t*)malloc(0x20000);
+    bool ok = false;
+    if (tmp) ok = (fread(tmp, 1, 0x20000, fp) == 0x20000);
+    fclose(fp);
+    if (ok && !IPL) IPL = (uint8_t*)malloc(0x40000);
+    if (ok && IPL) {
+        memset(IPL, 0, 0x40000);
+        memcpy(IPL, tmp, 0x20000);
+        /* P17-FIX-B: FETCHテーブル用LE16スワップ済みコピーを作成 */
+        /* C68K_BYTE_SWAP_OPT有効時FETCH_WORD=*(u16*)PC(LE native)のため、BE格納のIPL[]をLE16スワップ */
+        for (int i = 0; i < 0x20000; i += 2) {
+            s_ipl_fetch[i]     = IPL[i + 1];
+            s_ipl_fetch[i + 1] = IPL[i];
+        }
+    } else {
+        ok = false;
+    }
+    free(tmp);
+    debug_log( "[MX68K] IPLROM: %s -> %s\n", path, ok ? "OK" : "FAIL");
+    return ok;
+}
+
 void mx68k_set_bios_path(const char* iplrom, const char* cgrom) {
     bool ipl_ok = false;
     bool cg_ok = false;
     if (iplrom) {
-        FILE* fp = fopen(iplrom, "rb");
-        if (fp) {
-            if (!IPL) IPL = (uint8_t*)malloc(0x40000);
-            if (IPL) {
-                memset(IPL, 0, 0x40000);
-                ipl_ok = (fread(IPL, 1, 0x20000, fp) == 0x20000);
-            }
-            fclose(fp);
-            /* P17-FIX-B: FETCHテーブル用LE16スワップ済みコピーを作成 */
-            /* C68K_BYTE_SWAP_OPT有効時FETCH_WORD=*(u16*)PC(LE native)のため、BE格納のIPL[]をLE16スワップ */
-            if (ipl_ok && IPL) {
-                for (int i = 0; i < 0x20000; i += 2) {
-                    s_ipl_fetch[i]     = IPL[i + 1];
-                    s_ipl_fetch[i + 1] = IPL[i];
-                }
-            }
-            debug_log( "[MX68K] IPLROM: %s -> %s\n", iplrom, ipl_ok ? "OK" : "FAIL");
+        strncpy(g_iplrom_path, iplrom, sizeof(g_iplrom_path) - 1);
+        g_iplrom_path[sizeof(g_iplrom_path) - 1] = '\0';
+        if (g_wired_cpu_model == 1 && !m68000_cpu_env_override()) {
+            /* P872: X68030で動作中に「適用」されても、IPLROM.DAT で IPL[] を上書きしない
+             * (次のハードリセットで機種に応じて読み込む) */
+            ipl_ok = (s_ipl_loaded_model >= 0);
+            debug_log("[P872-CPUMODEL] set_bios_path: IPL load deferred (wired=EC030)\n");
         } else {
-            debug_log( "[MX68K] IPLROM: %s -> fopen failed\n", iplrom);
+            ipl_ok = load_ipl_file(iplrom);
+            if (ipl_ok) s_ipl_loaded_model = 0;
         }
     }
     if (cgrom) {
@@ -7393,6 +7563,22 @@ void mx68k_get_midi_regs(MX68K_MIDIRegs* out) {
     out->tx_fifo_used = MIDI_Buffered;
 }
 
+/* P872: CPUモデル(0=MC68000、1=MC68EC030=X68030)。設定値を保存するだけで、
+ * 次の mx68k_reset_hard() で g_wired_cpu_model へ確定する */
+void mx68k_set_cpu_model(int model) {
+    g_cpu_model = (model == 1) ? 1 : 0;
+}
+
+/* P887: 16のみ有効、それ以外は0。次の mx68k_reset_hard() で反映する */
+void mx68k_set_high_memory_mb(int mb) {
+    g_himem_mb = (mb == 16) ? 16 : 0;
+}
+
+int mx68k_get_cpu_model(void) {
+    return g_wired_cpu_model;
+}
+
+/* パスを保存するだけ。読込みは X68030 選択時の mx68k_reset_hard() で行う(P872) */
 void mx68k_set_bios_path_030(const char* iplrom30_path) {
     if (iplrom30_path) {
         strncpy(g_iplrom30_path, iplrom30_path, sizeof(g_iplrom30_path) - 1);
@@ -9604,17 +9790,20 @@ void mx68k_joy_set1(int port, uint8_t bits) {
 void mx68k_get_status(MX68KStatus* status) {
     if (!status) return;
     memset(status, 0, sizeof(*status));
-    status->pc = C68k_Get_PC(&C68K);
+    /* P860: CPUレジスタは mx_cpu_iface.h 経由で取得する */
+    status->pc = mx_cpu_get_pc();
     for (int i = 0; i < 8; i++) {
-        status->d[i] = C68k_Get_DReg(&C68K, i);
-        status->a[i] = C68k_Get_AReg(&C68K, i);
+        status->d[i] = mx_cpu_get_dreg(i);
+        status->a[i] = mx_cpu_get_areg(i);
     }
-    status->sr = (uint16_t)C68k_Get_SR(&C68K);
-    status->usp = C68k_Get_USP(&C68K);
-    status->isp = C68k_Get_MSP(&C68K);
+    status->sr = (uint16_t)mx_cpu_get_sr();
+    status->usp = mx_cpu_get_usp();
+    status->isp = mx_cpu_get_ssp();
     status->clock_mhz = g_clock_mhz;
     status->machine_type = g_machine_type;
+    status->cpu_model = g_wired_cpu_model;
     status->memory_mb = g_memory_size_mb;
+    status->high_memory_mb = g_wired_himem_mb;   /* P887 */
     status->fpu_enabled = g_fpu_enabled;
     status->fdd0_inserted = (FDD_IsReady(0) != 0);
     status->fdd0_active = (mx68k_fdd_accessing(0) != 0);   /* P160: 赤 = アクセス中 */
@@ -9731,7 +9920,7 @@ void mx68k_get_int_regs_status(MX68KIntRegsStatus* status) {
     status->ioc_int_stat = IOC_IntStat;
     status->ioc_int_vect = IOC_IntVect;
     memcpy(status->sysport, SysPort, sizeof(status->sysport));
-    status->cpu_irq_line = C68K.IRQLine;
+    status->cpu_irq_line = mx_cpu_get_irq_line();   /* P860: mx_cpu_iface.h 経由 */
 }
 
 void mx68k_get_vc_status(MX68KVCStatus* status) {
@@ -10699,11 +10888,3 @@ void mx68k_set_trace_enabled(bool enabled) {
     (void)enabled;
 }
 
-// ---- Musashiのダミースタブ(Config.CPU_Emu == 0のときは未使用) ----
-void m68k_set_cpu_type(int type) { (void)type; }
-void m68k_init(void) {}
-void m68k_pulse_reset(void) {}
-int m68k_execute(int cycles) { (void)cycles; return 0; }
-void m68k_set_irq(int irqline) { (void)irqline; }
-uint32_t m68k_get_reg(void *context, int regnum) { (void)context; (void)regnum; return 0; }
-void m68k_set_reg(int regnum, uint32_t val) { (void)regnum; (void)val; }

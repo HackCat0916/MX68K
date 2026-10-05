@@ -277,7 +277,9 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             guard let self else { return }
             self.statusFields = [
                 String(format: String(localized: "CPU: %dMHz"), status.clock_mhz),
-                String(format: String(localized: "MEM: %dMB"), status.memory_mb),
+                status.high_memory_mb > 0
+                    ? String(format: String(localized: "MEM: %dMB+%dMB"), status.memory_mb, status.high_memory_mb)   // P887
+                    : String(format: String(localized: "MEM: %dMB"), status.memory_mb),
                 String(format: String(localized: "Spd: %3d%%"), Int(self.speedPercent.rounded())),
             ]
             // P777 — 在席判定は macOS 版 StatusBarView.swift と同じ fdd*_inserted
@@ -683,6 +685,10 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             return String(localized: "This state file was saved by an older, incompatible version of MX68K and cannot be loaded.")
         case -15:
             return String(localized: "This state file does not match the current memory size setting.")
+        case -16:   // P872: 保存したCPUコア/型と実行中のものが違う
+            return String(localized: "This state file was saved with a different CPU model (X68000 / X68030) and cannot be loaded.")
+        case -17:   // P887: ハイメモリ有効中はステートセーブ/ロード非対応
+            return String(localized: "State save/load is not available while high memory is enabled.")
         case -2:
             return String(localized: "Could not read or write the state file.")
         case -10, -12, -13, -14:
@@ -765,14 +771,17 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// 選択は引き続き iOS 非対応)。P831 — 内蔵 SC-55 の設定値も写すようにした。
     /// P846 — CoreMIDI デバイス index(出力/入力)も macOS と同じ経路で送るようにした。
     private func pushConfig(_ config: EmulatorConfig) {
+        // P872: CPUモデル(nil=68000、"EC030"=X68030)。ハードリセットで反映される
+        mx68k_set_cpu_model(config.hardware.cpuModel == "EC030" ? 1 : 0)
+        // P887: ハイメモリ(nil=なし、16=TS-6BE16相当)。X68030以外ではBridge側で無効。ハードリセットで反映
+        mx68k_set_high_memory_mb(Int32(config.hardware.highMemoryMB ?? 0))
         config.bios.iplromPath.withCString { ipl in
             config.bios.cgromPath.withCString { cg in
                 mx68k_set_bios_path(ipl, cg)
             }
         }
-        if !config.bios.iplrom30Path.isEmpty {
-            config.bios.iplrom30Path.withCString { mx68k_set_bios_path_030($0) }
-        }
+        // P872: 空でも常に渡す(パスを消したら Bridge 側も空にする)
+        config.bios.iplrom30Path.withCString { mx68k_set_bios_path_030($0) }
         // P712c — SCSI ROM の再送(macOS EmulatorViewModel.swift:476-490 の逐語移植)。
         // これを呼ばないと Bridge 側 s_scsi_in_rom_loaded が false のままとなり、
         // scsi_in_bridge_install() の gate_machine && gate_rom が成立せず

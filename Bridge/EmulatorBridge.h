@@ -10,6 +10,19 @@ void mx68k_shutdown(void);
 void mx68k_set_bios_path(const char* iplrom_path, const char* cgrom_path);
 void mx68k_set_bios_path_030(const char* iplrom30_path);
 
+// ---- CPUモデル(P872) ----
+// 0=MC68000(c68k)、1=MC68EC030(X68030、Musashi)。ハードリセット(ソフトリセットも同じ
+// mx68k_reset_hard() を通る)で反映。環境変数 MX68K_CPU_CORE 設定時はそちらが優先。
+// 1 のとき IPLROM30.DAT(mx68k_set_bios_path_030)を読み込み、読込みに失敗したら 0 で起動する。
+void mx68k_set_cpu_model(int model);
+// 配線確定したCPUモデル(直近の mx68k_reset_hard() で確定した値)
+int mx68k_get_cpu_model(void);
+// P887: X68030ハイメモリ(TS-6BE16相当、$01000000-$01FFFFFF)。16=有効(16MB固定)、それ以外=無効。
+// ハードリセット(ソフトリセットも同じ mx68k_reset_hard() を通る)で反映。X68030(CPUモデル1)以外、
+// および環境変数 MX68K_CPU_CORE 設定時は無効。内容はリセットでは保持し、アプリ起動時はゼロ。
+// 有効中はステートセーブ/ロードを rc=-17 で拒否する。
+void mx68k_set_high_memory_mb(int mb);
+
 // ---- ハードウェア設定(init またはリセットより前に呼ぶ) ----
 void mx68k_set_machine_type(int type);
 void mx68k_set_memory_size(int mb);
@@ -676,7 +689,9 @@ typedef struct {
     uint32_t isp;
     int      clock_mhz;
     int      machine_type;
+    int      cpu_model;      // 0=MC68000(c68k)、1=MC68EC030(Musashi、X68030)。配線確定値[mx68k_get_cpu_model()と同じ]
     int      memory_mb;
+    int      high_memory_mb;   // P887: ハイメモリの配線確定値(0 or 16)
     bool     fpu_enabled;
     bool     fdd0_inserted;
     bool     fdd0_active;
@@ -3018,6 +3033,18 @@ void m68000_p57a_dump_summary(void);
  * /tmp/mx68k_P56_plan.md Edit F。 */
 void m68000_p56_take_snapshot(int frame_num);
 
+/* P864: Musashi候補コア突合(CI-4/PoC)向けの実測プローブ。既定OFF。
+ * c68kバックエンドの mx_cpu_add_cycles/mx_cpu_set_irq/mx_cpu_end_timeslice の呼出し頻度と
+ * execute再入中の set_irq 受理可否をフレーム単位で [P864-MUSASHI-IRQPROBE] に出力する。
+ * 実装は m68000_bridge.c(c68k固有のため mx_cpu_iface.h には置かない)、呼出し元は mx68k_run_frame。
+ * ★マクロ定義を宣言より前に置くこと(#if 判定がヘッダ内の定義を参照できるように)。 */
+#ifndef P864_MUSASHI_IRQPROBE_ENABLE
+#define P864_MUSASHI_IRQPROBE_ENABLE 0
+#endif
+#if P864_MUSASHI_IRQPROBE_ENABLE
+void p864_musashi_irqprobe_frame_tick(uint32_t frame_num);
+#endif
+
 /* ====================================================================
  * P214 診断 probe — 描画欠陥の class 判別のための測定のみ（修正なし）。read-only:
  * 描画結果を 1 画素も変えず、エミュレーション状態にも触れない。
@@ -3753,6 +3780,30 @@ void p602_workarea_snapshot(const char* tag);
  * (出力自体は 300 フレームごと。P492 と同じ周期・同じ位置)。フレーム番号は
  * 引数で渡さず、関数内部で g_mx68k_frame_num を直接参照する。 */
 void p602_periodic_dump(void);
+#endif
+
+/* ===== P863: 常時コンパイルだった旧診断の既定無効化 =====
+ * いずれも起動停止調査(P21〜P82)時代の診断で、通常起動では役目を終えている。
+ * c68k を直接参照するため、CPU コア抽象化(mx_cpu_iface.h)の妨げになっていた。
+ * 再調査で必要になったら 1 にするか、-D<名前>=1 でビルドする。
+ * ★must-stay-green の供給元(P47-D-DIAG-G/P57A/P59G2/P63/P64/P69/P71/P385)はここに含めない。 */
+#ifndef P42_DIAG_STUCK_ENABLE
+#define P42_DIAG_STUCK_ENABLE  0   /* [P42-DIAG-STUCK] 毎ReadWのPC取得 */
+#endif
+#ifndef P47C_DIAGE_ENABLE
+#define P47C_DIAGE_ENABLE      0   /* [P47-C-DIAG-E-ε] 毎ReadWのA1判定 */
+#endif
+#ifndef P47D_DIAGH_ENABLE
+#define P47D_DIAGH_ENABLE      0   /* [P47-D-DIAG-H] panic時のPCリング/スタックダンプ(リング書込み自体は常時) */
+#endif
+#ifndef P47D_PCHIST_ENABLE
+#define P47D_PCHIST_ENABLE     0   /* [P47-D-DIAG-I-PCHIST] 毎チャンクのSSP差分 */
+#endif
+#ifndef P49B_ENABLE
+#define P49B_ENABLE            0   /* [P49-B-TRACE-IPL-LOOP] IPLポーリング窓のPCトレース */
+#endif
+#ifndef P82H_ENABLE
+#define P82H_ENABLE            0   /* [P82-H] エラーハンドラ帯域到達時のダンプ */
 #endif
 
 /* ================= P748: 実行制御(ブレークポイント / ステップ実行) =================

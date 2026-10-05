@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AE38F7EFFEF8EE88825A555D /* m68kcpu.c in Sources */ = {isa = PBXBuildFile; fileRef = 0FC43CF70541AE7FC862BC04 /* m68kcpu.c */; settings = {COMPILER_FLAGS = "-w"; }; };
+		64196D44D637286CF57E01CA /* m68kcpu.c in Sources */ = {isa = PBXBuildFile; fileRef = 0FC43CF70541AE7FC862BC04 /* m68kcpu.c */; settings = {COMPILER_FLAGS = "-w"; }; };
+		E9D0980CD230AC86ACF5784B /* m68kops.c in Sources */ = {isa = PBXBuildFile; fileRef = 5D7B6F35A7DC69801F5B52FF /* m68kops.c */; settings = {COMPILER_FLAGS = "-w"; }; };
+		D0668DDE6F7F2A4AB68879D1 /* m68kops.c in Sources */ = {isa = PBXBuildFile; fileRef = 5D7B6F35A7DC69801F5B52FF /* m68kops.c */; settings = {COMPILER_FLAGS = "-w"; }; };
+		A98E5443748D11100029396C /* mx_cpu_musashi.c in Sources */ = {isa = PBXBuildFile; fileRef = BAD11A286E8DAAA51B9FE22D /* mx_cpu_musashi.c */; };
+		C746FD43DF916F44BA539E75 /* mx_cpu_musashi.c in Sources */ = {isa = PBXBuildFile; fileRef = BAD11A286E8DAAA51B9FE22D /* mx_cpu_musashi.c */; };
 		00E7A5C22C73DCD51C8C2F97 /* FIRResampler.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1FFB40E6CD731D326E949DD /* FIRResampler.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
 		0476CDA09169A17EA37FBE44 /* SoftKeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A228C01D0000000000000002 /* SoftKeyboardView.swift */; };
 		06A22EE725F096DDFE8F4C70 /* IIR2xResampler.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 5DB6FF4348DF0BC8789EE8F3 /* IIR2xResampler.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
@@ -363,6 +369,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0FC43CF70541AE7FC862BC04 /* m68kcpu.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = m68kcpu.c; sourceTree = "<group>"; };
+		5D7B6F35A7DC69801F5B52FF /* m68kops.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = m68kops.c; sourceTree = "<group>"; };
+		BAD11A286E8DAAA51B9FE22D /* mx_cpu_musashi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mx_cpu_musashi.c; sourceTree = "<group>"; };
 		00B5B7E2535AAAB5EAADFD89 /* Part.cpp */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.cpp; path = Part.cpp; sourceTree = "<group>"; };
 		01EA17647AA618AE34F83CCA /* GamePad.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GamePad.h; sourceTree = "<group>"; };
 		02BD74F4A557D6B9C63B15F8 /* libstdc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libstdc++.tbd"; path = "usr/lib/libstdc++.tbd"; sourceTree = SDKROOT; };
@@ -832,6 +841,16 @@
 			path = srctools;
 			sourceTree = "<group>";
 		};
+		FD66395FCB1DAE8C267D2155 /* Musashi */ = {
+			isa = PBXGroup;
+			children = (
+				0FC43CF70541AE7FC862BC04 /* m68kcpu.c */,
+				5D7B6F35A7DC69801F5B52FF /* m68kops.c */,
+			);
+			name = Musashi;
+			path = Musashi;
+			sourceTree = "<group>";
+		};
 		2051DB79A58E1C11CB7E72C2 /* nuked_sc55 */ = {
 			isa = PBXGroup;
 			children = (
@@ -850,6 +869,7 @@
 				5CB59F91E21133EA180AE38C /* GamePad.c */,
 				01EA17647AA618AE34F83CCA /* GamePad.h */,
 				9B10FD0D913F30EAA75ED65B /* m68000_bridge.c */,
+				BAD11A286E8DAAA51B9FE22D /* mx_cpu_musashi.c */,
 				B0C1D2E3F4A5B6C7D8E9F0A1 /* midi_coremidi.c */,
 				D845A4D98A7CDAC5CB51CC95 /* MX68K-Bridging-Header.h */,
 				60E8EDA276E6C7575C1F9510 /* px68k_compat.h */,
@@ -1023,6 +1043,7 @@
 			children = (
 				D39CD39D00B8EEECE8FAF4AD /* mt32emu */,
 				2051DB79A58E1C11CB7E72C2 /* nuked_sc55 */,
+				FD66395FCB1DAE8C267D2155 /* Musashi */,
 			);
 			name = ThirdParty;
 			path = ../ThirdParty;
@@ -1672,6 +1693,9 @@
 				F81BBD6D081319D8064BCDE7 /* submcu.cpp in Sources */,
 				82D13DB84578987BBAB15AC2 /* sc55_bridge.c in Sources */,
 				83DB7AD4793930F1ED9873FA /* SC55Worker.swift in Sources */,
+				AE38F7EFFEF8EE88825A555D /* m68kcpu.c in Sources */,
+				E9D0980CD230AC86ACF5784B /* m68kops.c in Sources */,
+				A98E5443748D11100029396C /* mx_cpu_musashi.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1806,6 +1830,9 @@
 				A4D8B1F63E9C27A05D1E8B3C /* pcm.cpp in Sources */,
 				C6E3F09A4B7D18E2F9A05C47 /* submcu.cpp in Sources */,
 				E8B5A27D1C9F36E4A0B7D19F /* SC55Worker.swift in Sources */,
+				64196D44D637286CF57E01CA /* m68kcpu.c in Sources */,
+				D0668DDE6F7F2A4AB68879D1 /* m68kops.c in Sources */,
+				C746FD43DF916F44BA539E75 /* mx_cpu_musashi.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

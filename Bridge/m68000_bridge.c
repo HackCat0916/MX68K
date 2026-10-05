@@ -19,6 +19,8 @@
 #include "mercury_opn_shadow.h"        /* P491: EmulatorBridge.c と共有する Mercury OPN レジスタシャドウ */
 #include "sram_ext_bridge.h"           /* P494: SRAM 64KB 化の Fetch シャドウ配線/同期 */
 #include "windrv_bridge.h"             /* P642: Windrv($E9F000/$E9F001)の MMIO フック */
+#include "mx_cpu_iface.h"              /* P860: CPUコア抽象層(実装はファイル末尾の「mx_cpu_* 実装」節) */
+#include "mx_cpu_musashi.h"            /* P868: Musashiバックエンド(Musashi本体のヘッダは含めない——P867のinclude規約) */
 #include <string.h>                    /* P47-D: リセット用の memset */
 #include <stdio.h>                     /* P214-R2: プローブの1行サマリ用 snprintf */
 #include <time.h>                      /* P518: p424_now_ns() 用の clock_gettime/struct timespec */
@@ -415,7 +417,7 @@ void p492_io_histogram_dump(void) {
  *
  *  XM6 mainline (v2.06) の各デバイス ReadByte/ReadWord/WriteByte/WriteWord が
  *  scheduler->Wait(N) で差し引いている CPU サイクルを、c68k のメモリコールバック
- *  (trace_Memory_ReadB/ReadW/WriteB/WriteW) の冒頭で C68k_Add_Cycle() により
+ *  (trace_Memory_ReadB/ReadW/WriteB/WriteW) の冒頭で mx_cpu_add_cycles()(c68kバックエンドでは C68k_Add_Cycle)により
  *  同じく差し引く。対象は 5 デバイスのみ(Fix Plan §記号表 S-1〜S-10):
  *    GVRAM $C00000-$DFFFFF : 0/1 交互(平均 0.5)       XM6 vm/gvram.cpp:1445 他
  *    TVRAM $E00000-$E7FFFF : 4 回中 3 回 1(平均 0.75) XM6 vm/tvram.cpp:785 他
@@ -472,7 +474,7 @@ static inline void p806_io_wait(uint32_t addr, int is_word) {
     }
     s_p806_total_wait += w;
     if (w > 0 && s_p806_iowait_mult > 0) {
-        C68k_Add_Cycle(&C68K, (int32_t)(w * (uint32_t)s_p806_iowait_mult));
+        mx_cpu_add_cycles((int32_t)(w * (uint32_t)s_p806_iowait_mult));
     }
 }
 
@@ -1737,6 +1739,7 @@ int32_t ICount;
 /* P657: px68k-libretro(uraraworks) PR#2 の m68000_current_icount() 相当。
  * PR#2 は Musashi の m68k_cycles_run() を使い #if HAVE_MUSASHI 限定にしているが、
  * c68k には等価な公開APIが既にある:
+ *   (mx_cpu_cycles_done の c68k バックエンド実装が以下を呼ぶ)
  *   Core/c68k/c68k.h:184  int32_t C68k_Get_CycleDone(c68k_struc *cpu)
  *   Core/c68k/c68k.c:132  return CycleToDo - (CycleIO + CycleSup)
  * CycleIO は Core/c68k/c68kmac.inc:75 の PRE_IO により毎命令の先頭で
@@ -1764,8 +1767,7 @@ int32_t m68000_current_icount(void)
 {
     int32_t done;
     if (!s_p657_in_execute)                  return ICount;
-    if (!(C68K.Status & C68K_RUNNING))       return ICount;
-    done = C68k_Get_CycleDone(&C68K);
+    done = mx_cpu_cycles_done();
     if (done < 0)                            return ICount;
     return s_p657_exec_icount_base - s_p657_exec_consumed - done;
 }
@@ -1836,6 +1838,16 @@ unsigned long long g_p670_r22_writes_cum = 0;
  * MX68KQ_GUEST_PC マクロを従来のインライン定型式へ戻す (1行で戻せる)。
  * ==================================================================== */
 
+/* P868: CPUコアのバックエンド選択。値はプロセス起動時に1回だけ mx_cpu_backend_select()
+ * (c68k_init の先頭)が環境変数 MX68K_CPU_CORE から決める。
+ * ★既定値は c68k(0)。選択前(初期化前)のどの呼出しも従来どおり c68k へ行く。
+ * 下のPCアクセサ群がこれを参照するので、それらより前に置く。 */
+#define MX_CPU_BE_C68K    0
+#define MX_CPU_BE_MUSASHI 1
+static int s_mx_cpu_backend = MX_CPU_BE_C68K;
+static inline int mx_cpu_be_musashi(void) { return s_mx_cpu_backend == MX_CPU_BE_MUSASHI; }
+int m68000_cpu_env_override(void);   /* P872: 定義はファイル末尾の mx_cpu_* 節 */
+
 #ifndef MX68KQ_USE_SAFE_PC
 #define MX68KQ_USE_SAFE_PC 1
 #endif
@@ -1846,6 +1858,10 @@ unsigned long long g_p670_r22_writes_cum = 0;
  * 本体がテキスト上 `C68K.PC -
  * C68K.BasePC` という部分文字列にならないよう関数として実装する (さもないと下の一括置換に引っかかる)。 */
 static inline uint32_t mx68kq_legacy_guest_pc(void) {
+    /* P868: Musashi実行時はMusashiのレジスタから取る(c68kの PC/BasePC は休眠中で無意味)。
+     * Musashi実行時の値は参考値——サイクル単位のタイミングがc68kと違うので、
+     * frame番号やcountは正当にずれ得る(P868ゲート方針)。 */
+    if (mx_cpu_be_musashi()) return mx_cpu_get_pc() & 0x00FFFFFFu;
     uintptr_t a = (uintptr_t)C68K.PC;
     uintptr_t b = (uintptr_t)C68K.BasePC;
     return (uint32_t)(a - b) & 0x00FFFFFFu;
@@ -1858,9 +1874,12 @@ static inline uint32_t mx68kq_legacy_guest_pc(void) {
  * 検出しなければならない多層防御の箇所でのみ使うこと —
  * MX68KQ_GUEST_PC() は常に 24 ビットにマスクした値を返し、上位バイトが
  * 単なるノイズにしかならないログ/プローブ表示ではそちらが正しい
- * 選択である。他の ~102 箇所の呼出しは MX68KQ_GUEST_PC() のまま。 */
+ * 選択である。他の ~102 箇所の呼出しは MX68KQ_GUEST_PC() のまま。
+ * P868: Musashi実行時は mx_cpu_get_pc()(32bitのまま、上位byteタグを保持)。
+ * c68k側の式は従来と同一。Musashi実行時の値は参考値(P868ゲート方針)。 */
 #define MX68KQ_GUEST_PC_RAW() \
-    ((uint32_t)((uintptr_t)C68K.PC - (uintptr_t)C68K.BasePC))
+    (mx_cpu_be_musashi() ? mx_cpu_get_pc() \
+                         : (uint32_t)((uintptr_t)C68K.PC - (uintptr_t)C68K.BasePC))
 
 #if MX68KQ_USE_SAFE_PC
 
@@ -1954,6 +1973,10 @@ static inline uint32_t mx68k_probe_guest_pc_raw(void) {
  * 受け取ることは無く、妥当に見える PC を受け取る。信号は番兵カウンタ +
  * ログが担う)。 */
 static inline uint32_t mx68k_probe_guest_pc(void) {
+    /* P868: Musashi実行時はc68kのキャッシュ・走査に入らず、Musashiのレジスタから取る。
+     * 値は参考値——サイクル単位のタイミングがc68kと違うので、frame番号やcountは
+     * 正当にずれ得る(P868ゲート方針)。 */
+    if (mx_cpu_be_musashi()) return mx_cpu_get_pc() & 0x00FFFFFFu;
     uint32_t v = mx68k_probe_guest_pc_raw();
     if (v == 0xFFFFFFFFu) {
         return MX68KQ_LEGACY_GUEST_PC();
@@ -24812,7 +24835,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
         if (a207c >= 0xEA0000u && a207c <= 0xEFFFFFu && (BusErrFlag & 1)) {
             s_p207c_fault      = 1;
             s_p207c_fault_addr = a207c;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
         }
     }
 #endif
@@ -24827,7 +24850,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
         if (a220 >= s_p220b_membound && a220 < 0x00C00000u) {
             s_p207c_fault      = 1;
             s_p207c_fault_addr = a220;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
 #if P220B_PROBE
             {
                 static uint32_t s_p220b_n = 0;
@@ -24879,7 +24902,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
             if (!p483_pass) {
             s_p207c_fault      = 1;
             s_p207c_fault_addr = a221d;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
 #if P221D_PROBE
             if (s_p221d_n < 8u) {
                 s_p221d_n++;
@@ -24919,7 +24942,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
             && !windrv_claims_addr(a419b)) {
             s_p207c_fault      = 1;
             s_p207c_fault_addr = a419b;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
         }
     }
 #endif
@@ -24952,7 +24975,7 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
         if (a506 >= 0x00EA0000u && a506 <= 0x00EA1FFFu && !g_scsi_ext_board_wired) {
             s_p207c_fault      = 1;
             s_p207c_fault_addr = a506;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
         }
     }
 #if P221_PROBE
@@ -25866,6 +25889,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             s_p33_vsync_read_count++;
         }
     }
+#if P42_DIAG_STUCK_ENABLE
     /* P42-DIAG: PC=0xff063c (BRA.S infinite loop) 到達時のSR/IRQ状態を記録 */
     {
         static int s_p42_stuck_pc_count = 0;
@@ -25883,6 +25907,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             s_p42_stuck_pc_count++;
         }
     }
+#endif
     /* P47-D 整理: P47-C-δ DIAG-C を無効化 (#if 0)。
      * 理由: c68k の Fetch[] 経路はオペコードフェッチで trace_Memory_ReadW を経由しないため、
      * このフックは発火しない (test#52: 該当 0 件を確認済み。Codex inv §5.1)。
@@ -25918,6 +25943,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         }
     }
 #endif
+#if P47C_DIAGE_ENABLE
     /* P47-C-ε DIAG-E: A1 レジスタが IPL_ROM の panic 文字列ポインタ
      * 0xff09ab..0xff0a00 (Codex inv による: A1 = "エラーが発生しました…" のポインタで、
      * panic 終端の BRA $ の直前に 0xff0632 で用意される) を指した時点を検出する。ここに到達したら起動失敗を意味する
@@ -25943,6 +25969,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             }
         }
     }
+#endif
     if (g_trace_enable && g_trace_count < TRACE_MAX && trace_filter(addr)) {
         debug_log("[TRACE] R_W %06x = %04x\n", addr, val & 0xffff);
         g_trace_count++;
@@ -26577,7 +26604,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             if ((addr & 1u) == 0u && a209 >= 0xEA0000u && a209 <= 0xEFFFFFu && (BusErrFlag & 1)) {
                 s_p207c_fault      = 1;
                 s_p207c_fault_addr = a209;
-                C68k_Release_Cycle(&C68K);
+                mx_cpu_end_timeslice();
             }
         }
     #endif
@@ -26593,7 +26620,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             if ((addr & 1u) == 0u && a220 >= s_p220b_membound && a220 < 0x00C00000u) {
                 s_p207c_fault      = 1;
                 s_p207c_fault_addr = a220;
-                C68k_Release_Cycle(&C68K);
+                mx_cpu_end_timeslice();
     #if P220B_PROBE
                 {
                     static uint32_t s_p220b_n = 0;
@@ -26636,7 +26663,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                 if (!p483_pass) {
                 s_p207c_fault      = 1;
                 s_p207c_fault_addr = a221d;
-                C68k_Release_Cycle(&C68K);
+                mx_cpu_end_timeslice();
     #if P221D_PROBE
                 if (s_p221d_n < 8u) {
                     s_p221d_n++;
@@ -26669,7 +26696,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
                 && !windrv_claims_addr(a419b)) {
                 s_p207c_fault      = 1;
                 s_p207c_fault_addr = a419b;
-                C68k_Release_Cycle(&C68K);
+                mx_cpu_end_timeslice();
             }
         }
     #endif
@@ -26701,7 +26728,7 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             && !g_scsi_ext_board_wired) {
             s_p207c_fault      = 1;
             s_p207c_fault_addr = a506;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
         }
     }
     /* P634 (D-43): 自走 LR クロックの観測経路差し替え (word read)。byte 経路と
@@ -27334,7 +27361,7 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
             s_p207c_fault         = 1;
             s_p207c_fault_addr    = a220;
             s_p220b_fault_is_write = 1;   /* SSW bit4=write */
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
 #if P220B_PROBE
             {
                 static uint32_t s_p220b_n = 0;
@@ -27380,7 +27407,7 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
             s_p207c_fault         = 1;
             s_p207c_fault_addr    = a221d;
             s_p220b_fault_is_write = 1;   /* SSW bit4=write */
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
 #if P221D_PROBE
             if (s_p221d_n < 8u) {
                 s_p221d_n++;
@@ -27423,7 +27450,7 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
             s_p207c_fault           = 1;
             s_p207c_fault_addr      = a506;
             s_p220b_fault_is_write  = 1;   /* SSW bit4=write、XM6のBusErr(addr,FALSE)と対応 */
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
             return;   /* ストアを反映しない */
         }
     }
@@ -28920,7 +28947,7 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
             s_p207c_fault         = 1;
             s_p207c_fault_addr    = a220;
             s_p220b_fault_is_write = 1;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
 #if P220B_PROBE
             {
                 static uint32_t s_p220b_n = 0;
@@ -28963,7 +28990,7 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
             s_p207c_fault         = 1;
             s_p207c_fault_addr    = a221d;
             s_p220b_fault_is_write = 1;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
 #if P221D_PROBE
             if (s_p221d_n < 8u) {
                 s_p221d_n++;
@@ -29007,7 +29034,7 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
             s_p207c_fault           = 1;
             s_p207c_fault_addr      = a506;
             s_p220b_fault_is_write  = 1;
-            C68k_Release_Cycle(&C68K);
+            mx_cpu_end_timeslice();
             return;
         }
     }
@@ -29265,8 +29292,15 @@ static struct {
 } s_p384_last_req = {0, 0, 0, 0};
 #endif
 
+#if P864_MUSASHI_IRQPROBE_ENABLE
+/* P865: IACK コールバック実行中フラグ(mx_cpu_set_irq の呼出し文脈判定用) */
+static int s_p864_in_iack = 0;
+#endif
 static int32_t mx68k_diag_irqh_callback(int32_t level)
 {
+#if P864_MUSASHI_IRQPROBE_ENABLE
+    s_p864_in_iack = 1;
+#endif
     /* P252 Stage 2c-2: レベル 1 割込みのマルチプレクサ。既定では無作用
      * (g_spc_pending は 0 のまま) なので、SCSI 以外のすべての割込みでは
      * 元の 1 行 `vect = my_irqh_callback(level)` と同じになる。 */
@@ -29549,6 +29583,9 @@ static int32_t mx68k_diag_irqh_callback(int32_t level)
 #if P424_ENABLE
     s_p523_irq_acks++;   /* P523: 全 IACK 回数(段階1) */
 #endif
+#if P864_MUSASHI_IRQPROBE_ENABLE
+    s_p864_in_iack = 0;
+#endif
     return vect;
 }
 
@@ -29566,7 +29603,8 @@ void mx68k_diag_mfp_int(int32_t irq, const char* src)
 {
     if (g_p47d_diag_g_count < P47D_DIAG_G_LOG_MAX) {
         uint32_t pc = MX68KQ_GUEST_PC();
-        uint32_t sr = (uint32_t)C68k_Get_SR(&C68K);
+        /* P868: iface経由(c68kは C68k_Get_SR(&C68K) と同一関数。Musashi実行時は参考値) */
+        uint32_t sr = mx_cpu_get_sr();
         /* vec_target = MFP_VR upper4 | (15 - irq)。IPRA側(irq<8)・IPRB側
          * (irq>=8)ともに同一式に収束する(mfp.c:38-49の2つのループが
          * それぞれ基準値15/7から同期減算し、IPRBの基準値7は
@@ -29647,10 +29685,10 @@ int            mx68k_get_machine_type(void);/* EmulatorBridge.c(P253) getter */
 static void scsi_in_fetch_overlay_apply(void)
 {
     if (mx68k_get_machine_type() == 4 /*SCSI*/ && s_scsi_in_rom_loaded) {
-        C68k_Set_Fetch(&C68K, 0xfc0000, 0xfc1fff, (uintptr_t)s_scsi_in_rom);
+        mx_cpu_map_fetch(0xfc0000, 0xfc1fff, s_scsi_in_rom);
         debug_log("[P253] fetch overlay: $FC0000-$FC1FFF -> SCSI IPL ROM (gate ON)\n");
     } else {
-        C68k_Set_Fetch(&C68K, 0xfc0000, 0xfc1fff, (uintptr_t)s_ipl_fetch); /* 復元(既定=IPLミラー) */
+        mx_cpu_map_fetch(0xfc0000, 0xfc1fff, s_ipl_fetch); /* 復元(既定=IPLミラー) */
     }
 }
 
@@ -29737,21 +29775,55 @@ static void p806_io_wait_init(void) {
     }
 }
 
+/* P868: CPUコアの選択。環境変数 MX68K_CPU_CORE が "musashi"(完全一致・小文字)のときだけ
+ * Musashi(68000型)を選び、それ以外(未設定・空・"Musashi"等)はすべて c68k。
+ * プロセス中1回だけ実行する(c68k_init は m68000_init からプロセス中1回、ハードリセットでは
+ * 呼ばれない——CI-1 §2)。★P872: 環境変数が未設定のときは、設定画面のCPUモデルに従って
+ * mx68k_reset_hard() 冒頭の m68000_set_cpu_backend_model() がハードリセットごとにコアを決め直す。
+ * 「行が0件」を「未到達」と区別できるよう、未設定時も必ず1行出す(環境変数の生値を併記)。 */
+static void mx_cpu_backend_select(void)
+{
+    static int s_done = 0;
+    if (s_done) return;
+    s_done = 1;
+    const char *env = getenv("MX68K_CPU_CORE");
+    int musashi = (env != NULL && strcmp(env, "musashi") == 0);
+    s_mx_cpu_backend = musashi ? MX_CPU_BE_MUSASHI : MX_CPU_BE_C68K;
+    debug_log("[P868-CPUCORE] backend=%s env=%.32s%s\n",
+              mx_cpu_be_musashi() ? "musashi" : "c68k",
+              env ? env : "(unset)",
+              (env != NULL && !musashi) ? " (unrecognized)" : "");
+}
+
 /*--------------------------------------------------------
 	CPU初期化
 --------------------------------------------------------*/
 static void c68k_init(void)
 {
-    /* P47-D-DIAG-F: IRQ 受理コールバックを自前のラッパへ振り向ける。 */
-    C68k_Init(&C68K, mx68k_diag_irqh_callback);
+    /* P868: mx_cpu_init より前にバックエンドを決める */
+    mx_cpu_backend_select();
 
-    /* P806: I/O ウェイト倍率の読込とトグル/カウンタのリセット。 */
+    /* P47-D-DIAG-F: IRQ 受理コールバックを自前のラッパへ振り向ける。
+     * P861: 初期化と読み書き関数の登録は mx_cpu_init で一括して行う
+     * (c68k 側の呼出し順 Init→ReadB→ReadW→WriteB→WriteW は従来どおり)。 */
+    {
+        const mx_cpu_bus bus = {
+            .read8   = trace_Memory_ReadB,
+            .read16  = trace_Memory_ReadW,
+            .write8  = trace_Memory_WriteB,
+            .write16 = trace_Memory_WriteW,
+            .int_ack = mx68k_diag_irqh_callback,
+        };
+        mx_cpu_init(&bus);
+    }
+    /* P869: Musashi選択時のみ、実験用CPUモデル(MX68K_MUSASHI_MODEL)を最初のリセット前に適用する。
+     * P872: 環境変数で選ばれた場合に限る(設定画面のX68030で前回Musashiのまま電源OFF→ONしたときは
+     * ここを通さず、直後の mx68k_reset_hard() が型を決める) */
+    if (mx_cpu_be_musashi() && m68000_cpu_env_override()) mx_cpu_musashi_set_model_from_env(debug_log);
+
+    /* P806: I/O ウェイト倍率の読込とトグル/カウンタのリセット。
+     * P861: CPU 構造体に触れないため、読み書き関数の登録より後へ移しても挙動は同じ。 */
     p806_io_wait_init();
-
-    C68k_Set_ReadB(&C68K, trace_Memory_ReadB);
-    C68k_Set_ReadW(&C68K, trace_Memory_ReadW);
-    C68k_Set_WriteB(&C68K, trace_Memory_WriteB);
-    C68k_Set_WriteW(&C68K, trace_Memory_WriteW);
 
 #if P82XC_ENABLE
     /* P82-X-C Probe E: ビルド由来トークンを init 時 1 回出力する。
@@ -29835,15 +29907,15 @@ static void c68k_init(void)
      * P565 変更1: 1 ページ(64KB)ずつ 256 回呼び出すループへ置き換える。
      * 各呼出しは low = pg<<16 なので Fetch[pg] = s_zero_page - (pg<<16) となり、
      * 実行時には host = guest_pc + Fetch[pg] = s_zero_page + (pc & 0xFFFF)。
-     * これで未マップページのフェッチは常に s_zero_page(128KB)の内側に収まる。 */
+     * これで未マップページのフェッチは常に s_zero_page(128KB)の内側に収まる。
+     * P861: 以下のフェッチ表設定は mx_cpu_map_fetch(c68kバックエンドでは C68k_Set_Fetch)経由。 */
     for (uint32_t pg = 0; pg < 256u; pg++) {
-        C68k_Set_Fetch(&C68K, pg << 16, (pg << 16) | 0xFFFFu,
-                       (uintptr_t)s_zero_page);
+        mx_cpu_map_fetch(pg << 16, (pg << 16) | 0xFFFFu, s_zero_page);
     }
 
     /* P18-FIX: Step 2 — 実メモリ領域で上書きする (従来と同じ)。
      * MEM[] は 0x000000-0xBFFFFF (最大 RAM 12MB) を覆う — 縮めてはならない。 */
-    C68k_Set_Fetch(&C68K, 0x000000, 0xbfffff, (uintptr_t)MEM);
+    mx_cpu_map_fetch(0x000000, 0xbfffff, MEM);
     /* P21-FIX: 0xC00000-0xC7FFFF (GVRAM) は意図的に GVRAM[] へマップしない。
      * GVRAM は書込専用のピクセルメモリであり、GVRAM からの命令フェッチは無効である。
      *
@@ -29907,9 +29979,9 @@ static void c68k_init(void)
      *     512KB を越えるため配線せず、既定の s_zero_page のまま残す。c68k の
      *     Fetch[] は範囲チェックを持たないので、超過配線はバッファ外読み出しに
      *     直結する)。詳細は .mx68k_cycles/P609_plan.md。 */
-    C68k_Set_Fetch(&C68K, 0xc00000, 0xc7ffff, (uintptr_t)GVRAM);
-    C68k_Set_Fetch(&C68K, 0xe00000, 0xe7ffff, (uintptr_t)TVRAM);
-    C68k_Set_Fetch(&C68K, 0xea0000, 0xea1fff, (uintptr_t)SCSIIPL);
+    mx_cpu_map_fetch(0xc00000, 0xc7ffff, GVRAM);
+    mx_cpu_map_fetch(0xe00000, 0xe7ffff, TVRAM);
+    mx_cpu_map_fetch(0xea0000, 0xea1fff, SCSIIPL);
     /* P494-②: SRAM 領域($ED0000-$EDFFFF)の Fetch 配線。
      * c68k の Fetch[] は 64KB 粒度(index = adr>>16)で範囲チェックを持たないため、
      * 従来の C68k_Set_Fetch(0xed0000, 0xed3fff, SRAM) は「低位 16KB 分」のつもりでも
@@ -29923,10 +29995,10 @@ static void c68k_init(void)
      * sram_ext_install_fetch() が再度呼ばれて正しい状態へ上書きされる
      * (CPU 実行開始前に解消するため実害は無い)。 */
     sram_ext_install_fetch(sram_ext_is_enabled());
-    C68k_Set_Fetch(&C68K, 0xf00000, 0xfbffff, (uintptr_t)FONT);
+    mx_cpu_map_fetch(0xf00000, 0xfbffff, FONT);
     /* P17-FIX-B: s_ipl_fetch = IPL ROM の LE16 スワップ済みコピー (c68k の FETCH_WORD 用に BE->LE) */
-    C68k_Set_Fetch(&C68K, 0xfc0000, 0xfdffff, (uintptr_t)s_ipl_fetch);
-    C68k_Set_Fetch(&C68K, 0xfe0000, 0xffffff, (uintptr_t)s_ipl_fetch);
+    mx_cpu_map_fetch(0xfc0000, 0xfdffff, s_ipl_fetch);
+    mx_cpu_map_fetch(0xfe0000, 0xffffff, s_ipl_fetch);
 
     /* P253: 三重ゲート成立時のみ $FC0000-$FC1FFF を SCSI IPL ROM へ overlay */
     scsi_in_fetch_overlay_apply();
@@ -29942,15 +30014,15 @@ void m68000_init(void)
 
 void m68000_reset(void)
 {
-    C68k_Reset(&C68K);
+    mx_cpu_reset();
     // P9修正: IPLROM.DATのSSP値が奇数(0x2F0841F9)の場合、
     // 最初のスタック操作でAdrErrorが爆発する。
     // Bridge側でSSPを偶数に丸めることで回避する。
-    uint32_t ssp = C68k_Get_MSP(&C68K);
+    uint32_t ssp = mx_cpu_get_ssp();
     if (ssp & 1) {
         debug_log("[BRIDGE] P9-FIX: SSP 0x%08X was odd; rounding to 0x%08X\n",
                   ssp, ssp & ~1u);
-        C68k_Set_MSP(&C68K, ssp & ~1u);
+        mx_cpu_set_ssp(ssp & ~1u);
     }
 
     /* P253: ハードリセット時に fetch overlay を再評価(トグル/機種/ROM状態変更を反映) */
@@ -29978,21 +30050,51 @@ static unsigned long long g_p565_boundary_count = 0;  /* 分母 */
 static unsigned long long g_p565_resync_count   = 0;  /* 分子 */
 #define P565_RESYNC_LOG_MAX 32
 
+/* P868: [P868-MUSASHI-CHUNK] 一時プローブ(CI-1 N3)。Musashi実行時のみ計数・出力する
+ * (c68k実行時は分岐1つで抜け、1行も出ない)。Musashi経路が安定した後の整理対象。
+ * 窓 = P868_MUSASHI_CHUNK_PERIOD フレーム。分母 chunks を同じ行に出すので、
+ * 「チェックしていない(chunks=0)」と「チェックしたが0件」を区別できる。派生値は出さない。 */
+#define P868_MUSASHI_CHUNK_PERIOD 60
+static struct {
+    uint32_t chunks;      /* 分母: 窓内の mx_cpu_execute 呼出し数 */
+    int64_t  req_sum;     /* 要求サイクル合計 */
+    int64_t  exec_sum;    /* 実行サイクル合計(戻り値) */
+    uint32_t short_;      /* executed <  c */
+    uint32_t exact;       /* executed == c */
+    uint32_t over;        /* executed >  c */
+    uint32_t nonpos;      /* executed <= 0 */
+    uint32_t tagged_pc;   /* チャンク境界で PC > 0x00FFFFFF だった回数 */
+    uint32_t pc_hi01;     /* P887: チャンク境界で PC の上位byteが 0x01(ハイメモリ帯)だった回数 */
+    uint32_t halted;      /* チャンク境界で mx_cpu_is_halted() だった回数 */
+    uint32_t buserr;      /* 窓内のバスエラー合成回数 */
+} s_p868_mc;
+
 #if P207C_BUSERR_ENABLE
 /* P207c: 68000 の GROUP-0 (バスエラー) 例外について c68k の CHECK_INT 入口を
  * 再現し、正規の 7 ワードフレームを組み立てる。これにより同一の IPLROM
  * 0xFF05E4 ハンドラ (および Human68k の TRAP#14 連鎖) が XM6 と同じ「ボード無し」の
  * 結果を出す。エミュレーションスレッド上で命令境界にて実行される。
  * Core は無改変 — 状態変更はすべて公開の C68k_* セッタと、Bridge が既に他所で
- * 行っている C68K.PC/BasePC/Fetch[] への直接書込を通して行う。 */
+ * 行っている C68K.PC/BasePC/Fetch[] への直接書込を通して行う。
+ * P868: CPUレジスタの読み書きは mx_cpu_iface 経由にした(c68k実装は同じ C68k_* 関数を
+ * 同じ引数で呼ぶだけなので、c68k実行時の意味は完全に同じ)。最後の32bitジャンプは
+ * mx_cpu_jump_raw32(c68k版は旧来の BasePC/PC 直接代入3行をそのまま移したもの)。
+ * フレームはMusashi実行時もc68k実行時と同じ値をMEMへ直接書く(Musashi内部の
+ * m68ki_stack_frame_buserr はIRの中身がc68k版と異なり、pushもバスコールバックを
+ * 通るので使わない。上流の m68k_pulse_bus_error は68010形式29ワードフレームなので
+ * 使わない——P868 Plan §参照diff)。フレーム構造(7ワード: +00 SSW / +02,+04 アクセス
+ * アドレス / +06 IR / +08 SR / +0A,+0C PC)は68000ファミリハンドブック 図7.3
+ * (書籍p.89=PDF p.101)と一致する。 */
 static void mx68k_synth_buserror(uint32_t fault_addr)
 {
     if (!MEM) return;
-    uint32_t oldSR   = (uint32_t)C68k_Get_SR(&C68K);
-    uint32_t retPC   = (uint32_t)C68k_Get_PC(&C68K);          /* フォールト命令の次のワード */
+    uint32_t oldSR   = mx_cpu_get_sr();
+    uint32_t retPC   = mx_cpu_get_pc();                       /* フォールト命令の次のワード */
     int      wasUser = !(oldSR & 0x2000u);
-    uint32_t userSP  = wasUser ? (uint32_t)C68k_Get_AReg(&C68K, 7) : 0u;
-    uint32_t superSP = (uint32_t)C68k_Get_MSP(&C68K);         /* flag_S 経由 = スーパーバイザ SP */
+    uint32_t userSP  = wasUser ? mx_cpu_get_areg(7) : 0u;
+    /* スーパーバイザ SP(c68k: flag_S 経由の MSP。Musashi: ISP=ユーザーモード時は sp[4]、
+     * m68kcpu.c:659——同じ意味) */
+    uint32_t superSP = mx_cpu_get_ssp();
     uint32_t base    = superSP - 14u;                         /* 7 ワード */
     uint32_t bm      = base & 0x00FFFFFFu;
     if (bm < 8u || (uint32_t)(bm + 14u) >= (uint32_t)(12*1024*1024)) return;  /* 範囲外ガード */
@@ -30019,21 +30121,26 @@ static void mx68k_synth_buserror(uint32_t fault_addr)
     *(uint16_t*)&MEM[bm + 10] = (uint16_t)((retPC >> 16) & 0xFFFFu);
     *(uint16_t*)&MEM[bm + 12] = (uint16_t)(retPC & 0xFFFFu);
 
-    /* スーパーバイザへ移行 (S=1)、T をクリア、I は保持 (group-0 は IPL を上げない) */
-    C68k_Set_SR(&C68K, (oldSR & ~0x8000u) | 0x2000u);
-    C68k_Set_MSP(&C68K, base);           /* 今は flag_S=1 -> アクティブな A7 = フレームベース */
-    if (wasUser) C68k_Set_USP(&C68K, userSP);
+    /* スーパーバイザへ移行 (S=1)、T をクリア、I は保持 (group-0 は IPL を上げない)
+     * ★順序: SRは必ずSSP/USPより先に設定すること。SRのSビットがSSP/USPの書込み先を決める
+     *   (Musashi m68kcpu.c:706-717)。Musashiの set_sr(m68ki_set_sr_noint_nosp)はSPを入れ替えない
+     *   ので、ユーザーモードから来た場合は直後のA7にユーザーSPが残るが、続く set_ssp(base) が
+     *   S=1 なので A7=base、set_usp(userSP) が S=1 なので USP=userSP を書き、最終状態は
+     *   c68k(Set_SR でSPを入れ替える)と同じになる。SSPとUSP相互の順序は機能上任意だが、
+     *   mx_cpu_iface.h の既存契約「SR→A7→USPの順で呼ぶ」に揃えて SR→SSP→USP とする。
+     *   set_sr は割込み判定をしない(noint)。保留割込みは次の mx_cpu_execute 入口で判定される
+     *   (m68kcpu.c:974)——c68kの「命令境界で合成→次チャンクで受理」と同じ順序。 */
+    mx_cpu_set_sr((oldSR & ~0x8000u) | 0x2000u);
+    mx_cpu_set_ssp(base);                /* 今は S=1 -> アクティブな A7 = フレームベース */
+    if (wasUser) mx_cpu_set_usp(userSP);
 
     /* 32 ビットのスロット値全体でベクタする (上位バイトは IPLROM ディスパッチャの
-     * bsr トリック用に vec# を運ぶ)。C68k_Set_PC() は内部の SET_PC マクロが行う
-     * `BasePC -= A & 0xFF000000` の補正を省略し、m68000_set_reg は
-     * 24 ビットにマスクする (タグが失われる)。そこで c68k.h のバンク定数を使い、
-     * C68K フィールドへの直接書込で SET_PC の計算を再現する。 */
+     * bsr トリック用に vec# を運ぶ)。mx_cpu_set_pc は 24 ビットにマスクする (タグが
+     * 失われる) ので、上位byteを保持する mx_cpu_jump_raw32 を使う(68000のPCは32bit
+     * レジスタ——68000ファミリハンドブック 書籍p.10=PDF p.22)。 */
     uint32_t vec2 = (((uint32_t)*(uint16_t*)&MEM[0x08]) << 16) |
                      ((uint32_t)*(uint16_t*)&MEM[0x0a]);
-    C68K.BasePC  = C68K.Fetch[(vec2 >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
-    C68K.BasePC -= (uintptr_t)(vec2 & 0xFF000000u);
-    C68K.PC      = (uintptr_t)vec2 + C68K.BasePC;
+    mx_cpu_jump_raw32(vec2);
     {
         static uint32_t s_p207c_n = 0;
         /* P413: 50 -> 2000。上限 50 は $EAFxxx 帯の掃引だけで食い潰され、
@@ -30045,7 +30152,25 @@ static void mx68k_synth_buserror(uint32_t fault_addr)
             debug_log("[P207c-BUSERR] fault=0x%06x vec2=0x%08x base=0x%06x oldSR=0x%04x retPC=0x%06x wasUser=%d newPC=0x%08x (n=%u)\n",
                       (unsigned)fault_addr, (unsigned)vec2, (unsigned)bm, (unsigned)oldSR,
                       (unsigned)(retPC & 0x00FFFFFFu), wasUser,
-                      (unsigned)(uint32_t)(C68K.PC - C68K.BasePC), (unsigned)s_p207c_n);
+                      (unsigned)mx_cpu_get_pc(), (unsigned)s_p207c_n);
+        }
+    }
+    /* P881: バスエラーハンドラ先頭64バイトのダンプ(直前の[P207c-BUSERR]行と対で読む) */
+    {
+        static uint32_t s_p881_hdump_n = 0;
+        if (s_p881_hdump_n < 16u) {
+            uint32_t base_h = vec2 & 0x00FFFFFFu;
+            if (base_h + 64u < (uint32_t)(12*1024*1024)) {
+                s_p881_hdump_n++;
+                char hex[192]; /* 64バイト = 32語 × 4桁 + 余裕 */
+                int pos = 0;
+                for (int w = 0; w < 32 && pos < (int)sizeof(hex) - 5; w++) {
+                    uint16_t word = *(uint16_t*)&MEM[base_h + (uint32_t)w * 2u];
+                    pos += snprintf(hex + pos, sizeof(hex) - (size_t)pos, "%04x", word);
+                }
+                debug_log("[P881-HDUMP] n=%u newpc=0x%08x bytes=%s\n",
+                          s_p881_hdump_n, (unsigned)vec2, hex);
+            }
         }
     }
     BusErrFlag = 0;
@@ -30073,10 +30198,10 @@ static void mx68k_dbg_stop(int reason, uint32_t pc) {
               (unsigned long long)g_mx68k_dbg_armed_chunks);
 }
 
-/* EmulatorBridge.c は C68K を持たないため、HALT/WAIT 状態の取得だけここに置く。
+/* デバッガ表示用の HALT/WAIT 状態取得。CPUの実行状態は mx_cpu_is_halted() 経由で得る(P860)。
  * 読み取り専用・副作用ゼロ。 */
 int mx68k_debug_cpu_halted(void) {
-    return (C68K.Status & (C68K_HALTED | C68K_WAITING)) ? 1 : 0;
+    return mx_cpu_is_halted();
 }
 
 // P14-FIX: per-chunk PC ガード用の chunk サイズ (性能のため十分大きく、
@@ -30123,8 +30248,10 @@ int32_t m68000_execute(int32_t cycles)
              *     s_p657_in_execute = 0 の後始末を必ず通すため。 */
             if (g_mx68k_dbg_stopped) break;
 
-            if (C68K.Status & (C68K_HALTED | C68K_WAITING)) {
-                /* (2) HALTED/WAITING: C68k_Exec は予算全額を返して何も実行しない
+            /* P868: mx_cpu_is_halted() の c68k 実装は旧来のこの式
+             *     (C68K.Status & (C68K_HALTED | C68K_WAITING)) そのもの(同義置換)。 */
+            if (mx_cpu_is_halted()) {
+                /* (2) HALTED/WAITING: (c68kの場合)C68k_Exec は予算全額を返して何も実行しない
                  *     (c68kexec.c:279)。ここで c=1 にすると executed=1 のまま
                  *     PC が永久に動かず、step が無反応になる。step 要求は
                  *     消費して「HALTED で止まっている」と明示的に報告する。 */
@@ -30303,7 +30430,9 @@ int32_t m68000_execute(int32_t cycles)
         /* P47-D-DIAG-H: chunk 粒度の PC ring + panic フレームダンプ。
          * 各 chunk 開始時の PC を記録し、0xff0632/0xff05e4/0xff05c8 に到達したら
          * 直近 32 個の chunk PC と SSP+0..+30 の短縮スタックフレームをダンプする。
-         * セッションにつき one-shot。m68000_reset_pcguard_count() でリセットされる。 */
+         * セッションにつき one-shot。m68000_reset_pcguard_count() でリセットされる。
+         * ★P863: ring の書込みは常時(P602/P82-G 等が pc_now_h を共有)、
+         * panic ダンプは P47D_DIAGH_ENABLE(既定 0)のときのみ。 */
         {
             uint32_t pc_now_h = MX68KQ_GUEST_PC();
             s_p47d_pc_ring[s_p47d_pc_ring_pos] = pc_now_h;
@@ -30335,6 +30464,7 @@ int32_t m68000_execute(int32_t cycles)
             }
 #endif
 
+#if P47D_DIAGH_ENABLE
             if (!s_p47d_pc_ring_dumped &&
                 (pc_now_h == 0xff0632 || pc_now_h == 0xff05e4 || pc_now_h == 0xff05c8
 #if P74A_ENABLE
@@ -30395,6 +30525,7 @@ int32_t m68000_execute(int32_t cycles)
                           (unsigned)C68K.A[6], (unsigned)C68K.A[7]);
 #endif
             }
+#endif
 #if P88_ENABLE
             /* P88-A0ELATCH: 同じ panic-terminus PC で独立 one-shot dump。
              * 既存 P47-D-DIAG-H ([P47D-PCRING]) dump の直後に追記し既存出力非改変。
@@ -30928,6 +31059,7 @@ int32_t m68000_execute(int32_t cycles)
 
                 s_p82g_prev = pc_now_h;   /* chunk 毎に更新、ゲートなし */
             }
+#if P82H_ENABLE
             /* P82-H: IPLROM の致命エラーハンドラ帯域を one-shot で捕捉する。
              * ゲストのバイト列 0xFF0632-0xFF063C は IPLROM の終端エラー
              * ハンドラ: lea (errstr),a1 / bsr.w (文字列表示) / bra.b *
@@ -31009,6 +31141,7 @@ int32_t m68000_execute(int32_t cycles)
                     }
                 }
             }
+#endif
 #if P82M_ENABLE
             /* P82-M: chunk 毎の IPLROM stacktop 観測。dedup
              *   tuple-change ロギング。panic-band 到達時 one-shot ダンプ。 */
@@ -31349,6 +31482,7 @@ int32_t m68000_execute(int32_t cycles)
         p70_trace_dump_if_panic();   /* PC==0xff0632 || 0xff063c でワンショットダンプ */
 #endif
 
+#if P49B_ENABLE
         /* P49-B-TRACE-IPL-LOOP: IPL ポーリング窓 $ff0e80..$ff0ee0 に対する
          * chunk 毎の PC サンプラ — IPL がどのオペコード/ポートで
          * 停止しているかを確認する (test #58 では PC=0xff0eca SR=0x2700、サイクル数一定)。
@@ -31394,6 +31528,7 @@ int32_t m68000_execute(int32_t cycles)
                 s_p49b_trace_count++;
             }
         }
+#endif
 
 #if P50_ENABLE
         /* P50-TRACE-RAM-LOOP: RAM ステージ2 のスピナー窓 $001FC0..$002010 に対する
@@ -31733,7 +31868,18 @@ int32_t m68000_execute(int32_t cycles)
             s_p111_prev_opword   = entry_op11;
         }
 #endif /* P111_ENABLE */
-        int32_t executed = C68k_Exec(&C68K, c);
+        int32_t executed = mx_cpu_execute(c);
+        if (mx_cpu_be_musashi()) {
+            /* P868: [P868-MUSASHI-CHUNK] の計数(Musashi実行時のみ) */
+            s_p868_mc.chunks++;
+            s_p868_mc.req_sum  += c;
+            s_p868_mc.exec_sum += executed;
+            if (executed < c)       s_p868_mc.short_++;
+            else if (executed == c) s_p868_mc.exact++;
+            else                    s_p868_mc.over++;
+            if (executed <= 0)      s_p868_mc.nonpos++;
+            if (mx_cpu_is_halted()) s_p868_mc.halted++;
+        }
 #if P113_ENABLE
         /* P113-FB: chunk 境界 S sample (C68k_Exec return 直後)。S 1->0 を検出した
          * chunk の post-PC (=RTE landing 先、C68k_Get_PC は Really_End で sync 済、MINOR-2)・
@@ -31753,6 +31899,9 @@ int32_t m68000_execute(int32_t cycles)
          * fault -> 1 回の例外: 合成する前に latch をクリアする。 */
         if (s_p207c_fault) {
             s_p207c_fault = 0;
+            /* P868: 窓内の合成回数(Musashi時のみ)。合成関数側の範囲ガード(MEM未確保・
+             * フレームを置けない番地)で合成しなかった分も含む——実際に合成した行は [P207c-BUSERR] */
+            if (mx_cpu_be_musashi()) s_p868_mc.buserr++;
             mx68k_synth_buserror(s_p207c_fault_addr);
 #if P220B_MEMBOUND_ENABLE
             s_p220b_fault_is_write = 0;   /* P220b: 次の fault に備えてリセット (読出し経路は常に 0 を見る) */
@@ -32147,6 +32296,7 @@ int32_t m68000_execute(int32_t cycles)
             break;
         }
 
+#if P47D_PCHIST_ENABLE
         /* P47-D-DIAG-I-PCHIST: SSP が 6 バイト (SR + 32 ビット PC) 減少したことで
          * 短縮スタックフレームの push を検出する。push された PC の上位バイトを集計し、
          * c68k の SET_PC マスク問題を検証する。
@@ -32182,6 +32332,7 @@ int32_t m68000_execute(int32_t cycles)
             }
             s_p47d_pre_ssp = cur_ssp;
         }
+#endif
 
 #if P52_ENABLE && P52_DETECT_ENABLE
         /* P52 チャンク終了時の指紋検出。5 ゲートの AND:
@@ -32450,8 +32601,12 @@ int32_t m68000_execute(int32_t cycles)
          *
          * これは L2 の防御である。L1 (上の trace_Memory_WriteW 内の vec#0x61 固定) が
          * 根本の種を取り除く。L2 は将来の未知の種 (vec#0x60
-         * FDC、vec#0x62 SASI 等) を捕捉する。 */
-        {
+         * FDC、vec#0x62 SASI 等) を捕捉する。
+         *
+         * P868: c68k実行時のみ。Musashi は PC を32bitで保持する(実機どおり、
+         * 68000ファミリハンドブック 書籍p.10)ので、上位byteタグ付きPCは正当な値であり
+         * 正規化しない(RAWアクセサがMusashi対応になったため、囲まないと誤発火する)。 */
+        if (!mx_cpu_be_musashi()) {
             /* P82-X-Q diff-review 修正: L2 セーフティネットの検出で不正な上位バイトを
              * 観測できるよう、_RAW (マスクなし) アクセサを使う。 */
             uint32_t pc_dirty = MX68KQ_GUEST_PC_RAW();
@@ -32474,9 +32629,18 @@ int32_t m68000_execute(int32_t cycles)
         // 0x00FFFFFF を超える値を pop すると、物理フェッチポインタが確保済みバッファ
         // (IPL/FONT/MEM) の末尾を越えて進み、SIGSEGV を引き起こす。
         // ここ (チャンク間) で捕捉し、24 ビット空間へクランプし直す。
+        // P868: c68k実行時のみ。c68k固有の安全策(フェッチポインタがホストバッファ外へ出る
+        // のを防ぐ)であり、Musashiは命令フェッチを ADDRESS_68K(0x00FFFFFF)でマスクする
+        // (m68kcpu.h:283、m68kcpu.c:796-798)ので危険が無い。Musashiの32bit PC保持は実機どおり
+        // (68000ファミリハンドブック 書籍p.10=PDF p.22)。Musashi時に pc>0x00FFFFFF だった回数は
+        // [P868-MUSASHI-CHUNK] の tagged_pc で数える。下の P21-GVRAMPC は両コアとも従来どおり。
         {
             uint32_t pc = m68000_get_reg(M68K_PC);
-            if (pc > 0x00FFFFFF) {
+            if (mx_cpu_be_musashi() && pc > 0x00FFFFFF) {
+                s_p868_mc.tagged_pc++;
+                if ((pc >> 24) == 0x01) s_p868_mc.pc_hi01++;
+            }
+            if (pc > 0x00FFFFFF && !mx_cpu_be_musashi()) {
                 uint32_t masked_pc = pc & 0x00FFFFFF;
                 if (g_p14_pcguard_count < P14_PCGUARD_LOG_MAX) {
                     debug_log("[P14-PCGUARD] PC=0x%08x exceeded 24-bit space, "
@@ -32513,19 +32677,19 @@ int32_t m68000_execute(int32_t cycles)
             if (pc >= 0xC00000 && pc <= 0xDFFFFF) {
                 if (g_p21_gvram_pc_count < P21_GVRAM_PC_LOG_MAX) {
                     uint32_t sr  = (uint32_t)m68000_get_reg(M68K_SR);
-                    uint32_t ssp = C68k_Get_MSP(&C68K);
-                    uint32_t a7  = C68K.A[7];
+                    uint32_t ssp = mx_cpu_get_ssp();
+                    uint32_t a7  = mx_cpu_get_areg(7);
                     debug_log("[P21-GVRAMPC] PC=0x%06x in GVRAM space! "
                               "SR=0x%04x SSP=0x%08x A7=0x%08x (count=%d)\n",
                               pc, sr, ssp, a7, g_p21_gvram_pc_count + 1);
                     debug_log("[P21-GVRAMPC] D0-3=%08x %08x %08x %08x "
                               "D4-7=%08x %08x %08x %08x\n",
-                              C68K.D[0], C68K.D[1], C68K.D[2], C68K.D[3],
-                              C68K.D[4], C68K.D[5], C68K.D[6], C68K.D[7]);
+                              mx_cpu_get_dreg(0), mx_cpu_get_dreg(1), mx_cpu_get_dreg(2), mx_cpu_get_dreg(3),
+                              mx_cpu_get_dreg(4), mx_cpu_get_dreg(5), mx_cpu_get_dreg(6), mx_cpu_get_dreg(7));
                     debug_log("[P21-GVRAMPC] A0-3=%08x %08x %08x %08x "
                               "A4-6=%08x %08x %08x\n",
-                              C68K.A[0], C68K.A[1], C68K.A[2], C68K.A[3],
-                              C68K.A[4], C68K.A[5], C68K.A[6]);
+                              mx_cpu_get_areg(0), mx_cpu_get_areg(1), mx_cpu_get_areg(2), mx_cpu_get_areg(3),
+                              mx_cpu_get_areg(4), mx_cpu_get_areg(5), mx_cpu_get_areg(6));
                 }
                 if (g_p21_gvram_pc_count == P21_GVRAM_PC_LOG_MAX) {
                     debug_log("[P21-GVRAMPC] further GVRAM-PC events suppressed (>%d)\n",
@@ -32561,8 +32725,11 @@ int32_t m68000_execute(int32_t cycles)
              *
              * 正常時(BasePC が既に正しい)は比較 1 回のみで C68k_Set_PC() は
              * 呼ばれず、既存の実行経路と byte-equivalent。
+             *
+             * P868: c68k実行時のみ(c68kのFetch表固有の処理。分母・分子カウンタと
+             * stat 行もc68k時のみ)。
              * ============================================================ */
-            {
+            if (!mx_cpu_be_musashi()) {
                 pc = m68000_get_reg(M68K_PC);
                 uintptr_t want = C68K.Fetch[(pc >> 16) & 0xFFu];
 
@@ -32607,6 +32774,19 @@ int32_t m68000_execute(int32_t cycles)
 // イベントが常にログ出力されるようにする。
 void m68000_reset_pcguard_count(void)
 {
+    /* P868: [P868-MUSASHI-CHUNK](一時プローブ)。Musashi実行時かつ60フレーム毎に1行出してゼロクリア。
+     * 出力するのは直前の窓の生の計数のみ(f= は出力時点の g_mx68k_frame_num)。 */
+    if (mx_cpu_be_musashi() && (g_mx68k_frame_num % P868_MUSASHI_CHUNK_PERIOD) == 0) {
+        debug_log("[P868-MUSASHI-CHUNK] f=%d chunks=%u req_sum=%lld exec_sum=%lld "
+                  "short=%u exact=%u over=%u nonpos=%u tagged_pc=%u halted=%u buserr=%u pc_hi01=%u\n",
+                  g_mx68k_frame_num, s_p868_mc.chunks,
+                  (long long)s_p868_mc.req_sum, (long long)s_p868_mc.exec_sum,
+                  s_p868_mc.short_, s_p868_mc.exact, s_p868_mc.over, s_p868_mc.nonpos,
+                  s_p868_mc.tagged_pc, s_p868_mc.halted, s_p868_mc.buserr, s_p868_mc.pc_hi01);
+        memset(&s_p868_mc, 0, sizeof(s_p868_mc));
+        /* P869: [P869-SUM](一時プローブ、プローブ有効モデル以外では何も出さない) */
+        mx_cpu_musashi_p869_tick(g_mx68k_frame_num);
+    }
     g_p14_pcguard_count = 0;
     /* P19-DIAG: フレームごとのベクタテーブル異常カウンタもリセットする */
     g_p19_vec_corrupt_count = 0;
@@ -33930,7 +34110,7 @@ void m68000_reset_p47d_counters(void)
 
 void m68000_set_irq_line(int32_t irqline)
 {
-    C68k_Set_IRQ(&C68K, irqline);
+    mx_cpu_set_irq(irqline);
 }
 
 void m68000_set_irq_callback(int32_t (*callback)(int32_t line))
@@ -33942,26 +34122,26 @@ uint32_t m68000_get_reg(int32_t regnum)
 {
     switch (regnum)
     {
-    case M68K_PC:  return C68k_Get_PC(&C68K);
-    case M68K_USP: return C68k_Get_USP(&C68K);
-    case M68K_MSP: return C68k_Get_MSP(&C68K);
-    case M68K_SR:  return C68k_Get_SR(&C68K);
-    case M68K_D0:  return C68k_Get_DReg(&C68K, 0);
-    case M68K_D1:  return C68k_Get_DReg(&C68K, 1);
-    case M68K_D2:  return C68k_Get_DReg(&C68K, 2);
-    case M68K_D3:  return C68k_Get_DReg(&C68K, 3);
-    case M68K_D4:  return C68k_Get_DReg(&C68K, 4);
-    case M68K_D5:  return C68k_Get_DReg(&C68K, 5);
-    case M68K_D6:  return C68k_Get_DReg(&C68K, 6);
-    case M68K_D7:  return C68k_Get_DReg(&C68K, 7);
-    case M68K_A0:  return C68k_Get_AReg(&C68K, 0);
-    case M68K_A1:  return C68k_Get_AReg(&C68K, 1);
-    case M68K_A2:  return C68k_Get_AReg(&C68K, 2);
-    case M68K_A3:  return C68k_Get_AReg(&C68K, 3);
-    case M68K_A4:  return C68k_Get_AReg(&C68K, 4);
-    case M68K_A5:  return C68k_Get_AReg(&C68K, 5);
-    case M68K_A6:  return C68k_Get_AReg(&C68K, 6);
-    case M68K_A7:  return C68k_Get_AReg(&C68K, 7);
+    case M68K_PC:  return mx_cpu_get_pc();
+    case M68K_USP: return mx_cpu_get_usp();
+    case M68K_MSP: return mx_cpu_get_ssp();
+    case M68K_SR:  return mx_cpu_get_sr();
+    case M68K_D0:  return mx_cpu_get_dreg(0);
+    case M68K_D1:  return mx_cpu_get_dreg(1);
+    case M68K_D2:  return mx_cpu_get_dreg(2);
+    case M68K_D3:  return mx_cpu_get_dreg(3);
+    case M68K_D4:  return mx_cpu_get_dreg(4);
+    case M68K_D5:  return mx_cpu_get_dreg(5);
+    case M68K_D6:  return mx_cpu_get_dreg(6);
+    case M68K_D7:  return mx_cpu_get_dreg(7);
+    case M68K_A0:  return mx_cpu_get_areg(0);
+    case M68K_A1:  return mx_cpu_get_areg(1);
+    case M68K_A2:  return mx_cpu_get_areg(2);
+    case M68K_A3:  return mx_cpu_get_areg(3);
+    case M68K_A4:  return mx_cpu_get_areg(4);
+    case M68K_A5:  return mx_cpu_get_areg(5);
+    case M68K_A6:  return mx_cpu_get_areg(6);
+    case M68K_A7:  return mx_cpu_get_areg(7);
     default: return 0;
     }
 }
@@ -33984,26 +34164,26 @@ void m68000_set_reg(int32_t regnum, uint32_t val)
 {
     switch (regnum)
     {
-    case M68K_PC:  val &= 0x00FFFFFF; C68k_Set_PC(&C68K, val); break;
-    case M68K_USP: C68k_Set_USP(&C68K, val); break;
-    case M68K_MSP: C68k_Set_MSP(&C68K, val); break;
-    case M68K_SR:  C68k_Set_SR(&C68K, val); break;
-    case M68K_D0:  C68k_Set_DReg(&C68K, 0, val); break;
-    case M68K_D1:  C68k_Set_DReg(&C68K, 1, val); break;
-    case M68K_D2:  C68k_Set_DReg(&C68K, 2, val); break;
-    case M68K_D3:  C68k_Set_DReg(&C68K, 3, val); break;
-    case M68K_D4:  C68k_Set_DReg(&C68K, 4, val); break;
-    case M68K_D5:  C68k_Set_DReg(&C68K, 5, val); break;
-    case M68K_D6:  C68k_Set_DReg(&C68K, 6, val); break;
-    case M68K_D7:  C68k_Set_DReg(&C68K, 7, val); break;
-    case M68K_A0:  C68k_Set_AReg(&C68K, 0, val); break;
-    case M68K_A1:  C68k_Set_AReg(&C68K, 1, val); break;
-    case M68K_A2:  C68k_Set_AReg(&C68K, 2, val); break;
-    case M68K_A3:  C68k_Set_AReg(&C68K, 3, val); break;
-    case M68K_A4:  C68k_Set_AReg(&C68K, 4, val); break;
-    case M68K_A5:  C68k_Set_AReg(&C68K, 5, val); break;
-    case M68K_A6:  C68k_Set_AReg(&C68K, 6, val); break;
-    case M68K_A7:  C68k_Set_AReg(&C68K, 7, val); break;
+    case M68K_PC:  mx_cpu_set_pc(val); break;
+    case M68K_USP: mx_cpu_set_usp(val); break;
+    case M68K_MSP: mx_cpu_set_ssp(val); break;
+    case M68K_SR:  mx_cpu_set_sr(val); break;
+    case M68K_D0:  mx_cpu_set_dreg(0, val); break;
+    case M68K_D1:  mx_cpu_set_dreg(1, val); break;
+    case M68K_D2:  mx_cpu_set_dreg(2, val); break;
+    case M68K_D3:  mx_cpu_set_dreg(3, val); break;
+    case M68K_D4:  mx_cpu_set_dreg(4, val); break;
+    case M68K_D5:  mx_cpu_set_dreg(5, val); break;
+    case M68K_D6:  mx_cpu_set_dreg(6, val); break;
+    case M68K_D7:  mx_cpu_set_dreg(7, val); break;
+    case M68K_A0:  mx_cpu_set_areg(0, val); break;
+    case M68K_A1:  mx_cpu_set_areg(1, val); break;
+    case M68K_A2:  mx_cpu_set_areg(2, val); break;
+    case M68K_A3:  mx_cpu_set_areg(3, val); break;
+    case M68K_A4:  mx_cpu_set_areg(4, val); break;
+    case M68K_A5:  mx_cpu_set_areg(5, val); break;
+    case M68K_A6:  mx_cpu_set_areg(6, val); break;
+    case M68K_A7:  mx_cpu_set_areg(7, val); break;
     default: break;
     }
 }
@@ -34143,3 +34323,242 @@ void m68000_p57a_dump_summary(void) {
     debug_log("[P57A-SUMMARY-DECISION] path=%s reason=\"%s\"\n", path, reason);
 #endif
 }
+
+/* ===== mx_cpu_* 実装(P860)— c68kバックエンド + バックエンド切替(P868) =====
+ * Bridge/mx_cpu_iface.h の実装。ステート・モニタに加え、初期化/リセット・m68000_get/set_reg・
+ * windrvが使う(P861)。実行ループ・割込み要求・メモリアクセス中のサイクル操作(P862)。
+ * c68k版(mx_cpu_c68k_*)の中身は既存の m68000_get_reg/m68000_set_reg と同じ c68k 関数を
+ * 同じ引数で呼ぶだけで、挙動は変えない(P868で名前を mx_cpu_* から改名したのみ)。
+ * P868: 公開の mx_cpu_* はこの節の末尾で、s_mx_cpu_backend により c68k版と
+ * Musashi版(Bridge/mx_cpu_musashi.c)へ2分岐する。★P868で静的変数 s_mx_cpu_backend と
+ * [P868-MUSASHI-CHUNK] のカウンタを追加した(データ配置が変わるため、既定c68k経路の不変は
+ * main/ブランチ間の debug.log 一致で検証する——P868 T-3)。
+ * 2つ目のバックエンド(030用コア)を足すサイクルで、この節を独立ファイルへ切り出す。 */
+static inline uint32_t mx_cpu_c68k_get_dreg(int n) { return C68k_Get_DReg(&C68K, (uint32_t)n); }
+static inline uint32_t mx_cpu_c68k_get_areg(int n) { return C68k_Get_AReg(&C68K, (uint32_t)n); }
+static inline uint32_t mx_cpu_c68k_get_pc(void)    { return C68k_Get_PC(&C68K); }
+static inline uint32_t mx_cpu_c68k_get_sr(void)    { return C68k_Get_SR(&C68K); }
+static inline uint32_t mx_cpu_c68k_get_usp(void)   { return C68k_Get_USP(&C68K); }
+static inline uint32_t mx_cpu_c68k_get_ssp(void)   { return C68k_Get_MSP(&C68K); }
+static inline void mx_cpu_c68k_set_dreg(int n, uint32_t v) { C68k_Set_DReg(&C68K, (uint32_t)n, v); }
+static inline void mx_cpu_c68k_set_areg(int n, uint32_t v) { C68k_Set_AReg(&C68K, (uint32_t)n, v); }
+static inline void mx_cpu_c68k_set_sr(uint32_t v)  { C68k_Set_SR(&C68K, v); }
+static inline void mx_cpu_c68k_set_usp(uint32_t v) { C68k_Set_USP(&C68K, v); }
+/* ★24bitマスクは m68000_set_reg(M68K_PC) と同じ */
+static inline void mx_cpu_c68k_set_pc(uint32_t v)  { C68k_Set_PC(&C68K, v & 0x00FFFFFFu); }
+static inline void mx_cpu_c68k_set_ssp(uint32_t v) { C68k_Set_MSP(&C68K, v); }
+
+/* C68k_Init は構造体全体をゼロクリアし(フェッチ表を含む)、ダミーの読み書き関数を入れてから
+ * ジャンプ表を初期化する。その後で読み書き関数を差し替える——置換前の c68k_init と同じ順序。
+ * arm64 では FASTCALL が空マクロなので、mx_cpu_bus の関数ポインタは C68K_READ 等とそのまま互換。 */
+static inline void mx_cpu_c68k_init(const mx_cpu_bus *bus) {
+    C68k_Init(&C68K, bus->int_ack);
+    C68k_Set_ReadB(&C68K, bus->read8);
+    C68k_Set_ReadW(&C68K, bus->read16);
+    C68k_Set_WriteB(&C68K, bus->write8);
+    C68k_Set_WriteW(&C68K, bus->write16);
+}
+static inline void mx_cpu_c68k_map_fetch(uint32_t lo, uint32_t hi, const void *host) {
+    C68k_Set_Fetch(&C68K, lo, hi, (uintptr_t)host);
+}
+/* 戻り値(c68kの実行状態)は置換前も使っていない */
+static inline void mx_cpu_c68k_reset(void) { (void)C68k_Reset(&C68K); }
+static inline int32_t mx_cpu_c68k_get_irq_line(void) { return C68K.IRQLine; }
+static inline int     mx_cpu_c68k_is_halted(void)    { return (C68K.Status & (C68K_HALTED | C68K_WAITING)) ? 1 : 0; }
+static inline uint32_t mx_cpu_c68k_state_get_run_status(void) { return C68K.Status; }
+static inline int32_t  mx_cpu_c68k_state_get_irq_line(void)   { return C68K.IRQLine; }
+/* ★生の代入のみ。C68k_Set_IRQ は呼ばない(実行中断・HALT解除の副作用を起こさない) */
+static inline void mx_cpu_c68k_state_restore_run(uint32_t run_status, int32_t irq_line) {
+    C68K.Status  = run_status;
+    C68K.IRQLine = irq_line;
+}
+
+/* --- 実行・割込み・サイクル操作(P862)。呼出し元はすべてこのファイル内なので、
+ *     最適化ビルドでは呼出し元へ展開される見込み(c68k本体は元から別ファイルの通常関数) --- */
+static inline int32_t mx_cpu_c68k_execute(int32_t cycles) { return C68k_Exec(&C68K, cycles); }
+#if P864_MUSASHI_IRQPROBE_ENABLE
+/* P864: Musashi候補コア突合(CI-4/PoC)の実測。execute再入中の mx_cpu_set_irq
+ * 呼出し頻度・受理可否と、add_cycles/end_timeslice の呼出し頻度をフレーム単位で
+ * ヒストグラム化する。既定OFF、c68kバックエンドのラッパ3関数に計装するのみで
+ * 挙動(戻り値・呼出し先)は一切変えない。 */
+static int32_t s_p864_add_cycles_calls    = 0;
+static int64_t s_p864_add_cycles_sum      = 0;
+static int32_t s_p864_set_irq_total       = 0;  /* 分母: 全呼出し */
+static int32_t s_p864_set_irq_in_exec     = 0;  /* execute再入中の呼出し */
+static int32_t s_p864_set_irq_acceptable  = 0;  /* 上記のうちlevel==7かlevel>IPLマスク */
+static int32_t s_p864_end_timeslice_calls = 0;
+/* 自己反証可能性のため、判定に使った生の値(直近の execute 再入中呼出し分)も残す。-1 = 未観測 */
+static int32_t s_p864_last_level          = -1;
+static int32_t s_p864_last_mask           = -1;
+/* P865: P864プローブの拡張。level分布・呼出し文脈・c68k固有所見A/B/Cの定量化。 */
+static int32_t s_p865_level_hist[8]      = {0};  /* execute再入中、level別(0-7)ヒストグラム */
+static int32_t s_p865_ctx_iack           = 0;    /* 呼出し文脈: IACKコールバック内 */
+static int32_t s_p865_ctx_memcb          = 0;    /* 呼出し文脈: メモリCB内(IACK外) */
+static int32_t s_p865_ab_detect_count    = 0;    /* 所見A/B前提条件(CycleIO==0 && CycleSup!=0)の検出数 */
+static int64_t s_p865_ab_discarded_sum   = 0;    /* 上記検出時のCycleSup合計(破棄される可能性のあるサイクル) */
+static int32_t s_p865_c_detect_count     = 0;    /* 所見C前提条件(ack内level==0呼出し時、CycleIO!=0)の検出数 */
+static int64_t s_p865_c_old_cycleio_sum  = 0;    /* 上記検出時の旧CycleIO合計(二重計上候補サイクル) */
+#endif
+
+#if P864_MUSASHI_IRQPROBE_ENABLE
+static inline void mx_cpu_c68k_set_irq(int32_t level) {
+    s_p864_set_irq_total++;
+    if (s_p657_in_execute) {
+        s_p864_set_irq_in_exec++;
+        uint32_t sr   = C68k_Get_SR(&C68K);
+        uint32_t mask = (sr >> 8) & 7u;
+        s_p864_last_level = level;
+        s_p864_last_mask  = (int32_t)mask;
+        if (level == 7 || (uint32_t)level > mask) {
+            s_p864_set_irq_acceptable++;
+        }
+        /* P865: level分布・呼出し文脈 */
+        if (level >= 0 && level <= 7) s_p865_level_hist[level]++;
+        if (s_p864_in_iack) s_p865_ctx_iack++; else s_p865_ctx_memcb++;
+        /* P865: 所見A/B前提条件——呼出し前のCycleIO/CycleSupを見る(C68k_Set_IRQ呼出し前なので
+         * まだ書き換わっていない、前回のSet_IRQが残した退避済み状態かどうかを判定) */
+        if (C68K.CycleIO == 0 && C68K.CycleSup != 0) {
+            s_p865_ab_detect_count++;
+            s_p865_ab_discarded_sum += C68K.CycleSup;
+        }
+        /* P865: 所見C前提条件——ack内のlevel==0(解除)呼出しで、まだ消化されていない残予算があるか */
+        if (s_p864_in_iack && level == 0 && C68K.CycleIO != 0) {
+            s_p865_c_detect_count++;
+            s_p865_c_old_cycleio_sum += C68K.CycleIO;
+        }
+    }
+    C68k_Set_IRQ(&C68K, level);
+}
+static inline void mx_cpu_c68k_end_timeslice(void) {
+    s_p864_end_timeslice_calls++;
+    C68k_Release_Cycle(&C68K);
+}
+static inline void mx_cpu_c68k_add_cycles(int32_t cycles) {
+    s_p864_add_cycles_calls++;
+    s_p864_add_cycles_sum += cycles;
+    C68k_Add_Cycle(&C68K, cycles);
+}
+
+/* P864: フレーム境界でカウンタを出力してリセットする(mx68k_run_frame から毎フレーム呼ばれる)。
+ * last_level/last_mask は直近値の保持なのでリセットしない。 */
+void p864_musashi_irqprobe_frame_tick(uint32_t frame_num)
+{
+    debug_log("[P864-MUSASHI-IRQPROBE] frame=%u add_cycles_calls=%d add_cycles_sum=%lld "
+              "set_irq_total=%d set_irq_in_exec=%d set_irq_acceptable=%d "
+              "end_timeslice_calls=%d last_level=%d last_mask=%d\n",
+              frame_num, s_p864_add_cycles_calls, (long long)s_p864_add_cycles_sum,
+              s_p864_set_irq_total, s_p864_set_irq_in_exec, s_p864_set_irq_acceptable,
+              s_p864_end_timeslice_calls, s_p864_last_level, s_p864_last_mask);
+    debug_log("[P865-IRQPROBE-EXT] frame=%u level_hist=%d,%d,%d,%d,%d,%d,%d,%d "
+              "ctx_iack=%d ctx_memcb=%d ab_detect=%d ab_discarded_sum=%lld "
+              "c_detect=%d c_old_cycleio_sum=%lld\n",
+              frame_num,
+              s_p865_level_hist[0], s_p865_level_hist[1], s_p865_level_hist[2], s_p865_level_hist[3],
+              s_p865_level_hist[4], s_p865_level_hist[5], s_p865_level_hist[6], s_p865_level_hist[7],
+              s_p865_ctx_iack, s_p865_ctx_memcb, s_p865_ab_detect_count,
+              (long long)s_p865_ab_discarded_sum, s_p865_c_detect_count, (long long)s_p865_c_old_cycleio_sum);
+    s_p864_add_cycles_calls = 0; s_p864_add_cycles_sum = 0;
+    s_p864_set_irq_total = 0; s_p864_set_irq_in_exec = 0; s_p864_set_irq_acceptable = 0;
+    s_p864_end_timeslice_calls = 0;
+    memset(s_p865_level_hist, 0, sizeof(s_p865_level_hist));
+    s_p865_ctx_iack = 0; s_p865_ctx_memcb = 0;
+    s_p865_ab_detect_count = 0; s_p865_ab_discarded_sum = 0;
+    s_p865_c_detect_count = 0; s_p865_c_old_cycleio_sum = 0;
+}
+#else
+static inline void    mx_cpu_c68k_set_irq(int32_t level)  { C68k_Set_IRQ(&C68K, level); }
+static inline void    mx_cpu_c68k_end_timeslice(void)     { C68k_Release_Cycle(&C68K); }
+static inline void    mx_cpu_c68k_add_cycles(int32_t cycles) { C68k_Add_Cycle(&C68K, cycles); }
+#endif
+static inline int32_t mx_cpu_c68k_cycles_done(void)       { return C68k_Get_CycleDone(&C68K); }
+
+/* P868: 例外の飛び先へ32bit値のままPCを設定する(上位byteを保持)。
+ * 旧 mx68k_synth_buserror 末尾の BasePC/PC 直接代入3行をそのまま移したもの。
+ * C68k_Set_PC() は内部の SET_PC マクロが行う `BasePC -= A & 0xFF000000` の補正を省略し、
+ * m68000_set_reg / mx_cpu_set_pc は24ビットにマスクする(タグが失われる)ので、
+ * c68k.h のバンク定数を使い、C68K フィールドへの直接書込で SET_PC の計算を再現する。 */
+static inline void mx_cpu_c68k_jump_raw32(uint32_t vec2) {
+    C68K.BasePC  = C68K.Fetch[(vec2 >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
+    C68K.BasePC -= (uintptr_t)(vec2 & 0xFF000000u);
+    C68K.PC      = (uintptr_t)vec2 + C68K.BasePC;
+}
+
+/* --- P868: 公開 mx_cpu_* の2分岐ディスパッチ(s_mx_cpu_backend、既定 c68k) --- */
+uint32_t mx_cpu_get_dreg(int n) { if (mx_cpu_be_musashi()) return mx_cpu_musashi_get_dreg(n); return mx_cpu_c68k_get_dreg(n); }
+uint32_t mx_cpu_get_areg(int n) { if (mx_cpu_be_musashi()) return mx_cpu_musashi_get_areg(n); return mx_cpu_c68k_get_areg(n); }
+uint32_t mx_cpu_get_pc(void)    { if (mx_cpu_be_musashi()) return mx_cpu_musashi_get_pc();    return mx_cpu_c68k_get_pc(); }
+uint32_t mx_cpu_get_sr(void)    { if (mx_cpu_be_musashi()) return mx_cpu_musashi_get_sr();    return mx_cpu_c68k_get_sr(); }
+uint32_t mx_cpu_get_usp(void)   { if (mx_cpu_be_musashi()) return mx_cpu_musashi_get_usp();   return mx_cpu_c68k_get_usp(); }
+uint32_t mx_cpu_get_ssp(void)   { if (mx_cpu_be_musashi()) return mx_cpu_musashi_get_ssp();   return mx_cpu_c68k_get_ssp(); }
+void mx_cpu_set_dreg(int n, uint32_t v) { if (mx_cpu_be_musashi()) { mx_cpu_musashi_set_dreg(n, v); return; } mx_cpu_c68k_set_dreg(n, v); }
+void mx_cpu_set_areg(int n, uint32_t v) { if (mx_cpu_be_musashi()) { mx_cpu_musashi_set_areg(n, v); return; } mx_cpu_c68k_set_areg(n, v); }
+void mx_cpu_set_sr(uint32_t v)  { if (mx_cpu_be_musashi()) { mx_cpu_musashi_set_sr(v);  return; } mx_cpu_c68k_set_sr(v); }
+void mx_cpu_set_usp(uint32_t v) { if (mx_cpu_be_musashi()) { mx_cpu_musashi_set_usp(v); return; } mx_cpu_c68k_set_usp(v); }
+void mx_cpu_set_pc(uint32_t v)  { if (mx_cpu_be_musashi()) { mx_cpu_musashi_set_pc(v);  return; } mx_cpu_c68k_set_pc(v); }
+void mx_cpu_set_ssp(uint32_t v) { if (mx_cpu_be_musashi()) { mx_cpu_musashi_set_ssp(v); return; } mx_cpu_c68k_set_ssp(v); }
+void mx_cpu_jump_raw32(uint32_t pc32) { if (mx_cpu_be_musashi()) { mx_cpu_musashi_jump_raw32(pc32); return; } mx_cpu_c68k_jump_raw32(pc32); }
+
+/* P872: ハードリセットでコアを切り替えられるよう、両コアを常に初期化する(c68k→Musashiの順)。
+ * Musashiの m68k_init() は Musashi 内部状態の初期化のみで、ゲスト/c68k の状態には触れない */
+void mx_cpu_init(const mx_cpu_bus *bus) { mx_cpu_c68k_init(bus); mx_cpu_musashi_init(bus); }
+/* P872: c68kのフェッチ表は実行中のコアに関わらず常に構築する(Musashiで起動した後に
+ * c68kへ切り替えても表が揃っているように)。Musashi版はno-op */
+void mx_cpu_map_fetch(uint32_t lo, uint32_t hi, const void *host) {
+    mx_cpu_c68k_map_fetch(lo, hi, host);
+    mx_cpu_musashi_map_fetch(lo, hi, host);
+}
+void mx_cpu_reset(void) { if (mx_cpu_be_musashi()) { mx_cpu_musashi_reset(); return; } mx_cpu_c68k_reset(); }
+
+int32_t mx_cpu_execute(int32_t cycles)   { if (mx_cpu_be_musashi()) return mx_cpu_musashi_execute(cycles); return mx_cpu_c68k_execute(cycles); }
+void    mx_cpu_set_irq(int32_t level)    { if (mx_cpu_be_musashi()) { mx_cpu_musashi_set_irq(level); return; } mx_cpu_c68k_set_irq(level); }
+void    mx_cpu_end_timeslice(void)       { if (mx_cpu_be_musashi()) { mx_cpu_musashi_end_timeslice(); return; } mx_cpu_c68k_end_timeslice(); }
+void    mx_cpu_add_cycles(int32_t cycles){ if (mx_cpu_be_musashi()) { mx_cpu_musashi_add_cycles(cycles); return; } mx_cpu_c68k_add_cycles(cycles); }
+int32_t mx_cpu_cycles_done(void)         { if (mx_cpu_be_musashi()) return mx_cpu_musashi_cycles_done(); return mx_cpu_c68k_cycles_done(); }
+
+int32_t mx_cpu_get_irq_line(void) { if (mx_cpu_be_musashi()) return mx_cpu_musashi_get_irq_line(); return mx_cpu_c68k_get_irq_line(); }
+int     mx_cpu_is_halted(void)    { if (mx_cpu_be_musashi()) return mx_cpu_musashi_is_halted();    return mx_cpu_c68k_is_halted(); }
+
+/* ★ステートの生値はコアごとに中身が違い、コア間の互換は無い(P868時点で未対応、R-5棚上げ) */
+uint32_t mx_cpu_state_get_run_status(void) { if (mx_cpu_be_musashi()) return mx_cpu_musashi_state_get_run_status(); return mx_cpu_c68k_state_get_run_status(); }
+int32_t  mx_cpu_state_get_irq_line(void)   { if (mx_cpu_be_musashi()) return mx_cpu_musashi_state_get_irq_line();   return mx_cpu_c68k_state_get_irq_line(); }
+void mx_cpu_state_restore_run(uint32_t run_status, int32_t irq_line) {
+    if (mx_cpu_be_musashi()) { mx_cpu_musashi_state_restore_run(run_status, irq_line); return; }
+    mx_cpu_c68k_state_restore_run(run_status, irq_line);
+}
+
+/* --- P872: 本番経路(設定画面の機種選択)からのCPUコア切替 ---
+ * mx68k_reset_hard() の冒頭(m68000_reset() より前、CPUは実行されない区間)からだけ呼ぶ。 */
+
+/* model: 0=c68k(MC68000)、1=Musashi EC030(X68030) */
+void m68000_set_cpu_backend_model(int model)
+{
+    if (model == 1) {
+        s_mx_cpu_backend = MX_CPU_BE_MUSASHI;
+        mx_cpu_musashi_set_model(1);
+    } else {
+        s_mx_cpu_backend = MX_CPU_BE_C68K;
+    }
+}
+
+/* 環境変数 MX68K_CPU_CORE が設定(非NULL・非空)されていれば1。設定値より優先する。
+ * mx_cpu_backend_select() と同じくプロセス中1回だけ評価する */
+int m68000_cpu_env_override(void)
+{
+    static int s_cached = -1;
+    if (s_cached < 0) {
+        const char *env = getenv("MX68K_CPU_CORE");
+        s_cached = (env != NULL && env[0] != '\0') ? 1 : 0;
+    }
+    return s_cached;
+}
+
+/* ステートのCPU識別子。上位バイト=バックエンド(0=c68k/1=Musashi)、下位バイト=Musashiの型
+ * (0x00=68000型、0x01=EC030、0xFF=それ以外)。c68k は 0 */
+uint32_t m68000_get_cpu_state_id(void)
+{
+    if (!mx_cpu_be_musashi()) return 0u;
+    return 0x0100u | mx_cpu_musashi_get_model_id();
+}
+
+/* 現在のバックエンドが Musashi か(ログ・配線確定ブロック用) */
+int m68000_cpu_backend_is_musashi(void) { return mx_cpu_be_musashi(); }

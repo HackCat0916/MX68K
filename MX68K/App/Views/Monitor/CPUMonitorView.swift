@@ -43,7 +43,11 @@ struct CPUMonitorView: View {
             HStack(spacing: 24) {
                 Text("Machine: \(s.machineDisplayName)")
                 Text("Clock: \(Int(s.clock_mhz))MHz")
-                Text("MEM: \(Int(s.memory_mb))MB")
+                if s.high_memory_mb > 0 {   // P887: ハイメモリ有効時は「本体+ハイメモリ」
+                    Text("MEM: \(Int(s.memory_mb))MB+\(Int(s.high_memory_mb))MB")
+                } else {
+                    Text("MEM: \(Int(s.memory_mb))MB")
+                }
                 Text("FPU: \(s.fpu_enabled ? String(localized: "Yes") : String(localized: "No"))")
             }
             HStack(spacing: 24) {
@@ -91,11 +95,21 @@ struct CPUMonitorView: View {
 }
 
 extension MX68KStatus {
-    /// 機種のSASI/SCSI区分表示名(ステータスバー・モニタで共通使用)。
-    /// P449: 実際にBridgeへ配線される値は0(SASI)/4(SCSI)の2値のみ
-    /// (EmulatorViewModel.machineTypeValue()参照)なので、それ以外の
-    /// 具体的モデル名を装った表示は実態と一致しない死にコードだった。
+    /// 機種の表示名(ステータスバー・モニタで共通使用)。
+    /// P874: cpu_model(68000/EC030軸)とmachine_type(SASI/SCSI軸)を
+    /// それぞれ独立に読んで組み立てる。★Code Review指摘(2026-10-04): 当初案は
+    /// 「X68030選択時はmachineTypeも必ずSCSI」という前提をハードコードしていたが、
+    /// UI(`SettingsViewModel.machineChoice`)がこの組合せを常に強制しているだけで、
+    /// データモデル自体は2軸が独立(config.jsonの`machineType`/`cpuModel`は別キー、
+    /// 互換性チェック無しに個別にBridgeへ渡される)。2軸を独立に読む形にすることで、
+    /// 将来config.jsonの手編集・migrationミス等で組合せがズレても実際の配線値を
+    /// 正確に反映する(CLAUDE.md referent-binding規律)。
+    /// ★ユーザー判断(2026-10-04): X68030は現状SCSI固定(選択不可)のため、
+    /// (SCSI)を付けると選択肢があるかのように見えて紛らわしい。X68030時は
+    /// 区分表示を省略する(XM6 TypeGの`si`も「X68030」のみ表示)。
     var machineDisplayName: String {
-        machine_type == 4 ? "X68000 (SCSI)" : "X68000 (SASI)"
+        if cpu_model == 1 { return "X68030" }
+        let bus = machine_type == 4 ? "SCSI" : "SASI"
+        return "X68000 (\(bus))"
     }
 }

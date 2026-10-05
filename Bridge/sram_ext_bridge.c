@@ -3,8 +3,7 @@
 #include <string.h>
 #include "sram_ext_bridge.h"
 #include "EmulatorBridge.h"
-/* P494-②: C68K インスタンスと C68k_Set_Fetch()。m68000_bridge.c と同じ入手経路。 */
-#include "../Core/c68k/c68k.h"
+#include "mx_cpu_iface.h"              /* P861: 命令フェッチ表の設定(mx_cpu_map_fetch) */
 
 /* P493: 内蔵 SRAM 64KB 化 Stage 1。低位 16KB($ED0000-$ED3FFF)は Core 既存の
  * SRAM[] を無改変で使い続け、上位 48KB($ED4000-$EDFFFF)だけを Bridge 所有
@@ -184,13 +183,13 @@ void sram_ext_install_fetch(bool enabled)
     if (enabled) {
         sram_ext_fetch_shadow_rebuild();
         /* $ED0000-$EDFFFF の 64KB 全域(Fetch[] index 0xED の 1 エントリ)を
-         * 連続シャドウへ向ける。C68k_Set_Fetch は
+         * 連続シャドウへ向ける。mx_cpu_map_fetch(c68kバックエンドでは C68k_Set_Fetch)は
          * i=(low>>16)&0xff, j=(high>>16)&0xff で index 化するため、
          * low=0xed0000 / high=0xedffff は i=j=0xED(Core/c68k/c68k.c:220-224)。 */
-        C68k_Set_Fetch(&C68K, 0xed0000, 0xedffff, (uintptr_t)g_sram_fetch_shadow);
+        mx_cpu_map_fetch(0xed0000, 0xedffff, g_sram_fetch_shadow);
     } else {
         /* P494 以前の呼出しと完全に同一(低位 16KB のみ・Core 所有 SRAM[] を直接参照)。 */
-        C68k_Set_Fetch(&C68K, 0xed0000, 0xed3fff, (uintptr_t)SRAM);
+        mx_cpu_map_fetch(0xed0000, 0xed3fff, SRAM);
     }
     debug_log("[P494-SRAMEXT] install_fetch: enabled=%d -> %s\n",
               (int)enabled, enabled ? "shadow(64KB)" : "SRAM[](16KB)");

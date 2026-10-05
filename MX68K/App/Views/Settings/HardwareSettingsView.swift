@@ -108,6 +108,15 @@ struct HardwareSettingsView: View {
         }
     }
 
+    /// P872 — IPLROM30.DAT のパスが指定され、大きさが 131,072 バイトのときだけ真。
+    private var iplrom30Valid: Bool {
+        let path = settingsViewModel.iplrom30Path
+        guard !path.isEmpty,
+              let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? NSNumber else { return false }
+        return size.intValue == 131_072
+    }
+
     /// P762追補 — ターボ ON/OFF ボタンのラベル。
     /// ON/OFF の実体は macOS = `EmulatorViewModel` / iOS = `MX68KiOSViewModel` と
     /// 分かれるが、`Button(_:)` の引数は式であって `#if` を書けないため、
@@ -130,11 +139,16 @@ struct HardwareSettingsView: View {
                 // P221b: 機種は実機のストレージバス軸
                 // (SASI: 初代〜EXPERT II / SCSI: SUPER〜XVI)。連動させるのは
                 // 機種 -> 既定クロックの提案のみで、メモリは独立している。
-                Picker("Machine Type", selection: $settingsViewModel.machineType) {
+                // P872: 3つ目の選択肢 X68030 は machineType="SCSI" + cpuModel="EC030" の合成表示。
+                // 連動の監視も machineChoice に一本化する(X68030 選択時に machineType が SASI→SCSI と
+                // 変わっても、SCSI 側の既定クロック 16MHz で上書きされないように)。
+                Picker("Machine Type", selection: $settingsViewModel.machineChoice) {
                     Text("SASI Model (Initial – EXPERT II)").tag("SASI")
                     Text("SCSI Model (SUPER – XVI)").tag("SCSI")
+                    Text("X68030 (Experimental)").tag("X68030")
+                        .disabled(!iplrom30Valid)
                 }
-                .onChange(of: settingsViewModel.machineType) { newValue in
+                .onChange(of: settingsViewModel.machineChoice) { newValue in
                     guard machineTypeReady else { return }
                     switch newValue {
                     case "SASI":
@@ -143,10 +157,36 @@ struct HardwareSettingsView: View {
                     case "SCSI":
                         settingsViewModel.clockMHz = 16
                         settingsViewModel.scsiMode = "internal"   // P274: この機種は内蔵SCSI固定
+                    case "X68030":
+                        settingsViewModel.clockMHz = 25           // X68030 定格
+                        settingsViewModel.scsiMode = "internal"   // 内蔵SCSI機(XVI用SCSIINROM overlay のまま)
+                        settingsViewModel.fpuEnabled = false      // MXはFPU命令を未実装(Phase 3)のため無効固定。実機X68030はFPUを追加可能
                     default: break
                     }
                 }
                 .onAppear { machineTypeReady = true }
+
+                // P872: IPLROM30.DAT が未指定/大きさ不一致だと X68030 は選べない。macOS の Picker で項目単位の
+                // .disabled が効かない場合に備えて注意文も出す(選んでも Bridge は68000で起動するので安全側)。
+                if !iplrom30Valid {
+                    Text("X68030 requires IPLROM30.DAT to be set in the BIOS settings.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // P887: ハイメモリ(TS-6BE16相当)は X68030 選択時だけ表示する。機種を変えても値は消さず、
+                // 保存時に X68030 以外ならキーを落とす(SettingsViewModel.apply)
+                if settingsViewModel.machineChoice == "X68030" {
+                    Picker("High Memory", selection: $settingsViewModel.highMemoryMB) {
+                        Text("None").tag(0)
+                        Text("16MB (TS-6BE16 equivalent)").tag(16)
+                    }
+                    Text("Takes effect after reset. A high-memory driver (e.g. TS16DRV.X) is needed to use it from Human68k. Save states are unavailable while enabled.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Picker("Memory", selection: $settingsViewModel.memoryMB) {
                     Text("1 MB").tag(1)
@@ -222,6 +262,14 @@ struct HardwareSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Toggle("FPU Enabled", isOn: $settingsViewModel.fpuEnabled)
+                    // P872: MXはFPU命令を未実装(Phase 3)のため X68030 では無効固定。実機X68030はFPUを追加可能
+                    .disabled(settingsViewModel.machineChoice == "X68030")
+                if settingsViewModel.machineChoice == "X68030" {
+                    Text("FPU emulation is not yet supported for X68030.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 // P686 (D-70): 外付け FDD ユニット(ドライブ 2/3 = C:/D:)。実機で外付けを
                 // 接続していなければドライブ 2/3 は EC=1(未接続)を返し、Human68k に

@@ -540,15 +540,18 @@ class EmulatorViewModel: ObservableObject {
     /// 起動時 config プッシュ（挙動不変で startEmulation から抽出・applySettings と共有）。
     /// mx68k_set_* グローバルは mx68k_init()/reset のみが消費する。
     private func pushConfig(_ config: EmulatorConfig) {
+        // P872: CPUモデル(nil=68000、"EC030"=X68030)。ハードリセットで反映される
+        mx68k_set_cpu_model(config.hardware.cpuModel == "EC030" ? 1 : 0)
+        // P887: ハイメモリ(nil=なし、16=TS-6BE16相当)。X68030以外ではBridge側で無効。ハードリセットで反映
+        mx68k_set_high_memory_mb(Int32(config.hardware.highMemoryMB ?? 0))
         config.bios.iplromPath.withCString { ipl in
             config.bios.cgromPath.withCString { cg in
                 mx68k_set_bios_path(ipl, cg)
             }
         }
-        if !config.bios.iplrom30Path.isEmpty {
-            config.bios.iplrom30Path.withCString { path in
-                mx68k_set_bios_path_030(path)
-            }
+        // P872: 空でも常に渡す(パスを消したら Bridge 側も空にする)
+        config.bios.iplrom30Path.withCString { path in
+            mx68k_set_bios_path_030(path)
         }
         // P241 Stage A: 外付け SCSI(CZ-6BS1)IPL ROM。任意 — 空なら外付け SCSI 起動のみ無効。
         if !config.bios.scsiExtRomPath.isEmpty {
@@ -1192,6 +1195,10 @@ class EmulatorViewModel: ObservableObject {
             return String(localized: "This state file was saved by an older, incompatible version of MX68K and cannot be loaded.")
         case -15:
             return String(localized: "This state file does not match the current memory size setting.")
+        case -16:   // P872: 保存したCPUコア/型と実行中のものが違う
+            return String(localized: "This state file was saved with a different CPU model (X68000 / X68030) and cannot be loaded.")
+        case -17:   // P887: ハイメモリ有効中はステートセーブ/ロード非対応
+            return String(localized: "State save/load is not available while high memory is enabled.")
         case -2:
             return String(localized: "Could not read or write the state file.")
         case -10, -12, -13, -14:

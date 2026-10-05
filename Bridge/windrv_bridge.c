@@ -53,7 +53,8 @@
 
 #include "windrv_bridge.h"
 #include "EmulatorBridge.h"          /* debug_log */
-#include "../Core/c68k/c68k.h"       /* C68K / C68k_Get_AReg / C68k_Set_DReg */
+#include "../Core/c68k/c68k.h"       /* C68K / C68k_Get_PC(診断ログのpc表示のみ) */
+#include "mx_cpu_iface.h"             /* P861: D0/A5 の読み書き */
 
 /* Core のメモリアクセス。sasi_bridge.c / sram_ext_bridge.c と同じ
  * 「ヘッダを引かず extern 再宣言」パターン。`Memory_ReadB`/`Memory_WriteB` は
@@ -161,6 +162,7 @@ extern void     cpu_writemem24(uint32_t adr, uint32_t data);
 #define FS_CANTDELETE           0xFFFFFFEBu   /* windrv.h:54 削除できない */
 #define FS_CANTRENAME           0xFFFFFFEAu   /* windrv.h:55 改名できない */
 #define FS_DISKFULL             0xFFFFFFE9u   /* windrv.h:56 ディスクが一杯でファイルが作れない */
+#define FS_CANTSEEK             0xffffffe7u   /* P888: $4E Seek の不正モード・負位置 */
 #define FS_FILEEXIST            0xFFFFFFB0u   /* windrv.h:67 ファイルが存在する */
 /* P650 変更0: $53 DiskRead の非対応応答に使う。 */
 #define FS_NOTIOCTRL            0xFFFFFFEFu   /* XM6h:windrv.h:50 IOCTRLできないデバイス */
@@ -1707,6 +1709,39 @@ static void windrv_cmd_write(void) {
     windrv_set_result(total);
 }
 
+/* $4E Seek — vm/windrv.cpp:1760-1806、mfc_host.cpp CWinFileSys::Seek()相当。
+ * モード(CMD_OFF_ATTR、1B): 0=SK_BEGIN/1=SK_CURRENT/2=SK_END。
+ * オフセット(CMD_OFF_ADDR2、4B符号付き)。FCBアドレス(CMD_OFF_ADDR3)。
+ * ★MXのRead/Write実装は毎回ゲスト側FCBのfileptr(+6)から再seekする設計
+ *   (windrv_cmd_read:1419-1423等)のため、本関数はホスト側fseekを一切行わず
+ *   FCBのfileptrフィールドを書き換えるだけでよい。結果はbool成功フラグではなく
+ *   新しい絶対位置の値そのもの(windrv.cppのSetResult(nResult)と同じ規約)。 */
+static void windrv_cmd_seek(void) {
+    uint32_t nfcb   = wd_raddr(s_a5 + CMD_OFF_ADDR3);
+    uint32_t mode   = wd_rb(s_a5 + CMD_OFF_ATTR);
+    int32_t  offset = (int32_t)wd_rl(s_a5 + CMD_OFF_ADDR2);
+    WindrvFile* f   = windrv_file_find(nfcb);
+    struct stat st;
+    int64_t newpos;
+    uint32_t curptr;
+
+    if (!f || !f->fp) { windrv_set_result(FS_NOTOPENED); return; }
+    if (fstat(fileno(f->fp), &st) != 0) { windrv_set_result(FS_NOTOPENED); return; }
+
+    curptr = wd_rl(nfcb + FCB_OFF_FILEPTR);
+
+    switch (mode) {
+    case 0: /* SK_BEGIN */   newpos = (int64_t)offset; break;
+    case 1: /* SK_CURRENT */ newpos = (int64_t)curptr + (int64_t)offset; break;
+    case 2: /* SK_END */     newpos = (int64_t)st.st_size + (int64_t)offset; break;
+    default: windrv_set_result(FS_CANTSEEK); return;
+    }
+    if (newpos < 0) { windrv_set_result(FS_CANTSEEK); return; }
+
+    wd_wl(nfcb + FCB_OFF_FILEPTR, (uint32_t)newpos);
+    windrv_set_result((uint32_t)newpos);
+}
+
 /* $45 Delete — windrv.cpp:1306。in: a5+14 (1L) NAMESTS(:1318)。 */
 static void windrv_cmd_delete(void) {
     if (!g_windrv_write_wired) {
@@ -2253,7 +2288,8 @@ static void windrv_dispatch(void) {
      * 第2分岐(疑似セクタでのファイル実体読出し)は未実装で FS_NOTIOCTRL。 */
     case 0x53: windrv_cmd_disk_read(); return;
 
-    /* $4E Seek は MVP 範囲外(Fix Plan が明示的にスコープ外)。 */
+    case 0x4E: windrv_cmd_seek(); return;
+
     default:
         windrv_set_result(FS_INVALIDFUNC);
         return;
@@ -2455,7 +2491,7 @@ uint32_t windrv_mmio_read(uint32_t addr, int size) {
         if (size == 2) {
             /* word read は $E9F000(上位)+ $E9F001(下位)の合成
              * —— Core mem_wrap.c rm16_main() の既定合成順序に合わせる。 */
-            uint32_t handle = C68k_Get_DReg(&C68K, 0);
+            uint32_t handle = mx_cpu_get_dreg(0);
             uint32_t st = windrv_handle_live(handle) ? 1u : 0xFFu;
             return (v << 8) | st;
         }
@@ -2466,7 +2502,7 @@ uint32_t windrv_mmio_read(uint32_t addr, int size) {
         /* windrv.cpp:926-946 StatusAsynchronous: D0.L のハンドルを見て
          * 0 = 実行中 / 1 = 完了 / 0xFF = 不正ハンドル。MX は同期実行なので
          * 生存ハンドルは常に「完了済み」。 */
-        uint32_t handle = C68k_Get_DReg(&C68K, 0);
+        uint32_t handle = mx_cpu_get_dreg(0);
         return windrv_handle_live(handle) ? 1u : 0xFFu;
     }
     return 0xFFu;
@@ -2490,9 +2526,9 @@ void windrv_mmio_write(uint32_t addr, uint32_t val, int size) {
          * 何もせず return するが(DUAL のみ Execute)、MX は DUAL 相当として
          * 同期実行する —— 互換ドライバもそのまま動く上位互換。
          * 結果は D0.L(= a5+3/+4 の fatal コード)へ返す。 */
-        uint32_t a5  = C68k_Get_AReg(&C68K, 5);
+        uint32_t a5  = mx_cpu_get_areg(5);
         uint32_t ret = windrv_execute(a5);
-        C68k_Set_DReg(&C68K, 0, ret);
+        mx_cpu_set_dreg(0, ret);
         return;
     }
 
@@ -2501,14 +2537,14 @@ void windrv_mmio_write(uint32_t addr, uint32_t val, int size) {
          * それ以外の値は何もしない(拡張用、バスエラーにもしない)。 */
         uint32_t v = val & 0xFFu;
         if (v == 0x00u) {
-            uint32_t a5 = C68k_Get_AReg(&C68K, 5);
+            uint32_t a5 = mx_cpu_get_areg(5);
             uint32_t handle = 0;
             (void)windrv_execute(a5);
             /* windrv.cpp:906-915: 空きスレッドが無ければ D0.L = -1。 */
             if (!windrv_handle_alloc(&handle)) handle = 0xFFFFFFFFu;
-            C68k_Set_DReg(&C68K, 0, handle);
+            mx_cpu_set_dreg(0, handle);
         } else if (v == 0xFFu) {
-            windrv_handle_free(C68k_Get_DReg(&C68K, 0));
+            windrv_handle_free(mx_cpu_get_dreg(0));
         }
         return;
     }

@@ -32,6 +32,12 @@ struct HardwareConfig: Codable {
     var memoryMB: Int = 2
     var clockMHz: Int = 16
     var fpuEnabled: Bool = false
+    // P872: CPUモデル。nil(キー無し)=MC68000、"EC030"=X68030(MC68EC030)。machineType(ストレージ軸)とは独立。
+    // ★Optional必須: 合成Decodableが decodeIfPresent 扱いになり、旧config.jsonで設定全体が初期化されない(P194教訓)
+    var cpuModel: String? = nil
+    // P887: X68030ハイメモリ。nil(キー無し)=なし、16=TS-6BE16相当(16MB)。X68030選択時のみ有効。
+    // ★Optional必須: cpuModel と同じ理由(旧config.jsonで設定全体が初期化されないようにする、P194教訓)
+    var highMemoryMB: Int? = nil
 }
 
 /// P221b: 旧 6 値(モデル名)→ 新 2 値(実機ストレージ種)の移行写像。

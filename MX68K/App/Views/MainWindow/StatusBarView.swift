@@ -37,7 +37,14 @@ struct StatusBarView: View {
                 .font(.caption)
                 .layoutPriority(1)
 
-            Text("MEM: \(Int(viewModel.status.memory_mb))MB")
+            // P887: ハイメモリ有効時は「本体+ハイメモリ」で表示する
+            Group {
+                if viewModel.status.high_memory_mb > 0 {
+                    Text("MEM: \(Int(viewModel.status.memory_mb))MB+\(Int(viewModel.status.high_memory_mb))MB")
+                } else {
+                    Text("MEM: \(Int(viewModel.status.memory_mb))MB")
+                }
+            }
                 .font(.caption)
                 .layoutPriority(1)
 

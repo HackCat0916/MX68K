@@ -12,6 +12,10 @@ class SettingsViewModel: ObservableObject {
     @Published var memoryMB: Int = 2
     @Published var clockMHz: Int = 16
     @Published var fpuEnabled: Bool = false
+    // P872: CPUモデル("68000" / "EC030")。config.json では "68000" のときキーを書かない(nil)
+    @Published var cpuModel: String = "68000"
+    // P887: ハイメモリ(0=なし / 16=TS-6BE16相当)。config.json へは X68030 かつ 16 のときだけキーを書く
+    @Published var highMemoryMB: Int = 0
     @Published var audioEnabled: Bool = true
     @Published var audioVolume: Double = 1.0
     @Published var audioSampleRate: Int = 44100
@@ -50,6 +54,21 @@ class SettingsViewModel: ObservableObject {
     // P557: FD アクセス高速化(XM6「フロッピーディスク高速化」相当)。既定 OFF。
     @Published var fdFastAccess: Bool = false
 
+    /// P872: 設定画面の「機種」Picker 用の合成値("SASI" / "SCSI" / "X68030")。
+    /// 保存上は machineType(SASI/SCSI)と cpuModel の組合せで、X68030 = SCSI + EC030。
+    var machineChoice: String {
+        get { cpuModel == "EC030" ? "X68030" : machineType }
+        set {
+            if newValue == "X68030" {
+                machineType = "SCSI"
+                cpuModel = "EC030"
+            } else {
+                machineType = newValue
+                cpuModel = "68000"
+            }
+        }
+    }
+
     func apply(to config: inout EmulatorConfig) {
         config.bios.iplromPath = iplromPath
         config.bios.cgromPath = cgromPath
@@ -61,6 +80,8 @@ class SettingsViewModel: ObservableObject {
         config.hardware.memoryMB = memoryMB
         config.hardware.clockMHz = clockMHz
         config.hardware.fpuEnabled = fpuEnabled
+        config.hardware.cpuModel = (cpuModel == "EC030") ? "EC030" : nil   // P872: 68000 はキーを書かない
+        config.hardware.highMemoryMB = (machineChoice == "X68030" && highMemoryMB == 16) ? 16 : nil   // P887: 68000系機種ではキーを書かない
         config.audio.enabled = audioEnabled
         config.audio.volume = audioVolume
         config.audio.sampleRate = audioSampleRate
@@ -102,6 +123,8 @@ class SettingsViewModel: ObservableObject {
         memoryMB = config.hardware.memoryMB
         clockMHz = config.hardware.clockMHz
         fpuEnabled = config.hardware.fpuEnabled
+        cpuModel = (config.hardware.cpuModel == "EC030") ? "EC030" : "68000"   // P872: nil は 68000
+        highMemoryMB = (config.hardware.highMemoryMB == 16) ? 16 : 0   // P887: 16 以外は 0 へ正規化
         audioEnabled = config.audio.enabled
         audioVolume = config.audio.volume
         audioSampleRate = config.audio.sampleRate
