@@ -1,0 +1,67 @@
+SoftFloat Release 2a (68K-specialized, from Hatari) — MX68K vendored copy
+(This file is MX68K作成 — not an upstream file.)
+
+Source:     https://github.com/hatari/hatari, directory src/cpu/softfloat/
+Commit:     b166d8c8319da5418490d556ad40706c0995b6f8
+            Verified with:
+              gh api repos/hatari/hatari/commits/b166d8c8319da5418490d556ad40706c0995b6f8 --jq .sha
+Lineage:    softfloat.c / softfloat.h / softfloat-macros.h / softfloat-specialize.h:
+              SoftFloat Release 2a (John R. Hauser) -> QEMU (relicensed back to 2a in 2015;
+              Fabrice Bellard's BSD portions, GPLv2+ portions) -> Previous / Hatari (SOFTFLOAT_68K).
+            softfloat_fpsp.c / softfloat_fpsp_tables.h (transcendental functions, MC68881/68882):
+              Motorola M68040 FPSP -> NetBSD sys/arch/m68k/fpsp/ (1994) -> Previous
+              (Andreas Grabher) -> Hatari.
+License:    softfloat.c and the three headers: SoftFloat-2a + BSD (Fabrice Bellard) + GPL-2.0-or-later,
+            as stated in each file's own header (kept unmodified). Full 2a text: LICENSES/SoftFloat-2a.txt.
+            softfloat_fpsp.c / softfloat_fpsp_tables.h: no notice of their own upstream (Previous is
+            GPL-2.0-or-later as a whole). They are derived from the Motorola M68040 FPSP, whose notice
+            requires that "this entire notice is retained without alteration" and that modified versions
+            are identified as such; MX68K restores that notice at the top of both files.
+            Full text: LICENSES/Motorola-M68040-FPSP.txt. See NOTICE-THIRD-PARTY.md for open questions.
+Re-vendor:  bash Scripts/vendor_softfloat_2a.sh (fetches the 6 files at the pinned commit, checks each
+            against a hardcoded SHA256, fails if any contains SoftFloat 2b's "INDEMNIFY" wording, copies
+            4 files unmodified, prepends the MX68K comment block to the 2 FPSP files and checks that the
+            remainder is byte-identical to upstream, and checks that the MX68K-authored files exist).
+
+Contents:
+  Upstream, unmodified (4) — sha256 of the vendored file:
+    softfloat.c             495d1edcedb64bce5e28a0de9d446fbb8fdb4185c3377869cebeb8113d38a8f6
+    softfloat.h             41ef72422776dfd177892494fdf4a9f2166e6c11f47e9ff6982d29361b757333
+    softfloat-macros.h      96e2c9631795dfd661b779b02dafd92450b830ebbe8a1a68dece8d5760c7a2cb
+    softfloat-specialize.h  c0461bcf1d8ea1e32b503dbcc4eb173db56a3d6e5717a4f52074ef652edac51b
+  Upstream + MX68K comment block prepended at the top (2) — sha256 of the UPSTREAM file:
+    softfloat_fpsp.c        1047b589a2307ee5d921357bc104f1749b9b6e4072494cea51a2e7b615f78ad2
+    softfloat_fpsp_tables.h 9670ce7c4c9e6ddc2e811ca2e703eebcff62de512a8a4289301d4f64ba9d72bf
+    The block identifies the file as a modified version derived from the Motorola M68040 FPSP and
+    reproduces the Motorola notice in full. Everything after the block is byte-identical to upstream.
+  MX68K-authored (2):
+    softfloat/softfloat.h   1-line forwarding shim (#include "../softfloat.h"). Upstream softfloat.c
+                            includes "softfloat/softfloat.h" (Hatari resolves it with -I src/cpu);
+                            this shim lets it resolve relative to softfloat.c's own directory.
+    MX68K_VENDOR.txt        this file.
+
+Excluded (not vendored) and why:
+  - softfloat_decimal.c: packed-decimal conversion; depends on Hatari's sysconfig.h/sysdeps.h/
+    write_log and carries no notice. (P897: FMOVE.P is left unsupported for now instead.)
+  - Hatari fpp.c / fpp_softfloat.c / fpp.h (UAE FPU decoder): deeply tied to newcpu.h/regs/currprefs.
+  - Any SoftFloat Release 2b code (indemnification clause). Musashi's upstream softfloat/ (2b) remains
+    excluded from ThirdParty/Musashi/ as before.
+
+Status:
+  Called from ThirdParty/Musashi/m68kfpu.c (P897: MX68K-authored port of MAME m68kfpu.cpp), which
+  implements MC68881/68882 instructions for the X68030 (EC030) Musashi core. The FPU is enabled only
+  with the environment variable MX68K_MUSASHI_FPU=1 (MX68K_MUSASHI_FPU_MODEL=68881|68882, default
+  68882); otherwise FPU instructions still take the line-1111 exception as before.
+  Not used: floatdecimal_to_floatx80 / floatx80_to_floatdecimal (declared in softfloat.h, defined in
+  the non-vendored softfloat_decimal.c — calling them would fail to link; FMOVE.P is unsupported).
+  Host-side check: bash Scripts/softfloat_2a_selftest.sh; FPU instruction check: bash
+  Scripts/musashi_selftest.sh (links softfloat.c / softfloat_fpsp.c since P897).
+
+Build notes (MX68K):
+  - softfloat.c and softfloat_fpsp.c are compiled into both targets (MX68K and MX68K-iOS),
+    COMPILER_FLAGS = -w (upstream warnings). No .h file from here is added to the Xcode project.
+  - ThirdParty/softfloat_2a is NOT in HEADER_SEARCH_PATHS: ThirdParty/Musashi/softfloat/softfloat.h
+    has the same name (since P897 an MX68K forwarding shim to this directory's softfloat.h), so
+    headers here are reached only by quoted includes relative to the including file's own directory.
+    Callers outside this directory must include by relative path, as with Musashi.
+  - softfloat.h defines SOFTFLOAT_68K itself (line 1), so both .c files see the same configuration.

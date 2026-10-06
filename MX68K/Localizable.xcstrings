@@ -5627,12 +5627,22 @@
         }
       }
     },
-    "FPU emulation is not yet supported for X68030.": {
+    "FPU Model": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "X68030でのFPU(数値演算プロセッサ)エミュレーションは現在未対応です。"
+            "value": "FPU の型"
+          }
+        }
+      }
+    },
+    "Takes effect after hard reset. FDBcc/FTRAPcc are not yet functional (known limitation, see Docs).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ハードリセット後に反映されます。FDBcc/FTRAPcc命令は現在未対応です(既知の制限、詳細はDocs参照)。"
           }
         }
       }

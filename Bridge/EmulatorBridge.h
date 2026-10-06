@@ -32,6 +32,9 @@ void mx68k_set_machine_type(int type);
 void mx68k_set_memory_size(int mb);
 void mx68k_set_clock(int mhz);
 void mx68k_set_fpu_enabled(bool en);
+// P898: FPUの型(68881 または 68882、それ以外は 68882)。X68030(EC030)配線時のみ有効、
+// mx68k_set_fpu_enabled と同じくハードリセットで確定する。
+void mx68k_set_fpu_model(int model);
 // P483: Mercury Unit(MK-MU1 / $ECC000)の装着設定。既定 false(未装着)。
 // mx68k_set_machine_type と同じく「設定値」と「配線確定値」を分離する:
 // 装着はハードリセット(mx68k_reset_hard)で初めて確定し、それまでは
@@ -696,7 +699,8 @@ typedef struct {
     int      cpu_model;      // 0=MC68000(c68k)、1=MC68EC030(Musashi、X68030)。配線確定値[mx68k_get_cpu_model()と同じ]
     int      memory_mb;
     int      high_memory_mb;   // P887/P889: ハイメモリの配線確定値(MB、0=無効。TS-6BE16相当=16、060turbo相当=16〜768)
-    bool     fpu_enabled;
+    bool     fpu_enabled;    // P898: 配線確定値(X68030かつFPU有効でハードリセット済みのときだけtrue)
+    int      fpu_model;      // P898: 配線確定値(68881 または 68882)
     bool     fdd0_inserted;
     bool     fdd0_active;
     bool     fdd1_inserted;

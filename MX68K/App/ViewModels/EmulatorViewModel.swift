@@ -663,6 +663,7 @@ class EmulatorViewModel: ObservableObject {
         mx68k_set_memory_size(Int32(config.hardware.memoryMB))
         mx68k_set_clock(Int32(config.hardware.clockMHz))
         mx68k_set_fpu_enabled(config.hardware.fpuEnabled)
+        mx68k_set_fpu_model(Int32(config.hardware.fpuModel ?? 68882))   // P898
         // P483: Mercury Unit(MK-MU1 / $ECC000)の装着設定。値は Bridge 側で
         // 「設定値」として保持され、配線はハードリセット（⌘R）で確定する。
         mx68k_set_mercury_enabled(config.extensions.mercuryUnit)

@@ -908,6 +908,12 @@ void sasi_bridge_apply_rom_boot_handle(int wired_machine_type, bool ext_wired,
 static int  g_memory_size_mb  = 1;
 static int  g_clock_mhz       = 16;
 static bool g_fpu_enabled     = false;
+/* P898: FPU(68881/68882)。g_fpu_enabled/g_fpu_model は設定値(即時)、g_wired_fpu_* は
+ * mx68k_reset_hard() でだけ確定する配線値(P872 の g_cpu_model と同じ2変数方式)。
+ * 配線されるのは X68030(EC030)が実際に配線されたときだけ。 */
+static int  g_fpu_model         = 68882;
+static bool g_wired_fpu_enabled = false;
+static int  g_wired_fpu_model   = 68882;
 /* P512: 各チップ音量の最終設定値を保持する。mx68k_reset_hard() が
  * ADPCM_SetVolume/OPM_SetVolume を再実行する際、固定値ではなくユーザー設定値を
  * 再適用するために使う(ハードリセットで設定が既定値へ巻き戻る回帰の防止)。
@@ -2002,6 +2008,7 @@ void mx68k_shutdown(void) {
      * (戻さないと、X68030で電源OFF→ONしたとき set_bios_path が読込みを保留してしまう) */
     g_wired_cpu_model = 0;
     s_ipl_loaded_model = -1;
+    g_wired_fpu_enabled = false;   /* P898: FPUの配線確定値も cold 状態へ戻す */
     /* P887: ハイメモリも cold 状態へ戻す(Musashi側の参照を先に外してから解放する) */
     mx_cpu_musashi_set_highmem(NULL, 0, 0);
     free(g_himem_buf); g_himem_buf = NULL;
@@ -2112,6 +2119,17 @@ void mx68k_reset_hard(void) {
     }
     g_wired_cpu_model = p872_latched;
 
+    /* P898: FPUの配線確定。P872と同じく環境変数override時はMusashiに触れない
+     * (P868/P869の実験経路を保つ)。EC030型が実際に配線された場合のみ、
+     * 設定値(g_fpu_enabled/g_fpu_model)をMusashiへ反映する。
+     * m68000_set_cpu_backend_model() 内の環境変数駆動の設定より後に置くので、override で
+     * なければ Bridge の設定値が最終的に勝つ。 */
+    if (!p872_override) {
+        g_wired_fpu_enabled = (p872_latched == 1) && g_fpu_enabled;
+        g_wired_fpu_model = g_fpu_model;
+        mx_cpu_musashi_set_fpu_config(g_wired_fpu_enabled ? 1 : 0, g_wired_fpu_model);
+    }
+
     /* P887: ハイメモリの配線確定。m68000_set_cpu_backend_model → mx_cpu_musashi_set_model が
      * アドレスマスクを24bitへ戻すので、必ずその後に置く。環境変数優先時は Musashi に一切触れない
      * (P868/P869の実験経路を保つ、XVIMode と同じ扱い)。バッファはリセットでは保持(kept)する。 */
@@ -2194,6 +2212,19 @@ void mx68k_reset_hard(void) {
               g_clock_mhz, Config.XVIMode,
               (unsigned)SysPort_Read(0xe8e00b),   /* ゲストから見えるバイトを読み戻す(P221B_PROBEと同手法) */
               (int)g_mx68k_frame_num);
+
+    /* P897: FPU(環境変数ゲート)。未設定時も必ず1行出す(「ゲート無効」と「ログ機構の不動作」を区別するため) */
+    {
+        const char *fpu_env = mx_cpu_musashi_fpu_env_raw();
+        if (fpu_env == NULL)
+            debug_log("[P897-FPU] env=unset model=%d present=%d cpu_wired=%d backend=%s frame=%d\n",
+                      mx_cpu_musashi_get_fpu_model(), mx_cpu_musashi_get_fpu_present(), g_wired_cpu_model,
+                      m68000_cpu_backend_is_musashi() ? "musashi" : "c68k", (int)g_mx68k_frame_num);
+        else
+            debug_log("[P897-FPU] env=%.16s model=%d present=%d cpu_wired=%d backend=%s frame=%d\n",
+                      fpu_env, mx_cpu_musashi_get_fpu_model(), mx_cpu_musashi_get_fpu_present(), g_wired_cpu_model,
+                      m68000_cpu_backend_is_musashi() ? "musashi" : "c68k", (int)g_mx68k_frame_num);
+    }
 
 #if P221B_PROBE
     debug_log("[P221B-MACHINE] machine=%d clock=%d -> XVIMode=%d $E8E00B=0x%02x\n",
@@ -6628,7 +6659,10 @@ extern uint8_t Sprite_Regs[0x800];
 /* P890: 2u -> 3u。ハイメモリ(TS-6BE16相当・060turbo相当)の内容ブロックが固定
  * ブロック列へ新たに加わったため、ファイルレイアウトが変わった。P890より前の
  * .mxstate ファイルはもう読み込めない(rc=-11) — P479と同じ、意図どおりの仕様。 */
-#define MX68K_STATE_VERSION 3u
+/* P898: 3u -> 4u。設定ヘッダへ g_fpu_model を追加したため、ファイルレイアウトが
+ * 変わった。P898より前の .mxstate ファイルはもう読み込めない(rc=-11) —
+ * P479/P890と同じ、意図どおりの仕様。 */
+#define MX68K_STATE_VERSION 4u
 
 /* 共有フィールドビジター: セーブとロードでフィールドの順序/サイズを同一にし、
  * 両方向が食い違うことがないようにする。save=1 は emulator->buf へ詰め、save=0 は
@@ -6828,6 +6862,7 @@ static int do_save_state(const char* path) {
     if (state_w32(f, (uint32_t)g_memory_size_mb)){ rc = -3; goto done; }
     if (state_w32(f, (uint32_t)g_clock_mhz))     { rc = -3; goto done; }
     if (state_w32(f, (uint32_t)(g_fpu_enabled ? 1 : 0))) { rc = -3; goto done; }
+    if (state_w32(f, (uint32_t)g_fpu_model))     { rc = -3; goto done; }   /* P898 */
     for (int d = 0; d < 2; d++) {
         uint32_t len = (uint32_t)strlen(g_fdd_path[d]);
         if (state_w32(f, len)) { rc = -3; goto done; }
@@ -6903,7 +6938,7 @@ static int do_load_state(const char* path) {
     int rc = 0;
     state_rdcur c;
     uint32_t version = 0, flags = 0;
-    int32_t s_machine = 0, s_mem = 0, s_clock = 0, s_fpu = 0;
+    int32_t s_machine = 0, s_mem = 0, s_clock = 0, s_fpu = 0, s_fpu_model = 0;
     char s_fdd[2][4096];
     uint32_t exp_mem = 0;
     uint32_t exp_himem = 0;   /* P890: PASS1で算出、PASS2で参照 */
@@ -6985,11 +7020,12 @@ static int do_load_state(const char* path) {
     }
 
     /* 設定ヘッダ */
-    if (c.pos + 16 > c.len) { rc = -10; goto out; }
+    if (c.pos + 20 > c.len) { rc = -10; goto out; }
     memcpy(&s_machine, c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_mem,     c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_clock,   c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_fpu,     c.base + c.pos, 4); c.pos += 4;
+    memcpy(&s_fpu_model, c.base + c.pos, 4); c.pos += 4;   /* P898 */
     /* P481 (D-42): -11ではなく-15とする——rc=-11は「古い非互換のMX68Kバージョンで
      * 書かれたステートファイル」専用に予約されており、UIがその旨を正確に表示できるようにする。
      * メモリサイズの範囲外は無関係な条件なので、独自のコードが必要。 */
@@ -7062,11 +7098,12 @@ static int do_load_state(const char* path) {
     /* --- PASS 2: 適用(構造は検証済み) --- */
     /* 設定不一致 -> RAM/レジスタ復元の前に再設定+ハードリセット */
     if (s_machine != g_machine_type || s_mem != g_memory_size_mb ||
-        s_clock != g_clock_mhz || (s_fpu != 0) != g_fpu_enabled) {
+        s_clock != g_clock_mhz || (s_fpu != 0) != g_fpu_enabled || s_fpu_model != g_fpu_model) {
         mx68k_set_machine_type(s_machine);
         mx68k_set_memory_size(s_mem);
         mx68k_set_clock(s_clock);
         mx68k_set_fpu_enabled(s_fpu != 0);
+        mx68k_set_fpu_model(s_fpu_model);
         mx68k_reset_hard();
     }
 
@@ -7453,6 +7490,11 @@ void mx68k_set_bios_path(const char* iplrom, const char* cgrom) {
 
 void mx68k_set_fpu_enabled(bool enabled) {
     g_fpu_enabled = enabled;
+}
+
+/* P898: 68881 以外はすべて 68882 として扱う(m68kfpu.c の set_config と同じ正規化) */
+void mx68k_set_fpu_model(int model) {
+    g_fpu_model = (model == 68881) ? 68881 : 68882;
 }
 
 /* P483: Mercury Unit の装着設定。設定値のみを更新し、配線は init /
@@ -9897,7 +9939,8 @@ void mx68k_get_status(MX68KStatus* status) {
     status->cpu_model = g_wired_cpu_model;
     status->memory_mb = g_memory_size_mb;
     status->high_memory_mb = g_wired_himem_mb ? g_wired_himem_mb : g_wired_himem060_mb;   /* P887/P889: 追加MB数(種別を問わない) */
-    status->fpu_enabled = g_fpu_enabled;
+    status->fpu_enabled = g_wired_fpu_enabled;   /* P898: 設定値ではなく配線確定値 */
+    status->fpu_model = g_wired_fpu_model;
     status->fdd0_inserted = (FDD_IsReady(0) != 0);
     status->fdd0_active = (mx68k_fdd_accessing(0) != 0);   /* P160: 赤 = アクセス中 */
     status->fdd1_inserted = (FDD_IsReady(1) != 0);

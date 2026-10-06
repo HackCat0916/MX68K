@@ -48,7 +48,8 @@ struct CPUMonitorView: View {
                 } else {
                     Text("MEM: \(Int(s.memory_mb))MB")
                 }
-                Text("FPU: \(s.fpu_enabled ? String(localized: "Yes") : String(localized: "No"))")
+                // P898: 配線確定値。有効時は型(MC68881/MC68882)を出す
+                Text("FPU: \(s.fpu_enabled ? "MC\(Int(s.fpu_model))" : String(localized: "No"))")
             }
             HStack(spacing: 24) {
                 Label("FDD0", systemImage: s.fdd0_inserted ? "opticaldisc.fill" : "opticaldisc")

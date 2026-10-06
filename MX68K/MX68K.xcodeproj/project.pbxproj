@@ -11,6 +11,10 @@
 		64196D44D637286CF57E01CA /* m68kcpu.c in Sources */ = {isa = PBXBuildFile; fileRef = 0FC43CF70541AE7FC862BC04 /* m68kcpu.c */; settings = {COMPILER_FLAGS = "-w"; }; };
 		E9D0980CD230AC86ACF5784B /* m68kops.c in Sources */ = {isa = PBXBuildFile; fileRef = 5D7B6F35A7DC69801F5B52FF /* m68kops.c */; settings = {COMPILER_FLAGS = "-w"; }; };
 		D0668DDE6F7F2A4AB68879D1 /* m68kops.c in Sources */ = {isa = PBXBuildFile; fileRef = 5D7B6F35A7DC69801F5B52FF /* m68kops.c */; settings = {COMPILER_FLAGS = "-w"; }; };
+		0446E5445F80AC90975F81FC /* softfloat.c in Sources */ = {isa = PBXBuildFile; fileRef = 208293F30F0E2CAA512DA809 /* softfloat.c */; settings = {COMPILER_FLAGS = "-w"; }; };
+		5854845674F0620B8EB4C40F /* softfloat.c in Sources */ = {isa = PBXBuildFile; fileRef = 208293F30F0E2CAA512DA809 /* softfloat.c */; settings = {COMPILER_FLAGS = "-w"; }; };
+		1ECECA9F1B3280C03948665A /* softfloat_fpsp.c in Sources */ = {isa = PBXBuildFile; fileRef = BE96AA1A635496F95D41EA0F /* softfloat_fpsp.c */; settings = {COMPILER_FLAGS = "-w"; }; };
+		C5D6F111B21B771B17D10C9D /* softfloat_fpsp.c in Sources */ = {isa = PBXBuildFile; fileRef = BE96AA1A635496F95D41EA0F /* softfloat_fpsp.c */; settings = {COMPILER_FLAGS = "-w"; }; };
 		A98E5443748D11100029396C /* mx_cpu_musashi.c in Sources */ = {isa = PBXBuildFile; fileRef = BAD11A286E8DAAA51B9FE22D /* mx_cpu_musashi.c */; };
 		C746FD43DF916F44BA539E75 /* mx_cpu_musashi.c in Sources */ = {isa = PBXBuildFile; fileRef = BAD11A286E8DAAA51B9FE22D /* mx_cpu_musashi.c */; };
 		00E7A5C22C73DCD51C8C2F97 /* FIRResampler.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A1FFB40E6CD731D326E949DD /* FIRResampler.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
@@ -371,6 +375,8 @@
 /* Begin PBXFileReference section */
 		0FC43CF70541AE7FC862BC04 /* m68kcpu.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = m68kcpu.c; sourceTree = "<group>"; };
 		5D7B6F35A7DC69801F5B52FF /* m68kops.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = m68kops.c; sourceTree = "<group>"; };
+		208293F30F0E2CAA512DA809 /* softfloat.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = softfloat.c; sourceTree = "<group>"; };
+		BE96AA1A635496F95D41EA0F /* softfloat_fpsp.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = softfloat_fpsp.c; sourceTree = "<group>"; };
 		BAD11A286E8DAAA51B9FE22D /* mx_cpu_musashi.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mx_cpu_musashi.c; sourceTree = "<group>"; };
 		00B5B7E2535AAAB5EAADFD89 /* Part.cpp */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.cpp; path = Part.cpp; sourceTree = "<group>"; };
 		01EA17647AA618AE34F83CCA /* GamePad.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GamePad.h; sourceTree = "<group>"; };
@@ -841,6 +847,16 @@
 			path = srctools;
 			sourceTree = "<group>";
 		};
+		551047A99134A347450BC8B2 /* softfloat_2a */ = {
+			isa = PBXGroup;
+			children = (
+				208293F30F0E2CAA512DA809 /* softfloat.c */,
+				BE96AA1A635496F95D41EA0F /* softfloat_fpsp.c */,
+			);
+			name = softfloat_2a;
+			path = softfloat_2a;
+			sourceTree = "<group>";
+		};
 		FD66395FCB1DAE8C267D2155 /* Musashi */ = {
 			isa = PBXGroup;
 			children = (
@@ -1044,6 +1060,7 @@
 				D39CD39D00B8EEECE8FAF4AD /* mt32emu */,
 				2051DB79A58E1C11CB7E72C2 /* nuked_sc55 */,
 				FD66395FCB1DAE8C267D2155 /* Musashi */,
+				551047A99134A347450BC8B2 /* softfloat_2a */,
 			);
 			name = ThirdParty;
 			path = ../ThirdParty;
@@ -1696,6 +1713,8 @@
 				AE38F7EFFEF8EE88825A555D /* m68kcpu.c in Sources */,
 				E9D0980CD230AC86ACF5784B /* m68kops.c in Sources */,
 				A98E5443748D11100029396C /* mx_cpu_musashi.c in Sources */,
+				0446E5445F80AC90975F81FC /* softfloat.c in Sources */,
+				1ECECA9F1B3280C03948665A /* softfloat_fpsp.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1833,6 +1852,8 @@
 				64196D44D637286CF57E01CA /* m68kcpu.c in Sources */,
 				D0668DDE6F7F2A4AB68879D1 /* m68kops.c in Sources */,
 				C746FD43DF916F44BA539E75 /* mx_cpu_musashi.c in Sources */,
+				5854845674F0620B8EB4C40F /* softfloat.c in Sources */,
+				C5D6F111B21B771B17D10C9D /* softfloat_fpsp.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

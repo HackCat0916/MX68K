@@ -154,13 +154,14 @@ struct HardwareSettingsView: View {
                     case "SASI":
                         settingsViewModel.clockMHz = 10   // 機種既定クロック(後から自由に変更可)
                         settingsViewModel.scsiMode = "none"       // P274: 内蔵SCSI不可の機種へ切替時、既定へ戻す
+                        settingsViewModel.fpuEnabled = false      // P898: 68000型のFPUボード(CZ-6BP1/2)は未対応のため無効固定
                     case "SCSI":
                         settingsViewModel.clockMHz = 16
                         settingsViewModel.scsiMode = "internal"   // P274: この機種は内蔵SCSI固定
+                        settingsViewModel.fpuEnabled = false      // P898: 同上
                     case "X68030":
                         settingsViewModel.clockMHz = 25           // X68030 定格
                         settingsViewModel.scsiMode = "internal"   // 内蔵SCSI機(XVI用SCSIINROM overlay のまま)
-                        settingsViewModel.fpuEnabled = false      // MXはFPU命令を未実装(Phase 3)のため無効固定。実機X68030はFPUを追加可能
                     default: break
                     }
                 }
@@ -265,10 +266,14 @@ struct HardwareSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 Toggle("FPU Enabled", isOn: $settingsViewModel.fpuEnabled)
-                    // P872: MXはFPU命令を未実装(Phase 3)のため X68030 では無効固定。実機X68030はFPUを追加可能
-                    .disabled(settingsViewModel.machineChoice == "X68030")
-                if settingsViewModel.machineChoice == "X68030" {
-                    Text("FPU emulation is not yet supported for X68030.")
+                    // P898: FPU(68881/68882)は X68030 でのみ対応。68000型のFPUボードは未対応のため無効固定
+                    .disabled(settingsViewModel.machineChoice != "X68030")
+                if settingsViewModel.machineChoice == "X68030" && settingsViewModel.fpuEnabled {
+                    Picker("FPU Model", selection: $settingsViewModel.fpuModel) {
+                        Text(verbatim: "MC68881").tag("68881")
+                        Text(verbatim: "MC68882").tag("68882")
+                    }
+                    Text("Takes effect after hard reset. FDBcc/FTRAPcc are not yet functional (known limitation, see Docs).")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

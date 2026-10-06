@@ -60,4 +60,15 @@ int mx_cpu_musashi_highmem_selftest(char *out, size_t n);
 /* P869: 一時プローブの定期集計行。プローブ有効モデル以外では何もしない */
 void mx_cpu_musashi_p869_tick(int frame);
 
+/* P897: FPU(68881/68882、ThirdParty/Musashi/m68kfpu.c)。環境変数 MX68K_MUSASHI_FPU=1 かつEC030のときだけ
+ * set_model / set_model_from_env が装着する(MX68K_MUSASHI_FPU_MODEL=68881|68882、既定68882)。
+ * 直接指定(selftest用): set_model の後・reset の前に呼ぶ */
+void mx_cpu_musashi_set_fpu_config(int present, int model);
+int  mx_cpu_musashi_get_fpu_present(void);
+int  mx_cpu_musashi_get_fpu_model(void);
+/* MX68K_MUSASHI_FPU の生値(未設定・空なら NULL) */
+const char *mx_cpu_musashi_fpu_env_raw(void);
+/* P897: [P897-FPU] の定期行(FPU装着時のみ出す、観測カウンタは累計) */
+void mx_cpu_musashi_p897_tick(int frame, mx_cpu_musashi_logf logf);
+
 #endif /* MX_CPU_MUSASHI_H */

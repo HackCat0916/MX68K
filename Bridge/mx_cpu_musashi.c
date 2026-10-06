@@ -147,7 +147,54 @@ void mx_cpu_musashi_init(const mx_cpu_bus *bus)
 /* Musashiには直接フェッチ表が無い(命令も m68k_read_memory_* 経由で読む)ので何もしない */
 void mx_cpu_musashi_map_fetch(uint32_t lo, uint32_t hi, const void *host) { (void)lo; (void)hi; (void)host; }
 
-void mx_cpu_musashi_reset(void) { m68k_pulse_reset(); }
+/* P897: FPU(ThirdParty/Musashi/m68kfpu.c、MAME m68kfpu.cpp 由来の移植版)。定義は m68kfpu.c */
+extern void mx68k_m68kfpu_set_config(int present, int model);
+extern int  mx68k_m68kfpu_get_present(void);
+extern int  mx68k_m68kfpu_get_model(void);
+extern void mx68k_m68kfpu_reset(void);
+extern int  mx68k_m68kfpu_format_stats(char *out, size_t n);
+
+/* P897: 環境変数 MX68K_MUSASHI_FPU / MX68K_MUSASHI_FPU_MODEL はプロセス中1回だけ評価する */
+static int s_fpu_env_done;
+static const char *s_fpu_env_raw;   /* NULL=未設定 */
+static int s_fpu_env_on;            /* "1" と完全一致なら1 */
+static int s_fpu_env_model;         /* 68881 または 68882(未指定・それ以外は68882) */
+
+static void fpu_env_load(void)
+{
+    const char *m;
+    if (s_fpu_env_done) return;
+    s_fpu_env_done = 1;
+    s_fpu_env_raw = getenv("MX68K_MUSASHI_FPU");
+    if (s_fpu_env_raw != NULL && s_fpu_env_raw[0] == '\0') s_fpu_env_raw = NULL;
+    s_fpu_env_on = (s_fpu_env_raw != NULL && strcmp(s_fpu_env_raw, "1") == 0);
+    m = getenv("MX68K_MUSASHI_FPU_MODEL");
+    s_fpu_env_model = (m != NULL && strcmp(m, "68881") == 0) ? 68881 : 68882;
+}
+
+/* EC030 のときだけ環境変数に従ってFPUを装着する(68000型では常に不在) */
+static void fpu_apply_for_model(int ec030)
+{
+    fpu_env_load();
+    mx68k_m68kfpu_set_config(ec030 && s_fpu_env_on, s_fpu_env_model);
+}
+
+void mx_cpu_musashi_set_fpu_config(int present, int model) { mx68k_m68kfpu_set_config(present, model); }
+int  mx_cpu_musashi_get_fpu_present(void) { return mx68k_m68kfpu_get_present(); }
+int  mx_cpu_musashi_get_fpu_model(void) { return mx68k_m68kfpu_get_model(); }
+const char *mx_cpu_musashi_fpu_env_raw(void) { fpu_env_load(); return s_fpu_env_raw; }
+
+void mx_cpu_musashi_p897_tick(int frame, mx_cpu_musashi_logf logf)
+{
+    char stats[512];
+    if (logf == NULL || !mx68k_m68kfpu_get_present()) return;
+    mx68k_m68kfpu_format_stats(stats, sizeof stats);
+    logf("[P897-FPU] f=%d present=1 model=%d cpu_type=%u fpcr=%08X fpsr=%08X %s\n",
+         frame, mx68k_m68kfpu_get_model(), m68ki_cpu.cpu_type, REG_FPCR, REG_FPSR, stats);
+}
+
+/* P897: FPUの初期化は m68k_pulse_reset() の後(上流 m68k_pulse_reset はFPUに触れない) */
+void mx_cpu_musashi_reset(void) { m68k_pulse_reset(); mx68k_m68kfpu_reset(); }
 
 /* --- 実行・割込み・サイクル操作 --- */
 int32_t mx_cpu_musashi_execute(int32_t cycles)
@@ -327,6 +374,7 @@ void mx_cpu_musashi_set_model(int ec030)
     } else {
         m68k_set_cpu_type(M68K_CPU_TYPE_68000);
     }
+    fpu_apply_for_model(ec030);   /* P897 */
 }
 
 /* P872: 現在の型の分類(ステートのCPU識別子の下位バイト)。
@@ -413,6 +461,7 @@ void mx_cpu_musashi_set_model_from_env(mx_cpu_musashi_logf logf)
          * ec030-bare: 上流EC030のまま(PMMU命令は line-1111) */
         HAS_PMMU = ec030 ? 1 : 0;
     }
+    fpu_apply_for_model(ec030 || bare);   /* P897 */
 
     if (probe) {
         s_logf = logf;

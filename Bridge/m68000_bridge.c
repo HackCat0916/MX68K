@@ -32786,6 +32786,8 @@ void m68000_reset_pcguard_count(void)
         memset(&s_p868_mc, 0, sizeof(s_p868_mc));
         /* P869: [P869-SUM](一時プローブ、プローブ有効モデル以外では何も出さない) */
         mx_cpu_musashi_p869_tick(g_mx68k_frame_num);
+        /* P897: [P897-FPU] 定期行(FPU装着時のみ) */
+        mx_cpu_musashi_p897_tick(g_mx68k_frame_num, debug_log);
     }
     g_p14_pcguard_count = 0;
     /* P19-DIAG: フレームごとのベクタテーブル異常カウンタもリセットする */

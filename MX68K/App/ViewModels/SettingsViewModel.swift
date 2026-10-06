@@ -12,6 +12,7 @@ class SettingsViewModel: ObservableObject {
     @Published var memoryMB: Int = 2
     @Published var clockMHz: Int = 16
     @Published var fpuEnabled: Bool = false
+    @Published var fpuModel: String = "68882"   // P898: "68881" / "68882"
     // P872: CPUモデル("68000" / "EC030")。config.json では "68000" のときキーを書かない(nil)
     @Published var cpuModel: String = "68000"
     // P887/P889: ハイメモリ(なし / TS-6BE16相当 / 060turbo相当)。排他選択なので1つのenumで持つ。
@@ -86,6 +87,7 @@ class SettingsViewModel: ObservableObject {
         config.hardware.memoryMB = memoryMB
         config.hardware.clockMHz = clockMHz
         config.hardware.fpuEnabled = fpuEnabled
+        config.hardware.fpuModel = (fpuModel == "68881") ? 68881 : 68882   // P898
         config.hardware.cpuModel = (cpuModel == "EC030") ? "EC030" : nil   // P872: 68000 はキーを書かない
         // P887/P889: 68000系機種ではキーを書かない
         let isX68030 = (machineChoice == "X68030")
@@ -141,6 +143,7 @@ class SettingsViewModel: ObservableObject {
         memoryMB = config.hardware.memoryMB
         clockMHz = config.hardware.clockMHz
         fpuEnabled = config.hardware.fpuEnabled
+        fpuModel = (config.hardware.fpuModel == 68881) ? "68881" : "68882"   // P898: nil・不正値は 68882
         cpuModel = (config.hardware.cpuModel == "EC030") ? "EC030" : "68000"   // P872: nil は 68000
         // P887/P889: 不正値はなしへ正規化。両方指定時は TS-6BE16相当を優先(Bridge側と同じ)
         if config.hardware.highMemoryMB == 16 {

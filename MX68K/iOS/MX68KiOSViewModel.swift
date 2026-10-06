@@ -802,6 +802,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         mx68k_set_memory_size(Int32(config.hardware.memoryMB))
         mx68k_set_clock(Int32(config.hardware.clockMHz))
         mx68k_set_fpu_enabled(config.hardware.fpuEnabled)
+        mx68k_set_fpu_model(Int32(config.hardware.fpuModel ?? 68882))   // P898
         // P757 — 音声サンプルレート(macOS `EmulatorViewModel.pushConfig` と同一呼出し)。
         // Core 側チップ(ADPCM / OPM / Mercury)の初期化レートはここで渡した値が
         // mx68k_init / ハードリセットで確定する。これを呼ばないと Core は常に

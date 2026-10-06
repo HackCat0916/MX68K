@@ -83,6 +83,19 @@ component here is misattributed or mislicensed, please open an issue.
   Both targets; used as the CPU core when X68030 is selected (default
   CPU core for X68000/X68000XVI remains C68K).
 
+- **SoftFloat Release 2a + M68040 FPSP-derived transcendental functions**
+  (planned MC68881/68882 FPU arithmetic engine; vendored but not yet called) —
+  `ThirdParty/softfloat_2a/`, from Hatari (<https://github.com/hatari/hatari>)
+  commit `b166d8c8319da5418490d556ad40706c0995b6f8`, `src/cpu/softfloat/`.
+  `softfloat.c` and its headers: John R. Hauser (SoftFloat 2a), as modified by
+  QEMU (Fabrice Bellard and others) and Previous/Hatari — **SoftFloat-2a / BSD /
+  GPL-2.0-or-later** per portion, headers unmodified (2a text in
+  `LICENSES/SoftFloat-2a.txt`). `softfloat_fpsp.c` / `softfloat_fpsp_tables.h`:
+  Andreas Grabher (Previous), derived from the Motorola M68040 FPSP (Copyright
+  (c) 1993, 1994 Motorola Inc.) via NetBSD; MX68K restores the Motorola notice
+  omitted upstream (`LICENSES/Motorola-M68040-FPSP.txt`). Open licensing
+  questions are stated in `NOTICE-THIRD-PARTY.md`.
+
 - **ZIPFoundation** — <https://github.com/weichsel/ZIPFoundation>. MIT.
   Swift Package dependency, `MX68K-iOS` target only.
 
