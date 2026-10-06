@@ -14,6 +14,7 @@
 #pragma clang diagnostic ignored "-Wunused-variable"
 #include "../ThirdParty/Musashi/m68kcpu.h"
 #pragma clang diagnostic pop
+#include "../ThirdParty/Musashi/m68kops.h"   /* P899: m68ki_instruction_jump_table / m68ki_cycles */
 
 /* 偽スタブ(ガード名 M68K_H / M68KCPU_H)を掴んでいないことをコンパイル時に確かめる */
 #if defined(M68K_H) || defined(M68KCPU_H) || !defined(M68K__HEADER) || !defined(M68KCPU__HEADER)
@@ -134,6 +135,71 @@ void mx_cpu_musashi_set_ssp(uint32_t v) { m68k_set_reg(M68K_REG_ISP, v); }
  * マスクする(m68kcpu.h:283、m68kcpu.c:796-798)ので、上位byteタグ付きPCでもホスト側は安全。 */
 void mx_cpu_musashi_jump_raw32(uint32_t pc32) { m68k_set_reg(M68K_REG_PC, pc32); }
 
+extern void debug_log(const char* fmt, ...);
+
+/* D-84: Musashiの汎用コプロセッサハンドラ(cpgen/cpscc/cpdbcc/cptrapcc/cpbcc)は
+ * EC020以降でcpIDを見ずに無音で戻る(上流の未実装部分)。実機はコプロセッサ不在なら
+ * F-line例外(MC68030 UM §8.1.5/§10.5.2.2)なので、表の項目を差し替える。
+ * 表は m68k_init() が1回だけ作り、機種切替・リセットでは作り直さないので、ここも1回だけ。 */
+#define MX_MUSASHI_NUM_CPU_TYPES 5   /* m68kops.c:34378 の NUM_CPU_TYPES と一致させること */
+
+static void mx_musashi_fix_cp_dispatch(void)
+{
+    static int s_done;
+    void (**jt)(void) = m68ki_instruction_jump_table;
+    void (*fline)(void), (*fpu0)(void), (*cp[5])(void);
+    unsigned int op, i, j, k, n_fline = 0, n_fpu = 0, n_cpdup = 0;
+    const char *abort_reason = NULL;
+
+    if (s_done) return;
+    s_done = 1;
+    fline = jt[0xFF00];  /* m68k_op_1111 */
+    fpu0  = jt[0xF200];  /* m68k_op_040fpu0_32 */
+    cp[0] = jt[0xFE00]; cp[1] = jt[0xFE40]; cp[2] = jt[0xFE48];  /* cpgen, cpscc, cpdbcc */
+    cp[3] = jt[0xFE78]; cp[4] = jt[0xFE80];                      /* cptrapcc, cpbcc */
+
+    /* 正準ポインタ7つの総当たり比較(21組)。
+     * (1) fline/fpu0/NULL との重なり(11組+NULL検査)は置換先と置換元の取り違えになるので中止する。
+     * (2) cp*同士の重なり(10組)は、本体が同一の4関数(cpbcc/cpgen/cpscc/cpdbcc)をリンカが1つに
+     *     畳んだ場合に起こりうる。どれも置換対象なので置換結果は変わらないが、件数でわかるよう数えて出す。 */
+    if (fline == NULL || fpu0 == NULL) abort_reason = "null";
+    else if (fline == fpu0) abort_reason = "fline==fpu0";
+    for (i = 0; i < 5 && abort_reason == NULL; i++) {
+        if (cp[i] == NULL) abort_reason = "cp_null";
+        else if (cp[i] == fline) abort_reason = "cp==fline";
+        else if (cp[i] == fpu0) abort_reason = "cp==fpu0";
+    }
+    if (abort_reason != NULL) {
+        debug_log("[P899-CPFIX] ABORT reason=%s fline=%p fpu0=%p cp=%p %p %p %p %p\n", abort_reason,
+                  (void *)fline, (void *)fpu0, (void *)cp[0], (void *)cp[1], (void *)cp[2], (void *)cp[3], (void *)cp[4]);
+        return;
+    }
+    for (i = 0; i < 5; i++)
+        for (j = i + 1; j < 5; j++)
+            if (cp[i] == cp[j]) n_cpdup++;
+
+    /* cpID2-7: 汎用cp*の項目だけをline-1111へ(move16 $F620-F627 等の別ハンドラはポインタが違うので残る) */
+    for (op = 0xF000; op <= 0xFFFF; op++) {
+        if (((op >> 9) & 7) < 2) continue;          /* cpID0(PMMU)・cpID1(FPU)は対象外/下で個別に扱う */
+        for (i = 0; i < 5; i++) {
+            if (jt[op] == cp[i]) { jt[op] = fline; n_fline++; break; }
+        }
+    }
+    /* cpID1: FDBcc $F248-F24F・FTRAPcc/FScc絶対番地 $F278-F27F を040fpu0へ戻す。サイクル値も040fpu0に揃える */
+    for (j = 0; j < 8; j++) {
+        unsigned int ops[2] = { 0xF248u + j, 0xF278u + j };
+        for (i = 0; i < 2; i++) {
+            if (jt[ops[i]] == cp[2] || jt[ops[i]] == cp[3]) {
+                jt[ops[i]] = fpu0;
+                for (k = 0; k < MX_MUSASHI_NUM_CPU_TYPES; k++)
+                    m68ki_cycles[k][ops[i]] = m68ki_cycles[k][0xF200];
+                n_fpu++;
+            }
+        }
+    }
+    debug_log("[P899-CPFIX] fline=%u fpu=%u cpdup=%u (expect 1528/16)\n", n_fline, n_fpu, n_cpdup);
+}
+
 /* --- 初期化・リセット --- */
 void mx_cpu_musashi_init(const mx_cpu_bus *bus)
 {
@@ -142,6 +208,7 @@ void mx_cpu_musashi_init(const mx_cpu_bus *bus)
     m68k_init();    /* 全コールバックをNULLへ戻すので、int_ackの登録は必ずこの後 */
     m68k_set_cpu_type(M68K_CPU_TYPE_68000);
     m68k_set_int_ack_callback(musashi_int_ack);
+    mx_musashi_fix_cp_dispatch();
 }
 
 /* Musashiには直接フェッチ表が無い(命令も m68k_read_memory_* 経由で読む)ので何もしない */

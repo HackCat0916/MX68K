@@ -52,8 +52,9 @@
  *   - FSAVE の version byte は実機値が一次資料に無いため MAME の仮値 $1F を使う。
  *   - サイクル数は MAME の値をそのまま使う(MAME 側の出典は未確認、実機タイミングとは乖離しうる)。
  *   - FDBcc($F248-$F24F)・FTRAPcc と FScc 絶対番地形式($F278-$F27F)は、Musashi のジャンプテーブル構築順
- *     (m68kops.c m68ki_build_opcode_table() で cpdbcc/cptrapcc が 040fpu0 を後から上書きする)により
- *     実行時には本ファイルへ到達しない。将来テーブル構築が変わった場合に備えて実装だけは置いてある。
+ *     (m68kops.c m68ki_build_opcode_table() で cpdbcc/cptrapcc が 040fpu0 を後から上書きする)で一度
+ *     汎用cp*ハンドラに奪われるが、P899(D-84)で Bridge/mx_cpu_musashi.c の mx_musashi_fix_cp_dispatch() が
+ *     起動時にこの16項目を040fpu0へ戻している(m68kops.c は無改変)。実行時の到達確認は Docs/01 §5-7 参照。
  *
  * m68kcpu.c の中へ m68kcpu.h の後で #include される(単独ではコンパイルしない)。
  * FPU不在(s_mx_fpu_present=0、既定)のときは P869 のスタブと同じく F2xx/F3xx を全て line-1111 例外にする。 */
@@ -1410,7 +1411,7 @@ static void fscc(int mode, int reg)
     }
 }
 
-/* FDBcc(★現状はジャンプテーブル上 cpdbcc に奪われ到達しない、ファイル先頭の注記参照) */
+/* FDBcc(★表の項目は Bridge/mx_cpu_musashi.c の mx_musashi_fix_cp_dispatch() で040fpu0へ戻している、ファイル先頭の注記参照) */
 static void fdbcc(void)
 {
     int condition;
@@ -1470,7 +1471,7 @@ static void fbcc(int is32)
     USE_CYCLES(7);
 }
 
-/* FTRAPcc(★現状はジャンプテーブル上 cptrapcc に奪われ到達しない、ファイル先頭の注記参照) */
+/* FTRAPcc(★表の項目は Bridge/mx_cpu_musashi.c の mx_musashi_fix_cp_dispatch() で040fpu0へ戻している、ファイル先頭の注記参照) */
 static void ftrap(void)
 {
     uint16_t w2;
