@@ -14,8 +14,14 @@ class SettingsViewModel: ObservableObject {
     @Published var fpuEnabled: Bool = false
     // P872: CPUモデル("68000" / "EC030")。config.json では "68000" のときキーを書かない(nil)
     @Published var cpuModel: String = "68000"
-    // P887: ハイメモリ(0=なし / 16=TS-6BE16相当)。config.json へは X68030 かつ 16 のときだけキーを書く
-    @Published var highMemoryMB: Int = 0
+    // P887/P889: ハイメモリ(なし / TS-6BE16相当 / 060turbo相当)。排他選択なので1つのenumで持つ。
+    // config.json へは X68030 のときだけ該当キーを書く
+    enum HighMemorySelection: Hashable {
+        case none
+        case ts6be16
+        case local060(Int)   // 16/32/64/128/256/384/512/768
+    }
+    @Published var highMemorySelection: HighMemorySelection = .none
     @Published var audioEnabled: Bool = true
     @Published var audioVolume: Double = 1.0
     @Published var audioSampleRate: Int = 44100
@@ -81,7 +87,19 @@ class SettingsViewModel: ObservableObject {
         config.hardware.clockMHz = clockMHz
         config.hardware.fpuEnabled = fpuEnabled
         config.hardware.cpuModel = (cpuModel == "EC030") ? "EC030" : nil   // P872: 68000 はキーを書かない
-        config.hardware.highMemoryMB = (machineChoice == "X68030" && highMemoryMB == 16) ? 16 : nil   // P887: 68000系機種ではキーを書かない
+        // P887/P889: 68000系機種ではキーを書かない
+        let isX68030 = (machineChoice == "X68030")
+        switch highMemorySelection {
+        case .none:
+            config.hardware.highMemoryMB = nil
+            config.hardware.highMemory060MB = nil
+        case .ts6be16:
+            config.hardware.highMemoryMB = isX68030 ? 16 : nil
+            config.hardware.highMemory060MB = nil
+        case .local060(let mb):
+            config.hardware.highMemoryMB = nil
+            config.hardware.highMemory060MB = isX68030 ? mb : nil
+        }
         config.audio.enabled = audioEnabled
         config.audio.volume = audioVolume
         config.audio.sampleRate = audioSampleRate
@@ -124,7 +142,14 @@ class SettingsViewModel: ObservableObject {
         clockMHz = config.hardware.clockMHz
         fpuEnabled = config.hardware.fpuEnabled
         cpuModel = (config.hardware.cpuModel == "EC030") ? "EC030" : "68000"   // P872: nil は 68000
-        highMemoryMB = (config.hardware.highMemoryMB == 16) ? 16 : 0   // P887: 16 以外は 0 へ正規化
+        // P887/P889: 不正値はなしへ正規化。両方指定時は TS-6BE16相当を優先(Bridge側と同じ)
+        if config.hardware.highMemoryMB == 16 {
+            highMemorySelection = .ts6be16
+        } else if let mb = config.hardware.highMemory060MB, [16, 32, 64, 128, 256, 384, 512, 768].contains(mb) {
+            highMemorySelection = .local060(mb)
+        } else {
+            highMemorySelection = .none
+        }
         audioEnabled = config.audio.enabled
         audioVolume = config.audio.volume
         audioSampleRate = config.audio.sampleRate

@@ -38,6 +38,9 @@ struct HardwareConfig: Codable {
     // P887: X68030ハイメモリ。nil(キー無し)=なし、16=TS-6BE16相当(16MB)。X68030選択時のみ有効。
     // ★Optional必須: cpuModel と同じ理由(旧config.jsonで設定全体が初期化されないようにする、P194教訓)
     var highMemoryMB: Int? = nil
+    // P889: 060turbo相当ハイメモリ(可変サイズ)。nil(キー無し)=なし、16/32/64/128/256/384/512/768の
+    // いずれか。X68030選択時のみ有効、TS-6BE16相当(highMemoryMB)とは排他。
+    var highMemory060MB: Int? = nil
 }
 
 /// P221b: 旧 6 値(モデル名)→ 新 2 値(実機ストレージ種)の移行写像。

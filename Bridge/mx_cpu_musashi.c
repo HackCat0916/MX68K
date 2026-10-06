@@ -36,29 +36,30 @@ static int s_p869_on;
 static void p869_on_read16(unsigned int address, unsigned int v);
 static void p869_on_read32(unsigned int address);
 
-/* P887: X68030ハイメモリ(TS-6BE16相当、$01000000-$01FFFFFF の16MB固定)。NULL=無効。
- * 参照: XEiJ v0.26.01.08 XEiJ.java:8056(BUS_HIGH_MEMORY_START)・:8092(16MBのみ)。
- * 有効時は CPU_ADDRESS_MASK=0xFFFFFFFF で32bitアドレスがそのまま届くので、$01xxxxxx だけを
- * このバッファへ、それ以外の上位byte値は24bitミラー(a & 0x00FFFFFF)として s_bus へ渡す。
+/* P887/P889: X68030ハイメモリ。NULL=無効。base/bytes は呼び出し側が指定する
+ * (TS-6BE16相当=$01000000/16MB固定[XEiJ XEiJ.java:8056,8092]、
+ *  060turbo相当=$10000000/16〜768MB可変[XEiJ XEiJ.java:8063,2766-2775])。
+ * 有効時は CPU_ADDRESS_MASK=0xFFFFFFFF で32bitアドレスがそのまま届くので、[base, base+bytes) だけを
+ * このバッファへ、それ以外は24bitミラー(a & 0x00FFFFFF)として s_bus へ渡す。
  * 無効時は従来どおり(アドレスに一切手を加えない)。 */
-#define MX_HIMEM_BASE  0x01000000u
-#define MX_HIMEM_BYTES 0x01000000u
+static uint32_t s_himem_base;
+static uint32_t s_himem_bytes;
 static uint8_t *s_himem;
 
-static inline int himem_hit(uint32_t a) { return (uint32_t)(a - MX_HIMEM_BASE) < MX_HIMEM_BYTES; }
+static inline int himem_hit(uint32_t a) { return s_himem && (uint32_t)(a - s_himem_base) < s_himem_bytes; }
 
 static inline unsigned int bus_read8(uint32_t a)
 {
     if (!s_himem) return s_bus.read8(a) & 0xffu;
-    if (himem_hit(a)) return s_himem[a - MX_HIMEM_BASE];
+    if (himem_hit(a)) return s_himem[a - s_himem_base];
     return s_bus.read8(a & 0x00ffffffu) & 0xffu;
 }
 static inline unsigned int bus_read16(uint32_t a)
 {
     if (!s_himem) return s_bus.read16(a) & 0xffffu;
     if (himem_hit(a)) {
-        uint32_t o = a - MX_HIMEM_BASE;
-        /* 末尾 $01FFFFFF の後半byteは $02000000(ミラー側)へ落とす */
+        uint32_t o = a - s_himem_base;
+        /* 末尾 byte の後半byteは base+bytes(ミラー側)へ落とす */
         unsigned int lo = himem_hit(a + 1) ? s_himem[o + 1] : (s_bus.read8((a + 1) & 0x00ffffffu) & 0xffu);
         return ((unsigned int)s_himem[o] << 8) | lo;
     }
@@ -67,14 +68,14 @@ static inline unsigned int bus_read16(uint32_t a)
 static inline void bus_write8(uint32_t a, unsigned int v)
 {
     if (!s_himem) { s_bus.write8(a, v & 0xffu); return; }
-    if (himem_hit(a)) { s_himem[a - MX_HIMEM_BASE] = (uint8_t)v; return; }
+    if (himem_hit(a)) { s_himem[a - s_himem_base] = (uint8_t)v; return; }
     s_bus.write8(a & 0x00ffffffu, v & 0xffu);
 }
 static inline void bus_write16(uint32_t a, unsigned int v)
 {
     if (!s_himem) { s_bus.write16(a, v & 0xffffu); return; }
     if (himem_hit(a)) {
-        uint32_t o = a - MX_HIMEM_BASE;
+        uint32_t o = a - s_himem_base;
         s_himem[o] = (uint8_t)(v >> 8);
         if (himem_hit(a + 1)) s_himem[o + 1] = (uint8_t)v;
         else s_bus.write8((a + 1) & 0x00ffffffu, v & 0xffu);
@@ -339,48 +340,55 @@ uint32_t mx_cpu_musashi_get_model_id(void)
     return 0xFFu;
 }
 
-/* P887: ハイメモリ用16MBバッファを設定する(NULL=無効)。有効時は CPU_ADDRESS_MASK を32bitへ、
+/* P887: ハイメモリ用バッファを設定する(NULL=無効)。有効時は CPU_ADDRESS_MASK を32bitへ、
  * 無効時は24bitへ戻す。mx_cpu_musashi_set_model の後(set_model がマスクを24bitへ戻すため)、
- * かつCPU非実行のリセット区間(mx68k_reset_hard / mx68k_shutdown)からだけ呼ぶこと。 */
-void mx_cpu_musashi_set_highmem(uint8_t *buf)
+ * かつCPU非実行のリセット区間(mx68k_reset_hard / mx68k_shutdown)からだけ呼ぶこと。
+ * P889: base/bytes を呼び出し側から指定できるようにした(TS-6BE16=$01000000/16MB固定、
+ * 060turbo相当=$10000000/可変)。buf=NULLのときbase/bytesは無視してよい(呼び出し側は0を渡すこと)。 */
+void mx_cpu_musashi_set_highmem(uint8_t *buf, uint32_t base, uint32_t bytes)
 {
     s_himem = buf;
+    s_himem_base = buf ? base : 0;
+    s_himem_bytes = buf ? bytes : 0;
     CPU_ADDRESS_MASK = buf ? 0xffffffffu : 0x00ffffffu;
 }
 
 uint32_t mx_cpu_musashi_get_address_mask(void) { return (uint32_t)CPU_ADDRESS_MASK; }
 
 /* P887: [P887-HIMEM-SELFTEST] 用。Musashiのコールバックを直接呼び、ADDRESS_68K のマスクは
- * 手動で再現する(命令実行経路そのものは通らない)。$01000000→$00000000 の順に退避・書込み・
+ * 手動で再現する(命令実行経路そのものは通らない)。base→$00000000 の順に退避・書込み・
  * 読戻しを行い、最後に逆順で元値へ戻す。無効時は両者が同じ番地なので二重復元で問題ない。
+ * P889: プローブ対象は実際に有効な base/bytes(無効時は後方互換のため $01000000/16MB)。
  * 戻り値: himem(1=有効)。 */
 int mx_cpu_musashi_highmem_selftest(char *out, size_t n)
 {
     const uint32_t pat = 0xA5C35A3Cu;
     const uint32_t mask = (uint32_t)CPU_ADDRESS_MASK;
     const int himem = s_himem != NULL;
-    uint32_t orig_00, orig_01, rd_01, rd_00, rd_02000000;
-    unsigned int rd_00ffffff_b;
+    const uint32_t probe_base  = s_himem ? s_himem_base  : 0x01000000u;
+    const uint32_t probe_bytes = s_himem ? s_himem_bytes : 0x01000000u;
+    uint32_t orig_00, orig_base, rd_base, rd_00, rd_end;
+    unsigned int rd_last_b;
     const char *verdict;
 
     orig_00 = m68k_read_memory_32(0x00000000u & mask);
-    orig_01 = m68k_read_memory_32(0x01000000u & mask);
-    m68k_write_memory_32(0x01000000u & mask, pat);
-    rd_01 = m68k_read_memory_32(0x01000000u & mask);
+    orig_base = m68k_read_memory_32(probe_base & mask);
+    m68k_write_memory_32(probe_base & mask, pat);
+    rd_base = m68k_read_memory_32(probe_base & mask);
     rd_00 = m68k_read_memory_32(0x00000000u & mask);
-    rd_00ffffff_b = m68k_read_memory_8(0x00FFFFFFu & mask);
-    rd_02000000 = m68k_read_memory_32(0x02000000u & mask);
-    m68k_write_memory_32(0x01000000u & mask, orig_01);
+    rd_last_b = m68k_read_memory_8((probe_base + probe_bytes - 1u) & mask);
+    rd_end = m68k_read_memory_32((probe_base + probe_bytes) & mask);
+    m68k_write_memory_32(probe_base & mask, orig_base);
     m68k_write_memory_32(0x00000000u & mask, orig_00);
 
-    if (rd_01 != pat) verdict = "BROKEN";
+    if (rd_base != pat) verdict = "BROKEN";
     else if (rd_00 == orig_00) verdict = "SEPARATE";
     else if (rd_00 == pat) verdict = "MIRROR";
     else verdict = "OTHER";
 
-    snprintf(out, n, "[P887-HIMEM-SELFTEST] himem=%d mask=0x%08x pat=0x%08x orig_00=0x%08x orig_01=0x%08x "
-             "rd_01=0x%08x rd_00=0x%08x rd_00ffffff_b=0x%02x rd_02000000=0x%08x verdict=%s\n",
-             himem, mask, pat, orig_00, orig_01, rd_01, rd_00, rd_00ffffff_b, rd_02000000, verdict);
+    snprintf(out, n, "[P887-HIMEM-SELFTEST] himem=%d mask=0x%08x base=0x%08x bytes=0x%08x pat=0x%08x "
+             "orig_00=0x%08x orig_base=0x%08x rd_base=0x%08x rd_00=0x%08x rd_last_b=0x%02x rd_end=0x%08x verdict=%s\n",
+             himem, mask, probe_base, probe_bytes, pat, orig_00, orig_base, rd_base, rd_00, rd_last_b, rd_end, verdict);
     return himem;
 }
 

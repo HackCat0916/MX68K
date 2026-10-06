@@ -624,6 +624,38 @@ static int  g_wired_cpu_model = 0;
 static int      g_himem_mb = 0;
 static int      g_wired_himem_mb = 0;
 static uint8_t *g_himem_buf = NULL;
+/* P889: 060turbo相当ハイメモリ($10000000〜、可変サイズ)。TS-6BE16相当とは排他で、g_himem_buf を共用する。 */
+static int      g_himem060_mb = 0;        /* 設定値: 060turbo相当(0 or 16/32/64/128/256/384/512/768) */
+static int      g_wired_himem060_mb = 0;  /* 配線確定値 */
+static int      g_himem_buf_mb = 0;       /* g_himem_buf が現在確保している容量(MB)。0=未確保 */
+/* P889: 060turbo相当のサイズホワイトリスト(XEiJ XEiJ.java:2766-2775,8128-8138)。setter と reset_hard で共用 */
+static int himem060_valid_mb(int mb) {
+    static const int valid[] = {16,32,64,128,256,384,512,768};
+    for (size_t i = 0; i < sizeof(valid)/sizeof(valid[0]); i++) if (mb == valid[i]) return 1;
+    return 0;
+}
+/* P890: ステートファイルの flags フィールド(32bit)の上位16bitにハイメモリ構成を
+ * エンコードする。下位16bit(m68000_get_cpu_state_id())とは独立したビット域。
+ * bit16-17: 種別(0=無効/1=TS-6BE16相当/2=060turbo相当)。bit18-20: 060turbo相当時の
+ * サイズindex(himem060_valid_mb()と同じ8値配列の添字)。P890より前のファイルは
+ * この領域が常にゼロ(=ハイメモリ無効として保存)——ただしP890でバージョンを
+ * 上げているため、旧ファイルはこの判定に到達する前にrc=-11で拒否される。 */
+static const int k_himem060_sizes[8] = {16,32,64,128,256,384,512,768};
+static uint32_t himem_state_flags(void) {
+    if (g_wired_himem_mb == 16) return (1u << 16);
+    if (g_wired_himem060_mb) {
+        int idx = 0;
+        for (int i = 0; i < 8; i++) if (k_himem060_sizes[i] == g_wired_himem060_mb) { idx = i; break; }
+        return (2u << 16) | ((uint32_t)idx << 18);
+    }
+    return 0u;
+}
+/* 現在の配線確定状態から、保存すべきハイメモリのバイト数を返す(0=無効)。 */
+static uint32_t himem_wired_bytes(void) {
+    if (g_wired_himem_mb == 16) return 16u << 20;
+    if (g_wired_himem060_mb) return (uint32_t)g_wired_himem060_mb << 20;
+    return 0u;
+}
 static int  s_ipl_loaded_model = -1;
 static char g_iplrom_path[4096];
 static char g_iplrom30_path[4096];   /* mx68k_set_bios_path_030 が保存し、reset_hard が読み込む */
@@ -1971,9 +2003,11 @@ void mx68k_shutdown(void) {
     g_wired_cpu_model = 0;
     s_ipl_loaded_model = -1;
     /* P887: ハイメモリも cold 状態へ戻す(Musashi側の参照を先に外してから解放する) */
-    mx_cpu_musashi_set_highmem(NULL);
+    mx_cpu_musashi_set_highmem(NULL, 0, 0);
     free(g_himem_buf); g_himem_buf = NULL;
     g_wired_himem_mb = 0;
+    g_wired_himem060_mb = 0;
+    g_himem_buf_mb = 0;
     free(MEM); MEM = NULL;
     free(IPL); IPL = NULL;
     free(FONT); FONT = NULL;
@@ -2082,26 +2116,41 @@ void mx68k_reset_hard(void) {
      * アドレスマスクを24bitへ戻すので、必ずその後に置く。環境変数優先時は Musashi に一切触れない
      * (P868/P869の実験経路を保つ、XVIMode と同じ扱い)。バッファはリセットでは保持(kept)する。 */
     {
-        int want = (!p872_override && g_wired_cpu_model == 1 && g_himem_mb == 16) ? 16 : 0;
+        /* P889: TS-6BE16相当($01000000/16MB)と060turbo相当($10000000/可変)は排他。
+         * 両方非ゼロ(config.json手動編集時のみ)なら TS-6BE16 を優先する。バッファは同じ種別・同じ容量の
+         * ときだけ保持(kept)し、容量が変われば解放→再確保(new)する。 */
+        int want_ts = (!p872_override && g_wired_cpu_model == 1 && g_himem_mb == 16) ? 16 : 0;
+        int want_060 = (!want_ts && !p872_override && g_wired_cpu_model == 1 && himem060_valid_mb(g_himem060_mb))
+                       ? g_himem060_mb : 0;
+        uint32_t want_base  = want_ts ? 0x01000000u : 0x10000000u;
+        int      want_mb    = want_ts ? want_ts : want_060;
+        uint32_t want_bytes = (uint32_t)want_mb << 20;
+
         const char *buf_state = "none";
         int alloc_fail = 0;
-        if (want) {
-            if (!g_himem_buf) {
-                g_himem_buf = (uint8_t *)calloc(1, 16u << 20);
-                buf_state = g_himem_buf ? "new" : "none";
-            } else {
+        if (want_mb) {
+            if (g_himem_buf && g_himem_buf_mb == want_mb) {
                 buf_state = "kept";
+            } else {
+                if (g_himem_buf) free(g_himem_buf);
+                g_himem_buf = (uint8_t *)calloc(1, (size_t)want_mb << 20);
+                g_himem_buf_mb = g_himem_buf ? want_mb : 0;
+                buf_state = g_himem_buf ? "new" : "none";
             }
         } else if (g_himem_buf) {
-            free(g_himem_buf); g_himem_buf = NULL;
+            free(g_himem_buf); g_himem_buf = NULL; g_himem_buf_mb = 0;
             buf_state = "freed";
         }
-        if (want && !g_himem_buf) { want = 0; alloc_fail = 1; }   /* 確保失敗→無効で起動 */
-        if (!p872_override) mx_cpu_musashi_set_highmem(want ? g_himem_buf : NULL);
-        g_wired_himem_mb = want;
+        if (want_mb && !g_himem_buf) { want_mb = want_ts = want_060 = 0; alloc_fail = 1; }   /* 確保失敗→無効で起動 */
 
-        debug_log("[P887-HIMEM] requested=%d cpu_wired=%d override=%d wired=%d buf=%s mask=0x%08x model_id=0x%02x frame=%d%s\n",
-                  g_himem_mb, g_wired_cpu_model, p872_override, g_wired_himem_mb, buf_state,
+        if (!p872_override) mx_cpu_musashi_set_highmem(want_mb ? g_himem_buf : NULL, want_base, want_bytes);
+        g_wired_himem_mb    = want_ts;
+        g_wired_himem060_mb = want_060;
+
+        debug_log("[P887-HIMEM] requested=%d requested060=%d cpu_wired=%d override=%d wired=%d wired060=%d "
+                  "buf=%s base=0x%08x bytes=0x%08x mask=0x%08x model_id=0x%02x frame=%d%s\n",
+                  g_himem_mb, g_himem060_mb, g_wired_cpu_model, p872_override, g_wired_himem_mb, g_wired_himem060_mb,
+                  buf_state, want_base, want_bytes,
                   (unsigned)mx_cpu_musashi_get_address_mask(), (unsigned)mx_cpu_musashi_get_model_id(),
                   (int)g_mx68k_frame_num, alloc_fail ? " alloc_fail=1" : "");
 
@@ -6576,7 +6625,10 @@ extern uint8_t Sprite_Regs[0x800];
  * ファイルは trailer/サイズ検査へ誤解析されて紛らわしいエラーになるのではなく、
  * 明示的なバージョン検査(rc=-11)で失敗するようになる。P479 より前の
  * .mxstate ファイルはもう読み込めない — 意図どおりの仕様。 */
-#define MX68K_STATE_VERSION 2u
+/* P890: 2u -> 3u。ハイメモリ(TS-6BE16相当・060turbo相当)の内容ブロックが固定
+ * ブロック列へ新たに加わったため、ファイルレイアウトが変わった。P890より前の
+ * .mxstate ファイルはもう読み込めない(rc=-11) — P479と同じ、意図どおりの仕様。 */
+#define MX68K_STATE_VERSION 3u
 
 /* 共有フィールドビジター: セーブとロードでフィールドの順序/サイズを同一にし、
  * 両方向が食い違うことがないようにする。save=1 は emulator->buf へ詰め、save=0 は
@@ -6753,11 +6805,6 @@ static int state_w32(FILE* f, uint32_t v) { return fwrite(&v, 4, 1, f) == 1 ? 0 
 
 static int do_save_state(const char* path) {
     if (!path || !MEM) return -1;
-    /* P887: ハイメモリ有効中はステートセーブ非対応(16MBブロックを持たないため) */
-    if (g_wired_himem_mb) {
-        debug_log("[P887-STATE] himem active -> rc=-17\n");
-        return -17;
-    }
     FILE* f = fopen(path, "wb");
     if (!f) return -2;
 
@@ -6773,7 +6820,8 @@ static int do_save_state(const char* path) {
     if (fwrite(MX68K_STATE_MAGIC, 1, 8, f) != 8) { rc = -3; goto done; }
     if (state_w32(f, MX68K_STATE_VERSION))       { rc = -3; goto done; }
     /* P872: flags の下位16bitにCPU識別子(c68kは0なので既定経路のファイルは従来とバイト単位で同一) */
-    if (state_w32(f, m68000_get_cpu_state_id() /*flags*/)) { rc = -3; goto done; }
+    /* P890: flags の上位16bitにハイメモリ構成(himem_state_flags()) */
+    if (state_w32(f, m68000_get_cpu_state_id() | himem_state_flags() /*flags*/)) { rc = -3; goto done; }
 
     /* 設定ヘッダ */
     if (state_w32(f, (uint32_t)g_machine_type))  { rc = -3; goto done; }
@@ -6819,6 +6867,8 @@ static int do_save_state(const char* path) {
         n = state_timing_block(scratch, 1); if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
         n = state_opm_block(scratch, 1);    if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
     }
+    /* P890: ハイメモリ内容(無効時は長さ0のブロックを書く) */
+    if (state_wblk(f, g_himem_buf, himem_wired_bytes())) { rc = -4; goto done; }
 
     /* トレーラ */
     if (state_w32(f, MX68K_STATE_TRAILER)) { rc = -5; goto done; }
@@ -6856,22 +6906,26 @@ static int do_load_state(const char* path) {
     int32_t s_machine = 0, s_mem = 0, s_clock = 0, s_fpu = 0;
     char s_fdd[2][4096];
     uint32_t exp_mem = 0;
+    uint32_t exp_himem = 0;   /* P890: PASS1で算出、PASS2で参照 */
     uint32_t trailer = 0;
     const uint8_t *blk_cpu = NULL, *blk_mem = NULL, *blk_tvram = NULL, *blk_tdw = NULL,
                   *blk_gvram = NULL, *blk_sram = NULL, *blk_bg = NULL, *blk_spr = NULL,
                   *blk_bgchr8 = NULL, *blk_bgchr16 = NULL,
                   *blk_crtc = NULL, *blk_pal = NULL, *blk_mfp = NULL, *blk_dma = NULL,
-                  *blk_ioc = NULL, *blk_bgr = NULL, *blk_tim = NULL, *blk_opm = NULL;
+                  *blk_ioc = NULL, *blk_bgr = NULL, *blk_tim = NULL, *blk_opm = NULL,
+                  *blk_himem = NULL;
     uint32_t n_cpu = 0, n_mem = 0, n_tvram = 0, n_tdw = 0, n_gvram = 0, n_sram = 0,
              n_bg = 0, n_spr = 0, n_bgchr8 = 0, n_bgchr16 = 0, n_crtc = 0, n_pal = 0,
-             n_mfp = 0, n_dma = 0, n_ioc = 0, n_bgr = 0, n_tim = 0, n_opm = 0;
+             n_mfp = 0, n_dma = 0, n_ioc = 0, n_bgr = 0, n_tim = 0, n_opm = 0,
+             n_himem = 0;
 
     /* --- ファイル全体をメモリへ読み込む --- */
     f = fopen(path, "rb");
     if (!f) return -2;
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -2; }
     fsz = ftell(f);
-    if (fsz <= 0 || fsz > (long)(64 * 1024 * 1024)) { fclose(f); return -2; }
+    /* P890: 060turbo相当最大768MB+固定ブロック約14MBを収める上限 */
+    if (fsz <= 0 || fsz > (long)(800u * 1024 * 1024)) { fclose(f); return -2; }
     rewind(f);
     fb = (uint8_t*)malloc((size_t)fsz);
     if (!fb) { fclose(f); return -2; }
@@ -6881,11 +6935,6 @@ static int do_load_state(const char* path) {
     c.base = fb; c.len = (size_t)fsz; c.pos = 0; c.err = 0;
 
     /* --- PASS 1: 全体を解析・検証する。エミュレータ状態は一切変更しない --- */
-    /* P887: ハイメモリ有効中はステートロード非対応。-16(CPU不一致)より優先する */
-    if (g_wired_himem_mb) {
-        debug_log("[P887-STATE] himem active -> rc=-17\n");
-        rc = -17; goto out;
-    }
     if (c.len < 16 || memcmp(c.base, MX68K_STATE_MAGIC, 8) != 0) { rc = -10; goto out; }
     c.pos = 8;
     memcpy(&version, c.base + c.pos, 4); c.pos += 4;
@@ -6897,6 +6946,42 @@ static int do_load_state(const char* path) {
         debug_log("[P872-STATE] cpu_id mismatch file=0x%04x running=0x%04x -> rc=-16\n",
                   (unsigned)(flags & 0xFFFFu), (unsigned)m68000_get_cpu_state_id());
         rc = -16; goto out;
+    }
+    /* P890: 保存時のハイメモリ構成(種別・サイズ)と実行中のものが違えば拒否する。
+     * CPU不一致(-16)と同じ設計(自動変換せず、ユーザーに設定を合わせてから
+     * 再試行させる)。生の flags 値を両方ログへ残し、判定根拠を後から検証可能にする。 */
+    {
+        uint32_t file_himem = flags & 0x1F0000u;
+        uint32_t cur_himem  = himem_state_flags();
+        if (file_himem != cur_himem) {
+            debug_log("[P890-STATE] himem mismatch file_flags=0x%08x cur_flags=0x%08x "
+                      "file_himem=0x%06x cur_himem=0x%06x -> rc=-18\n",
+                      flags, (m68000_get_cpu_state_id() | cur_himem), file_himem, cur_himem);
+            rc = -18; goto out;
+        }
+    }
+    /* P890追加修正(2回目): mx68k_reset_hard()の want_ts/want_060 算出ロジック
+     * (:2122-2123)を同じ条件式でここに再現し、「次にリセットしたら配線される値」と
+     * 「現在の配線値」を比較する。設定値そのものを比較しない理由は、CPU配線失敗・
+     * override・確保失敗等で配線値が恒久的に0のままになりうるため(単純比較だと
+     * ハイメモリを使わないロードまで永久に拒否してしまう)。現在何も配線されて
+     * いない(exp_himem=0でmemcpy自体が走らない)場合は、再計算値が何であっても
+     * 拒否不要。 */
+    /* P890追加修正(3回目): reset_hard()はハイメモリ算出より前にCPU配線値自体を設定値
+     * (g_cpu_model)から確定し直すため、CPUモデルがpendingなら上の先取り計算の前提が
+     * 崩れる。正確な予測は複雑なので、ハイメモリ配線中なら無条件で拒否する(保守的)。 */
+    {
+        int ovr = m68000_cpu_env_override();
+        int cpu_pending = (!ovr && g_cpu_model != g_wired_cpu_model);
+        int pend_ts  = (!ovr && g_wired_cpu_model == 1 && g_himem_mb == 16) ? 16 : 0;
+        int pend_060 = (!pend_ts && !ovr && g_wired_cpu_model == 1 && himem060_valid_mb(g_himem060_mb))
+                       ? g_himem060_mb : 0;
+        if ((g_wired_himem_mb || g_wired_himem060_mb) &&
+            (cpu_pending || pend_ts != g_wired_himem_mb || pend_060 != g_wired_himem060_mb)) {
+            debug_log("[P890-STATE] himem pending-reset mismatch cpu_pending=%d pend=%d/%d wired=%d/%d -> rc=-18\n",
+                      cpu_pending, pend_ts, pend_060, g_wired_himem_mb, g_wired_himem060_mb);
+            rc = -18; goto out;
+        }
     }
 
     /* 設定ヘッダ */
@@ -6935,6 +7020,7 @@ static int do_load_state(const char* path) {
     blk_bgr   = state_rblk(&c, &n_bgr);
     blk_tim   = state_rblk(&c, &n_tim);
     blk_opm   = state_rblk(&c, &n_opm);    /* P479 */
+    blk_himem = state_rblk(&c, &n_himem);  /* P890 */
     if (c.err) { rc = -12; goto out; }
 
     /* トレーラ */
@@ -6970,6 +7056,8 @@ static int do_load_state(const char* path) {
     if (n_bgr   != state_bgregs_block(NULL, 1)) { rc = -14; goto out; }
     if (n_tim   != state_timing_block(NULL, 1)) { rc = -14; goto out; }
     if (n_opm   != state_opm_block(NULL, 1))  { rc = -14; goto out; }
+    exp_himem = himem_wired_bytes();   /* 直前のhimem不一致チェックでfile側と一致済みのはずの値 */
+    if (n_himem != exp_himem)                { rc = -14; goto out; }
 
     /* --- PASS 2: 適用(構造は検証済み) --- */
     /* 設定不一致 -> RAM/レジスタ復元の前に再設定+ハードリセット */
@@ -7003,6 +7091,7 @@ static int do_load_state(const char* path) {
     memcpy(BGCHR8,      blk_bgchr8,  STATE_BGCHR8_BYTES);
     memcpy(BGCHR16,     blk_bgchr16, STATE_BGCHR16_BYTES);
     memcpy(DMA,         blk_dma,   sizeof(DMA));
+    if (exp_himem) memcpy(g_himem_buf, blk_himem, exp_himem);   /* P890 */
     state_crtc_block((uint8_t*)blk_crtc, 0);
     state_pal_block((uint8_t*)blk_pal, 0);
     state_mfp_block((uint8_t*)blk_mfp, 0);
@@ -7572,6 +7661,10 @@ void mx68k_set_cpu_model(int model) {
 /* P887: 16のみ有効、それ以外は0。次の mx68k_reset_hard() で反映する */
 void mx68k_set_high_memory_mb(int mb) {
     g_himem_mb = (mb == 16) ? 16 : 0;
+}
+
+void mx68k_set_high_memory_060_mb(int mb) {
+    g_himem060_mb = himem060_valid_mb(mb) ? mb : 0;
 }
 
 int mx68k_get_cpu_model(void) {
@@ -9803,7 +9896,7 @@ void mx68k_get_status(MX68KStatus* status) {
     status->machine_type = g_machine_type;
     status->cpu_model = g_wired_cpu_model;
     status->memory_mb = g_memory_size_mb;
-    status->high_memory_mb = g_wired_himem_mb;   /* P887 */
+    status->high_memory_mb = g_wired_himem_mb ? g_wired_himem_mb : g_wired_himem060_mb;   /* P887/P889: 追加MB数(種別を問わない) */
     status->fpu_enabled = g_fpu_enabled;
     status->fdd0_inserted = (FDD_IsReady(0) != 0);
     status->fdd0_active = (mx68k_fdd_accessing(0) != 0);   /* P160: 赤 = アクセス中 */

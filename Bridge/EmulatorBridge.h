@@ -22,6 +22,10 @@ int mx68k_get_cpu_model(void);
 // および環境変数 MX68K_CPU_CORE 設定時は無効。内容はリセットでは保持し、アプリ起動時はゼロ。
 // 有効中はステートセーブ/ロードを rc=-17 で拒否する。
 void mx68k_set_high_memory_mb(int mb);
+// P889: 060turbo相当ハイメモリ($10000000〜)。16/32/64/128/256/384/512/768=有効(MB)、それ以外=無効。
+// 反映条件・保持・ステート拒否は mx68k_set_high_memory_mb と同じ。TS-6BE16相当とは排他で、
+// 両方指定された場合は TS-6BE16相当を優先する。
+void mx68k_set_high_memory_060_mb(int mb);
 
 // ---- ハードウェア設定(init またはリセットより前に呼ぶ) ----
 void mx68k_set_machine_type(int type);
@@ -691,7 +695,7 @@ typedef struct {
     int      machine_type;
     int      cpu_model;      // 0=MC68000(c68k)、1=MC68EC030(Musashi、X68030)。配線確定値[mx68k_get_cpu_model()と同じ]
     int      memory_mb;
-    int      high_memory_mb;   // P887: ハイメモリの配線確定値(0 or 16)
+    int      high_memory_mb;   // P887/P889: ハイメモリの配線確定値(MB、0=無効。TS-6BE16相当=16、060turbo相当=16〜768)
     bool     fpu_enabled;
     bool     fdd0_inserted;
     bool     fdd0_active;

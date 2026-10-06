@@ -687,8 +687,8 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             return String(localized: "This state file does not match the current memory size setting.")
         case -16:   // P872: 保存したCPUコア/型と実行中のものが違う
             return String(localized: "This state file was saved with a different CPU model (X68000 / X68030) and cannot be loaded.")
-        case -17:   // P887: ハイメモリ有効中はステートセーブ/ロード非対応
-            return String(localized: "State save/load is not available while high memory is enabled.")
+        case -18:   // P890: 保存時のハイメモリ構成(種別・サイズ)が現在の設定と異なる
+            return String(localized: "This state file was saved with different High Memory settings and cannot be loaded. Match the High Memory setting in Hardware settings, then reset, before loading.")
         case -2:
             return String(localized: "Could not read or write the state file.")
         case -10, -12, -13, -14:
@@ -775,6 +775,8 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         mx68k_set_cpu_model(config.hardware.cpuModel == "EC030" ? 1 : 0)
         // P887: ハイメモリ(nil=なし、16=TS-6BE16相当)。X68030以外ではBridge側で無効。ハードリセットで反映
         mx68k_set_high_memory_mb(Int32(config.hardware.highMemoryMB ?? 0))
+        // P889: 060turbo相当ハイメモリ(nil=なし、16〜768MB)。TS-6BE16相当とは排他(両方ならBridge側でTS-6BE16優先)
+        mx68k_set_high_memory_060_mb(Int32(config.hardware.highMemory060MB ?? 0))
         config.bios.iplromPath.withCString { ipl in
             config.bios.cgromPath.withCString { cg in
                 mx68k_set_bios_path(ipl, cg)

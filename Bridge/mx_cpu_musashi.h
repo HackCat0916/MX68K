@@ -49,9 +49,10 @@ void mx_cpu_musashi_set_model_from_env(mx_cpu_musashi_logf logf);
 void mx_cpu_musashi_set_model(int ec030);
 /* P872: 現在の型の分類。0x00=68000型、0x01=EC030(本番構成)、0x02=EC030+ハイメモリ有効(P887)、0xFF=それ以外 */
 uint32_t mx_cpu_musashi_get_model_id(void);
-/* P887: ハイメモリ(TS-6BE16相当、$01000000-$01FFFFFF)の16MBバッファ。NULL=無効(アドレスマスク24bit)、
- * 非NULL=有効(32bit)。set_model の後、CPU非実行のリセット区間からだけ呼ぶ */
-void mx_cpu_musashi_set_highmem(uint8_t *buf);
+/* P887/P889: ハイメモリのバッファと配置(base/bytes)。NULL=無効(アドレスマスク24bit、base/bytesは0を渡す)、
+ * 非NULL=有効(32bit)。TS-6BE16相当=$01000000/16MB、060turbo相当=$10000000/可変。
+ * set_model の後、CPU非実行のリセット区間からだけ呼ぶ */
+void mx_cpu_musashi_set_highmem(uint8_t *buf, uint32_t base, uint32_t bytes);
 /* P887: Musashi の CPU_ADDRESS_MASK の現在値(ログ用の読み戻し) */
 uint32_t mx_cpu_musashi_get_address_mask(void);
 /* P887: [P887-HIMEM-SELFTEST] の1行を out へ書く(テスト専用、環境変数 MX68K_HIMEM_SELFTEST=1 のときだけ呼ぶ)。戻り値はhimem */

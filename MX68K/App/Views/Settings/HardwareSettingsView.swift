@@ -175,14 +175,17 @@ struct HardwareSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                // P887: ハイメモリ(TS-6BE16相当)は X68030 選択時だけ表示する。機種を変えても値は消さず、
-                // 保存時に X68030 以外ならキーを落とす(SettingsViewModel.apply)
+                // P887/P889: ハイメモリ(TS-6BE16相当 / 060turbo相当)は X68030 選択時だけ表示する。機種を変えても
+                // 値は消さず、保存時に X68030 以外ならキーを落とす(SettingsViewModel.apply)
                 if settingsViewModel.machineChoice == "X68030" {
-                    Picker("High Memory", selection: $settingsViewModel.highMemoryMB) {
-                        Text("None").tag(0)
-                        Text("16MB (TS-6BE16 equivalent)").tag(16)
+                    Picker("High Memory", selection: $settingsViewModel.highMemorySelection) {
+                        Text("None").tag(SettingsViewModel.HighMemorySelection.none)
+                        Text("16MB (TS-6BE16 equivalent)").tag(SettingsViewModel.HighMemorySelection.ts6be16)
+                        ForEach([16, 32, 64, 128, 256, 384, 512, 768], id: \.self) { mb in
+                            Text("\(mb)MB (060turbo-style)").tag(SettingsViewModel.HighMemorySelection.local060(mb))
+                        }
                     }
-                    Text("Takes effect after reset. A high-memory driver (e.g. TS16DRV.X) is needed to use it from Human68k. Save states are unavailable while enabled.")
+                    Text("Takes effect after reset. A high-memory driver (e.g. TS16DRV.X) is needed to use it from Human68k.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

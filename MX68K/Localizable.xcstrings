@@ -7149,22 +7149,32 @@
         }
       }
     },
-    "Takes effect after reset. A high-memory driver (e.g. TS16DRV.X) is needed to use it from Human68k. Save states are unavailable while enabled.": {
+    "%lldMB (060turbo-style)": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "リセット後に反映。Human68kから使うにはハイメモリドライバ(TS16DRV.X等)が必要です。有効中はステートセーブを使えません。"
+            "value": "%lldMB(060turbo相当)"
           }
         }
       }
     },
-    "State save/load is not available while high memory is enabled.": {
+    "Takes effect after reset. A high-memory driver (e.g. TS16DRV.X) is needed to use it from Human68k.": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ハイメモリ有効中はステートセーブ/ロードを使えません。"
+            "value": "リセット後に反映。Human68kから使うにはハイメモリドライバ(TS16DRV.X等)が必要です。"
+          }
+        }
+      }
+    },
+    "This state file was saved with different High Memory settings and cannot be loaded. Match the High Memory setting in Hardware settings, then reset, before loading.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このステートファイルは、保存時のハイメモリ設定(種別・容量)が現在の設定と異なるため読み込めません。ハードウェア設定でハイメモリの設定を合わせてからリセットし、再度お試しください。"
           }
         }
       }
