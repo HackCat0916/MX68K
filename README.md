@@ -38,6 +38,8 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **ネイティブmacOSアプリ** — SwiftUI + Metal で構築されたモダンなmacOSアプリ
 - **px68kコア** — 実績のあるpx68kエミュレーションコアをベースに実機ソフトの動作を目指す
 - **Apple Silicon ネイティブ** — arm64アーキテクチャに最適化（M1/M2/M3/M4シリーズ対応）
+- **X68030対応** — 機種選択でX68000（SASI/SCSI世代）に加えX68030（MC68EC030、Musashi CPUコア）を選択可能。ハイメモリ（TS-6BE16相当／060turbo相当、16〜768MB）にも対応
+- **FPU 68881/68882**（X68030選択時のみ）— 設定画面からFPU有効化・チップ選択（68881/68882）が可能
 - **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
 - **ドラッグ&ドロップマウント** — ディスクイメージをウィンドウにドロップしてFDDマウント（**FD のみ** — HDD/SCSI/CD-ROM/MOイメージは各設定画面の該当行へD&D可）
 - **フロッピードライブ最大4台** — FD0/FD1に加え、設定画面「Hardware」タブの「外付けFDDユニット」を有効にするとFD2/FD3も使用可能（FD2/FD3の挿入・イジェクトはmacOS版のFileメニューのみ）
@@ -64,6 +66,8 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **Native macOS App** — a modern macOS app built with SwiftUI + Metal
 - **px68k Core** — based on the proven px68k emulation core, aiming for compatibility with real X68000 software
 - **Apple Silicon Native** — optimized for arm64 (M1/M2/M3/M4 series)
+- **X68030 Support** — in addition to X68000 (SASI/SCSI-era machines), select X68030 (MC68EC030, via the Musashi CPU core). High memory support included (TS-6BE16-equivalent / 060turbo-equivalent, 16–768 MB)
+- **FPU 68881/68882** (X68030 only) — enable the FPU and select the chip (68881/68882) from the settings screen
 - **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP** (FD, single/multi-image archives)
 - **Drag & Drop Mounting** — drop a disk image onto the window to mount it as FDD (**FD only** — HDD/SCSI/CD-ROM/MO images can be dropped onto the corresponding row in each settings tab)
 - **Up to 4 Floppy Drives** — in addition to FD0/FD1, enabling "External FDD Unit" in the "Hardware" settings tab adds FD2/FD3 (inserting/ejecting FD2/FD3 is available only from the File menu on macOS)
