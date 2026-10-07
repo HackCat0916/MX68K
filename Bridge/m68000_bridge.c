@@ -19,6 +19,7 @@
 #include "mercury_opn_shadow.h"        /* P491: EmulatorBridge.c と共有する Mercury OPN レジスタシャドウ */
 #include "sram_ext_bridge.h"           /* P494: SRAM 64KB 化の Fetch シャドウ配線/同期 */
 #include "windrv_bridge.h"             /* P642: Windrv($E9F000/$E9F001)の MMIO フック */
+#include "fpuboard_bridge.h"           /* P901: FPU ボード CZ-6BP1(MC68881)の CIR デバイス */
 #include "mx_cpu_iface.h"              /* P860: CPUコア抽象層(実装はファイル末尾の「mx_cpu_* 実装」節) */
 #include "mx_cpu_musashi.h"            /* P868: Musashiバックエンド(Musashi本体のヘッダは含めない——P867のinclude規約) */
 #include <string.h>                    /* P47-D: リセット用の memset */
@@ -24938,8 +24939,9 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
          * 残りの $E9E000-$E9FFFF は無条件バスエラーのまま(同一構造)。
          * 未装着(既定)なら windrv_claims_addr() は常に 0 を返すので、
          * P642 以前と完全に同一挙動。 */
+        /* P901: FPU ボード配線時のみボード1 の CIR($E9E000-$E9E01F)も除外する。 */
         if (a419b >= 0x00E9E000u && a419b <= 0x00E9FFFFu
-            && !windrv_claims_addr(a419b)) {
+            && !windrv_claims_addr(a419b) && !fpuboard_buserr_exempt(a419b)) {
             s_p207c_fault      = 1;
             s_p207c_fault_addr = a419b;
             mx_cpu_end_timeslice();
@@ -24951,6 +24953,10 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
      * この窓では意味を持たない)。 */
     if (windrv_claims_addr(addr)) {
         val = windrv_mmio_read(addr & 0x00FFFFFFu, /*size=*/1);
+    }
+    /* P901: FPU ボード CZ-6BP1 の CIR(配線時のみ、$E9E000-$E9E01F)。 */
+    if (fpuboard_claims_addr(addr)) {
+        val = fpuboard_read(addr & 0x00FFFFFFu, /*size=*/1);
     }
     /* P506 (D-28): 外付け SCSI ボード窓 ($EA0000-$EA1FFF) でのバイト/ワード
      * read。XM6 vm/scsi.cpp:41-42 (memdev.first/last) +
@@ -26692,8 +26698,9 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             uint32_t a419b = addr & 0x00FFFFFFu;
             /* P642: byte 経路と同じく、Windrv 装着時のみ $E9F000 を除外する
              * (word read は偶数境界なので $E9F000 のみが該当)。 */
+            /* P901: byte 経路と同じく、FPU ボード配線時のみ CIR 窓を除外する。 */
             if ((addr & 1u) == 0u && a419b >= 0x00E9E000u && a419b <= 0x00E9FFFFu
-                && !windrv_claims_addr(a419b)) {
+                && !windrv_claims_addr(a419b) && !fpuboard_buserr_exempt(a419b)) {
                 s_p207c_fault      = 1;
                 s_p207c_fault_addr = a419b;
                 mx_cpu_end_timeslice();
@@ -26768,6 +26775,11 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
      * (P634/P637 と同じ方針)。値は 16bit 内なので P58Z のマスクの影響も無い。 */
     if (windrv_claims_addr(addr)) {
         val = windrv_mmio_read(addr & 0x00FFFFFFu, /*size=*/2);
+    }
+    /* P901: FPU ボード CIR(word read)。ロング読出しは Core 内で $10→$12 の 2 回の
+     * ワード読出しに分割されて届く(P900 の実機 hands-on で確認済み)。 */
+    if (fpuboard_claims_addr(addr)) {
+        val = fpuboard_read(addr & 0x00FFFFFFu, /*size=*/2);
     }
 #if P58Z_ENABLE
     /* P58-Z — ReadW の上位バイト除去 (P57A_DIAG_READW の Path Z 確認に対する
@@ -27659,6 +27671,10 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
      *   スレッドモデル注記を参照)。 */
     if (windrv_claims_addr(addr)) {
         windrv_mmio_write(addr & 0x00FFFFFFu, val, /*size=*/1);
+    }
+    /* P901: FPU ボード CIR(配線時のみ)。 */
+    if (fpuboard_claims_addr(addr)) {
+        fpuboard_write(addr & 0x00FFFFFFu, val, /*size=*/1);
     }
 }
 
@@ -29269,6 +29285,10 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
      * 上位/下位バイトへ分解して各ポートの意味へ振り分ける。 */
     if (windrv_claims_addr(addr)) {
         windrv_mmio_write(addr, val, /*size=*/2);
+    }
+    /* P901: FPU ボード CIR(word 書込み、command $0A はここに来る)。 */
+    if (fpuboard_claims_addr(addr)) {
+        fpuboard_write(addr, val, /*size=*/2);
     }
 }
 

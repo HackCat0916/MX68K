@@ -366,6 +366,7 @@ extern uint8_t MIDI_MODULE;
 #include "../Core/px68k/x68k/windraw.h"
 #include "sram_ext_bridge.h"   /* P493: 内蔵 SRAM 64KB 化(上位 48KB を Bridge が提供) */
 #include "windrv_bridge.h"     /* P642: Windrv(Mac フォルダのホスト共有) */
+#include "fpuboard_bridge.h"   /* P901: FPU ボード CZ-6BP1(MC68881)の CIR デバイス */
 
 // m68000_bridge.c 由来のプロトタイプ(Core/px68k/m68000/m68000.h)
 extern void m68000_init(void);
@@ -914,6 +915,11 @@ static bool g_fpu_enabled     = false;
 static int  g_fpu_model         = 68882;
 static bool g_wired_fpu_enabled = false;
 static int  g_wired_fpu_model   = 68882;
+/* P901: X68000 世代 FPU ボード CZ-6BP1。g_fpuboard_enabled は設定値(即時)、g_wired_fpuboard は
+ * mx68k_reset_hard() でだけ確定する配線値(Windrv/Mercury/MIDI と同型)。配線されるのは
+ * 68000 系機種(g_wired_cpu_model==0)のときだけで、X68030 では常に未配線。 */
+static bool g_fpuboard_enabled  = false;
+static bool g_wired_fpuboard    = false;
 /* P512: 各チップ音量の最終設定値を保持する。mx68k_reset_hard() が
  * ADPCM_SetVolume/OPM_SetVolume を再実行する際、固定値ではなくユーザー設定値を
  * 再適用するために使う(ハードリセットで設定が既定値へ巻き戻る回帰の防止)。
@@ -1763,6 +1769,10 @@ int mx68k_init(void) {
      * realpath() 正規化に失敗した場合も未装着へ倒れるため、ここを通れば
      * 「装着 = 検証済みルートが必ず存在する」が保証される。 */
     windrv_init();
+    /* P901: FPU ボード CZ-6BP1。ここでは未配線で初期化だけ行い、配線は末尾の
+     * mx68k_reset_hard() で確定する(この区間で CPU は実行されない)。 */
+    g_wired_fpuboard = false;
+    fpuboard_init(0, g_fpuboard_enabled, g_wired_cpu_model, "init");
     IRQH_Init();
     m68000_init();
 
@@ -2009,6 +2019,7 @@ void mx68k_shutdown(void) {
     g_wired_cpu_model = 0;
     s_ipl_loaded_model = -1;
     g_wired_fpu_enabled = false;   /* P898: FPUの配線確定値も cold 状態へ戻す */
+    g_wired_fpuboard = false;      /* P901: FPU ボードの配線確定値も cold 状態へ戻す */
     /* P887: ハイメモリも cold 状態へ戻す(Musashi側の参照を先に外してから解放する) */
     mx_cpu_musashi_set_highmem(NULL, 0, 0);
     free(g_himem_buf); g_himem_buf = NULL;
@@ -2687,6 +2698,13 @@ void mx68k_reset_hard(void) {
      * ここで初めて反映される(Mercury/MIDI/SRAM64K と同じ規約)。開いていた
      * ホストファイル/検索コンテキストは windrv_init() 内で全て解放される。 */
     windrv_init();
+    /* P901: FPU ボード CZ-6BP1 の配線確定(設定「適用」だけでは変わらず、ここで初めて反映される)。
+     * 68000 系機種のみ配線する。g_wired_cpu_model は本関数の冒頭(P872)で確定済み。
+     * 環境変数 MX68K_FPUBOARD=1 は設定値に関わらず装着扱い(開発者用、68000 系の条件は維持)。
+     * 配線の有無に関わらず CIR 状態と FPU コンテキストを実機の RESET 相当に初期化する
+     * (ソフトリセットも内部でこの経路を通る)。 */
+    g_wired_fpuboard = (g_fpuboard_enabled || fpuboard_env_forced()) && (g_wired_cpu_model == 0);
+    fpuboard_init(g_wired_fpuboard ? 1 : 0, g_fpuboard_enabled, g_wired_cpu_model, "reset");
     /* P494-②: 命令フェッチ用 Fetch[] の配線もここで確定させる。SRAM_Init()
      * (sram.dat 読込)・sram_ext_load() の完了後という順序をこの 1 箇所で
      * 自動的に満たすため、mx68k_init() 側には別途追加しない
@@ -6662,7 +6680,10 @@ extern uint8_t Sprite_Regs[0x800];
 /* P898: 3u -> 4u。設定ヘッダへ g_fpu_model を追加したため、ファイルレイアウトが
  * 変わった。P898より前の .mxstate ファイルはもう読み込めない(rc=-11) —
  * P479/P890と同じ、意図どおりの仕様。 */
-#define MX68K_STATE_VERSION 4u
+/* P901: 4u -> 5u。設定ヘッダへ g_fpuboard_enabled を、固定ブロック列へ FPU ボードの
+ * ブロックを追加したため、ファイルレイアウトが変わった。P901より前の .mxstate ファイルは
+ * もう読み込めない(rc=-11) — P479/P890/P898と同じ、意図どおりの仕様。 */
+#define MX68K_STATE_VERSION 5u
 
 /* 共有フィールドビジター: セーブとロードでフィールドの順序/サイズを同一にし、
  * 両方向が食い違うことがないようにする。save=1 は emulator->buf へ詰め、save=0 は
@@ -6741,6 +6762,12 @@ static uint32_t state_opm_block(uint8_t* buf, int save) {
     STATE_FIELD(g_opm_reg19_pmd_written); STATE_FIELD(g_opm_reg19_amd_written);
     STATE_FIELD(g_opm_curreg);
     return off;
+}
+
+/* P901: FPU ボード CZ-6BP1 の状態(FPU コンテキスト・CIR 状態機械)。配線の有無に関わらず
+ * 常に固定長で書く(実体は Bridge/fpuboard_bridge.c、約 300 B で scratch[2048] に収まる)。 */
+static uint32_t state_fpuboard_block(uint8_t* buf, int save) {
+    return fpuboard_state_block(buf, save);
 }
 
 static uint32_t state_bgregs_block(uint8_t* buf, int save) {
@@ -6863,6 +6890,7 @@ static int do_save_state(const char* path) {
     if (state_w32(f, (uint32_t)g_clock_mhz))     { rc = -3; goto done; }
     if (state_w32(f, (uint32_t)(g_fpu_enabled ? 1 : 0))) { rc = -3; goto done; }
     if (state_w32(f, (uint32_t)g_fpu_model))     { rc = -3; goto done; }   /* P898 */
+    if (state_w32(f, (uint32_t)(g_fpuboard_enabled ? 1 : 0))) { rc = -3; goto done; }   /* P901 */
     for (int d = 0; d < 2; d++) {
         uint32_t len = (uint32_t)strlen(g_fdd_path[d]);
         if (state_w32(f, len)) { rc = -3; goto done; }
@@ -6901,6 +6929,8 @@ static int do_save_state(const char* path) {
         n = state_bgregs_block(scratch, 1); if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
         n = state_timing_block(scratch, 1); if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
         n = state_opm_block(scratch, 1);    if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
+        /* 15b. FPU ボード (P901) */
+        n = state_fpuboard_block(scratch, 1); if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
     }
     /* P890: ハイメモリ内容(無効時は長さ0のブロックを書く) */
     if (state_wblk(f, g_himem_buf, himem_wired_bytes())) { rc = -4; goto done; }
@@ -6938,7 +6968,7 @@ static int do_load_state(const char* path) {
     int rc = 0;
     state_rdcur c;
     uint32_t version = 0, flags = 0;
-    int32_t s_machine = 0, s_mem = 0, s_clock = 0, s_fpu = 0, s_fpu_model = 0;
+    int32_t s_machine = 0, s_mem = 0, s_clock = 0, s_fpu = 0, s_fpu_model = 0, s_fpuboard = 0;
     char s_fdd[2][4096];
     uint32_t exp_mem = 0;
     uint32_t exp_himem = 0;   /* P890: PASS1で算出、PASS2で参照 */
@@ -6948,11 +6978,11 @@ static int do_load_state(const char* path) {
                   *blk_bgchr8 = NULL, *blk_bgchr16 = NULL,
                   *blk_crtc = NULL, *blk_pal = NULL, *blk_mfp = NULL, *blk_dma = NULL,
                   *blk_ioc = NULL, *blk_bgr = NULL, *blk_tim = NULL, *blk_opm = NULL,
-                  *blk_himem = NULL;
+                  *blk_fpub = NULL, *blk_himem = NULL;
     uint32_t n_cpu = 0, n_mem = 0, n_tvram = 0, n_tdw = 0, n_gvram = 0, n_sram = 0,
              n_bg = 0, n_spr = 0, n_bgchr8 = 0, n_bgchr16 = 0, n_crtc = 0, n_pal = 0,
              n_mfp = 0, n_dma = 0, n_ioc = 0, n_bgr = 0, n_tim = 0, n_opm = 0,
-             n_himem = 0;
+             n_fpub = 0, n_himem = 0;
 
     /* --- ファイル全体をメモリへ読み込む --- */
     f = fopen(path, "rb");
@@ -7020,12 +7050,13 @@ static int do_load_state(const char* path) {
     }
 
     /* 設定ヘッダ */
-    if (c.pos + 20 > c.len) { rc = -10; goto out; }
+    if (c.pos + 24 > c.len) { rc = -10; goto out; }
     memcpy(&s_machine, c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_mem,     c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_clock,   c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_fpu,     c.base + c.pos, 4); c.pos += 4;
     memcpy(&s_fpu_model, c.base + c.pos, 4); c.pos += 4;   /* P898 */
+    memcpy(&s_fpuboard, c.base + c.pos, 4); c.pos += 4;    /* P901 */
     /* P481 (D-42): -11ではなく-15とする——rc=-11は「古い非互換のMX68Kバージョンで
      * 書かれたステートファイル」専用に予約されており、UIがその旨を正確に表示できるようにする。
      * メモリサイズの範囲外は無関係な条件なので、独自のコードが必要。 */
@@ -7056,6 +7087,7 @@ static int do_load_state(const char* path) {
     blk_bgr   = state_rblk(&c, &n_bgr);
     blk_tim   = state_rblk(&c, &n_tim);
     blk_opm   = state_rblk(&c, &n_opm);    /* P479 */
+    blk_fpub  = state_rblk(&c, &n_fpub);   /* P901 */
     blk_himem = state_rblk(&c, &n_himem);  /* P890 */
     if (c.err) { rc = -12; goto out; }
 
@@ -7092,18 +7124,21 @@ static int do_load_state(const char* path) {
     if (n_bgr   != state_bgregs_block(NULL, 1)) { rc = -14; goto out; }
     if (n_tim   != state_timing_block(NULL, 1)) { rc = -14; goto out; }
     if (n_opm   != state_opm_block(NULL, 1))  { rc = -14; goto out; }
+    if (n_fpub  != state_fpuboard_block(NULL, 1)) { rc = -14; goto out; }   /* P901 */
     exp_himem = himem_wired_bytes();   /* 直前のhimem不一致チェックでfile側と一致済みのはずの値 */
     if (n_himem != exp_himem)                { rc = -14; goto out; }
 
     /* --- PASS 2: 適用(構造は検証済み) --- */
     /* 設定不一致 -> RAM/レジスタ復元の前に再設定+ハードリセット */
     if (s_machine != g_machine_type || s_mem != g_memory_size_mb ||
-        s_clock != g_clock_mhz || (s_fpu != 0) != g_fpu_enabled || s_fpu_model != g_fpu_model) {
+        s_clock != g_clock_mhz || (s_fpu != 0) != g_fpu_enabled || s_fpu_model != g_fpu_model ||
+        (s_fpuboard != 0) != g_fpuboard_enabled) {
         mx68k_set_machine_type(s_machine);
         mx68k_set_memory_size(s_mem);
         mx68k_set_clock(s_clock);
         mx68k_set_fpu_enabled(s_fpu != 0);
         mx68k_set_fpu_model(s_fpu_model);
+        mx68k_set_fpuboard_enabled(s_fpuboard != 0);   /* P901 */
         mx68k_reset_hard();
     }
 
@@ -7138,6 +7173,7 @@ static int do_load_state(const char* path) {
     /* P479: ここではBridge側のシャドウのみを復元する。チップへの再生は
      * さらに下、P474のkey-offループの後で行う。 */
     state_opm_block((uint8_t*)blk_opm, 0);
+    state_fpuboard_block((uint8_t*)blk_fpub, 0);   /* P901: 再構成のハードリセットより後に復元する */
 
     /* 派生状態の再構築(計画どおりCPUレジスタより前)。P473: ここでは
      * Pal_TrackContrast()ではなくPal32_ChangeContrast()を直接呼ぶ必要がある。
@@ -7495,6 +7531,11 @@ void mx68k_set_fpu_enabled(bool enabled) {
 /* P898: 68881 以外はすべて 68882 として扱う(m68kfpu.c の set_config と同じ正規化) */
 void mx68k_set_fpu_model(int model) {
     g_fpu_model = (model == 68881) ? 68881 : 68882;
+}
+
+/* P901: FPU ボード CZ-6BP1 の装着設定。設定値のみを更新し、配線は mx68k_reset_hard() で確定する */
+void mx68k_set_fpuboard_enabled(bool enabled) {
+    g_fpuboard_enabled = enabled;
 }
 
 /* P483: Mercury Unit の装着設定。設定値のみを更新し、配線は init /

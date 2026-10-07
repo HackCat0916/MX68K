@@ -12,8 +12,10 @@
  *     超越関数は MAME の合成計算ではなく softfloat_fpsp.c の専用関数(floatx80_sin 等)を直接呼ぶ。
  *   - 68040専用部(保留例外・68040フレーム・FSxxx/FDxxx)は移植しない(EC030+6888x では到達しない)。
  *   - fatalerror() は abort せず line-1111 例外へ置き換え、観測カウンタで数える。
- *   - FMOVE.P(パック10進)は未対応で line-1111 例外にする(移植元の変換は binary128 演算に依存し、
- *     softfloat_2a には128bit浮動小数点の演算関数が無いため。将来の拡張点)。
+ *   - FMOVE.P(パック10進)は CPU 命令経路では未対応で line-1111 例外にする(移植元の変換は binary128
+ *     演算に依存し、softfloat_2a には128bit浮動小数点の演算関数が無いため。将来の拡張点)。
+ *     X68000 世代 FPU ボード CZ-6BP1 の CIR 経路(P901、ファイル末尾の mx68k_fpucir_*)だけは
+ *     MX68K 独自の変換 Bridge/fpu_packed.c で対応している。
  *   - FSAVE/FRESTORE は選択チップ(68881/68882)に合わせたフレームを扱う(MAME は68881 IDLEのみ)。
  *   - 命令の振り分け(m68040_fpu_op0/op1 の内部)は MAME の m68k_in.lst(ライセンス表記無し)を使わず、
  *     MX68K が命令形式(MC68881/MC68882 User's Manual・MC68030ユーザーズマニュアル)から新規に書いた。
@@ -742,6 +744,298 @@ static int fmovecr_constant(int offset, floatx80 *out)
     }
 }
 
+/* P901: fpgen_rm_reg() の opmode 演算部を切り出した純粋な演算(CPU 経路と CIR 経路で共用)。
+ * 各 case の処理は切出し前と同一で、末尾の USE_CYCLES(n) を「cycles = n」へ置き換えただけ。
+ * 戻り値は消費サイクル数、未定義 opmode は -1(呼出し側が line-1111 にする) */
+static int fpgen_compute(uint16_t w2, floatx80 source)
+{
+    int dst = (w2 >> 7) & 0x7;
+    int opmode = w2 & 0x7f;
+    int cycles = 0;
+    floatx80 dstCopy;
+
+    dstCopy = REG_FP[dst];
+    if (opmode != 0)
+        clear_exception_flags();
+
+    switch (opmode)
+    {
+        case 0x00:   /* FMOVE */
+            REG_FP[dst] = source;
+            set_condition_codes(REG_FP[dst]);
+            cycles = 56;
+            break;
+        case 0x01:   /* FINT */
+            REG_FP[dst] = floatx80_round_to_int(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT);
+            cycles = 78;
+            break;
+        case 0x02:   /* FSINH(Hatari の専用関数。MAME は etox からの合成) */
+            REG_FP[dst] = floatx80_sinh(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            cycles = 687;
+            break;
+        case 0x03:   /* FINTRZ */
+            REG_FP[dst] = floatx80_round_to_int_toward_zero(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT);
+            cycles = 78;
+            break;
+        case 0x04:   /* FSQRT */
+            REG_FP[dst] = floatx80_sqrt(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT);
+            cycles = 109;
+            break;
+        case 0x06:   /* FLOGNP1 */
+            REG_FP[dst] = floatx80_lognp1(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
+            cycles = 594;
+            break;
+        case 0x08:   /* FETOXM1(Hatari の専用関数) */
+            REG_FP[dst] = floatx80_etoxm1(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_UNDFLOW);
+            cycles = 568;
+            break;
+        case 0x09:   /* FTANH(Hatari の専用関数) */
+            REG_FP[dst] = floatx80_tanh(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
+            cycles = 661;
+            break;
+        case 0x0a:   /* FATAN */
+            REG_FP[dst] = floatx80_atan(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
+            cycles = 426;
+            break;
+        case 0x0c:   /* FASIN(Hatari の専用関数) */
+            REG_FP[dst] = floatx80_asin(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
+            cycles = 581;
+            break;
+        case 0x0d:   /* FATANH(Hatari の専用関数) */
+            REG_FP[dst] = floatx80_atanh(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
+            cycles = 693;
+            break;
+        case 0x0e:   /* FSIN(Hatari は関数内で引数を範囲縮小するので MAME の再試行は不要) */
+            REG_FP[dst] = floatx80_sin(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
+            cycles = 414;
+            break;
+        case 0x0f:   /* FTAN */
+            REG_FP[dst] = floatx80_tan(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            cycles = 496;
+            break;
+        case 0x10:   /* FETOX */
+            REG_FP[dst] = floatx80_etox(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_UNDFLOW);
+            cycles = 520;
+            break;
+        case 0x11:   /* FTWOTOX */
+            REG_FP[dst] = floatx80_twotox(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_UNDFLOW);
+            cycles = 590;
+            break;
+        case 0x12:   /* FTENTOX */
+            REG_FP[dst] = floatx80_tentox(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_UNDFLOW);
+            cycles = 590;
+            break;
+        case 0x14:   /* FLOGN */
+            REG_FP[dst] = floatx80_logn(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT);
+            cycles = 548;
+            break;
+        case 0x15:   /* FLOG10 */
+            REG_FP[dst] = floatx80_log10(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT);
+            cycles = 604;
+            break;
+        case 0x16:   /* FLOG2 */
+            REG_FP[dst] = floatx80_log2(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT);
+            cycles = 604;
+            break;
+        case 0x18:   /* FABS */
+            REG_FP[dst] = source;
+            REG_FP[dst].high &= 0x7fff;
+            set_condition_codes(REG_FP[dst]);
+            cycles = 58;
+            break;
+        case 0x19:   /* FCOSH(Hatari の専用関数) */
+            REG_FP[dst] = floatx80_cosh(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW);
+            cycles = 607;
+            break;
+        case 0x1a:   /* FNEG */
+            REG_FP[dst] = source;
+            REG_FP[dst].high ^= 0x8000;
+            set_condition_codes(REG_FP[dst]);
+            cycles = 58;
+            break;
+        case 0x1c:   /* FACOS(Hatari の専用関数) */
+            REG_FP[dst] = floatx80_acos(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT);
+            cycles = 604;
+            break;
+        case 0x1d:   /* FCOS */
+            REG_FP[dst] = floatx80_cos(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, EXC_ENB_INEXACT);
+            cycles = 414;
+            break;
+        case 0x1e:   /* FGETEXP(MAME はホスト double 経由。Hatari の専用関数で置き換え) */
+            REG_FP[dst] = floatx80_getexp(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, 0);   /* 例外になりうるのは NaN・無限大だけ */
+            cycles = 68;
+            break;
+        case 0x1f:   /* FGETMAN */
+            REG_FP[dst] = floatx80_getman(source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, source, 0);
+            cycles = 54;
+            break;
+        case 0x20:   /* FDIV(MAME fpu_div の非040経路) */
+        {
+            floatx80 result = floatx80_div(dstCopy, source, &s_fpst);
+            if (s_fpst.float_exception_flags & float_flag_divbyzero)
+                REG_FPSR |= FPES_DIVZERO;
+            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            set_condition_codes(result);
+            REG_FP[dst] = result;
+            cycles = 128;
+            break;
+        }
+        case 0x21:   /* FMOD */
+        {
+            uint64_t quotient = 0;
+            flag qsign = 0;
+            REG_FP[dst] = floatx80_mod(dstCopy, source, &quotient, &qsign, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            REG_FPSR &= 0xff00ffff;
+            REG_FPSR |= (uint)(quotient & 0x7f) << 16;
+            /* 符号ビットは剰余ではなく商の符号 */
+            if ((dstCopy.high ^ source.high) & 0x8000)
+                REG_FPSR |= 0x00800000;
+            cycles = 95;
+            break;
+        }
+        case 0x22:   /* FADD */
+            REG_FP[dst] = floatx80_add(dstCopy, source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            cycles = 76;
+            break;
+        case 0x23:   /* FMUL */
+            REG_FP[dst] = floatx80_mul(dstCopy, source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            cycles = 96;
+            break;
+        case 0x24:   /* FSGLDIV(MAME は f32 演算で代用。Hatari の専用関数で置き換え) */
+            REG_FP[dst] = floatx80_sgldiv(dstCopy, source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            cycles = 94;
+            break;
+        case 0x25:   /* FREM */
+        {
+            uint64_t quotient = 0;
+            flag qsign = 0;
+            REG_FP[dst] = floatx80_rem(dstCopy, source, &quotient, &qsign, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(dstCopy, source, EXC_ENB_UNDFLOW);
+            REG_FPSR &= 0xff00ffff;
+            REG_FPSR |= (uint)(quotient & 0x7f) << 16;
+            if ((dstCopy.high ^ source.high) & 0x8000)
+                REG_FPSR |= 0x00800000;
+            cycles = 125;
+            break;
+        }
+        case 0x26:   /* FSCALE */
+            REG_FP[dst] = floatx80_scale(dstCopy, source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            cycles = 66;
+            break;
+        case 0x27:   /* FSGLMUL(Hatari の専用関数) */
+            REG_FP[dst] = floatx80_sglmul(dstCopy, source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            cycles = 94;
+            break;
+        case 0x28: case 0x29: case 0x2a: case 0x2b:
+        case 0x2c: case 0x2d: case 0x2e: case 0x2f:   /* FSUB */
+            REG_FP[dst] = floatx80_sub(dstCopy, source, &s_fpst);
+            set_condition_codes(REG_FP[dst]);
+            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            cycles = 76;
+            break;
+        case 0x30: case 0x31: case 0x32: case 0x33:
+        case 0x34: case 0x35: case 0x36: case 0x37:   /* FSINCOS */
+        {
+            floatx80 cosine;
+            floatx80 sine = floatx80_sincos(source, &cosine, &s_fpst);
+            /* FPs と FPc が同じレジスタなら sin の結果が残る */
+            REG_FP[w2 & 7] = cosine;
+            REG_FP[dst] = sine;
+            set_condition_codes(REG_FP[dst]);   /* CC は sin の結果で立てる */
+            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
+            cycles = 474;
+            break;
+        }
+        case 0x38: case 0x39: case 0x3c: case 0x3d:   /* FCMP */
+            /* 減算ではなく比較: 同符号の無限大は等しく、quiet NaN はオペランドエラーにしない。
+             * I は常に消え、等しいとき N はデスティネーションの符号を表す */
+            REG_FPSR &= ~(FPCC_N | FPCC_Z | FPCC_I | FPCC_NAN);
+            if (fx_is_nan(dstCopy) || fx_is_nan(source))
+            {
+                REG_FPSR |= FPCC_NAN;
+            }
+            else if (floatx80_eq(dstCopy, source, &s_fpst))
+            {
+                REG_FPSR |= FPCC_Z;
+                if (dstCopy.high & 0x8000)
+                    REG_FPSR |= FPCC_N;
+            }
+            else if (floatx80_lt(dstCopy, source, &s_fpst))
+            {
+                REG_FPSR |= FPCC_N;
+            }
+            sync_exception_flags(source, dstCopy, 0);
+            cycles = 58;
+            break;
+        case 0x3a: case 0x3b: case 0x3e: case 0x3f:   /* FTST */
+            set_condition_codes(source);
+            sync_exception_flags(source, dstCopy, 0);
+            cycles = 56;
+            break;
+        default:   /* VALID_6888X で弾いているので到達しない(MAME: fatalerror) */
+            return -1;
+    }
+    return cycles;
+}
+
 static void fpgen_rm_reg(uint16_t w2)
 {
     int ea = REG_IR & 0x3f;
@@ -750,7 +1044,6 @@ static void fpgen_rm_reg(uint16_t w2)
     int dst = (w2 >> 7) & 0x7;
     int opmode = w2 & 0x7f;
     floatx80 source;
-    floatx80 dstCopy;
 
     s_st[ST_FGEN]++;
 
@@ -848,284 +1141,50 @@ static void fpgen_rm_reg(uint16_t w2)
         source = REG_FP[src];
     }
 
-    dstCopy = REG_FP[dst];
-    if (opmode != 0)
-        clear_exception_flags();
-
-    switch (opmode)
     {
-        case 0x00:   /* FMOVE */
-            REG_FP[dst] = source;
-            set_condition_codes(REG_FP[dst]);
-            USE_CYCLES(56);
-            break;
-        case 0x01:   /* FINT */
-            REG_FP[dst] = floatx80_round_to_int(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT);
-            USE_CYCLES(78);
-            break;
-        case 0x02:   /* FSINH(Hatari の専用関数。MAME は etox からの合成) */
-            REG_FP[dst] = floatx80_sinh(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            USE_CYCLES(687);
-            break;
-        case 0x03:   /* FINTRZ */
-            REG_FP[dst] = floatx80_round_to_int_toward_zero(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT);
-            USE_CYCLES(78);
-            break;
-        case 0x04:   /* FSQRT */
-            REG_FP[dst] = floatx80_sqrt(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT);
-            USE_CYCLES(109);
-            break;
-        case 0x06:   /* FLOGNP1 */
-            REG_FP[dst] = floatx80_lognp1(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
-            USE_CYCLES(594);
-            break;
-        case 0x08:   /* FETOXM1(Hatari の専用関数) */
-            REG_FP[dst] = floatx80_etoxm1(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_UNDFLOW);
-            USE_CYCLES(568);
-            break;
-        case 0x09:   /* FTANH(Hatari の専用関数) */
-            REG_FP[dst] = floatx80_tanh(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
-            USE_CYCLES(661);
-            break;
-        case 0x0a:   /* FATAN */
-            REG_FP[dst] = floatx80_atan(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
-            USE_CYCLES(426);
-            break;
-        case 0x0c:   /* FASIN(Hatari の専用関数) */
-            REG_FP[dst] = floatx80_asin(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
-            USE_CYCLES(581);
-            break;
-        case 0x0d:   /* FATANH(Hatari の専用関数) */
-            REG_FP[dst] = floatx80_atanh(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
-            USE_CYCLES(693);
-            break;
-        case 0x0e:   /* FSIN(Hatari は関数内で引数を範囲縮小するので MAME の再試行は不要) */
-            REG_FP[dst] = floatx80_sin(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
-            USE_CYCLES(414);
-            break;
-        case 0x0f:   /* FTAN */
-            REG_FP[dst] = floatx80_tan(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            USE_CYCLES(496);
-            break;
-        case 0x10:   /* FETOX */
-            REG_FP[dst] = floatx80_etox(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_UNDFLOW);
-            USE_CYCLES(520);
-            break;
-        case 0x11:   /* FTWOTOX */
-            REG_FP[dst] = floatx80_twotox(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_UNDFLOW);
-            USE_CYCLES(590);
-            break;
-        case 0x12:   /* FTENTOX */
-            REG_FP[dst] = floatx80_tentox(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_UNDFLOW);
-            USE_CYCLES(590);
-            break;
-        case 0x14:   /* FLOGN */
-            REG_FP[dst] = floatx80_logn(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT);
-            USE_CYCLES(548);
-            break;
-        case 0x15:   /* FLOG10 */
-            REG_FP[dst] = floatx80_log10(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT);
-            USE_CYCLES(604);
-            break;
-        case 0x16:   /* FLOG2 */
-            REG_FP[dst] = floatx80_log2(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT);
-            USE_CYCLES(604);
-            break;
-        case 0x18:   /* FABS */
-            REG_FP[dst] = source;
-            REG_FP[dst].high &= 0x7fff;
-            set_condition_codes(REG_FP[dst]);
-            USE_CYCLES(58);
-            break;
-        case 0x19:   /* FCOSH(Hatari の専用関数) */
-            REG_FP[dst] = floatx80_cosh(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW);
-            USE_CYCLES(607);
-            break;
-        case 0x1a:   /* FNEG */
-            REG_FP[dst] = source;
-            REG_FP[dst].high ^= 0x8000;
-            set_condition_codes(REG_FP[dst]);
-            USE_CYCLES(58);
-            break;
-        case 0x1c:   /* FACOS(Hatari の専用関数) */
-            REG_FP[dst] = floatx80_acos(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT);
-            USE_CYCLES(604);
-            break;
-        case 0x1d:   /* FCOS */
-            REG_FP[dst] = floatx80_cos(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, EXC_ENB_INEXACT);
-            USE_CYCLES(414);
-            break;
-        case 0x1e:   /* FGETEXP(MAME はホスト double 経由。Hatari の専用関数で置き換え) */
-            REG_FP[dst] = floatx80_getexp(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, 0);   /* 例外になりうるのは NaN・無限大だけ */
-            USE_CYCLES(68);
-            break;
-        case 0x1f:   /* FGETMAN */
-            REG_FP[dst] = floatx80_getman(source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, source, 0);
-            USE_CYCLES(54);
-            break;
-        case 0x20:   /* FDIV(MAME fpu_div の非040経路) */
+        int c = fpgen_compute(w2, source);
+        if (c < 0)
         {
-            floatx80 result = floatx80_div(dstCopy, source, &s_fpst);
-            if (s_fpst.float_exception_flags & float_flag_divbyzero)
-                REG_FPSR |= FPES_DIVZERO;
-            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            set_condition_codes(result);
-            REG_FP[dst] = result;
-            USE_CYCLES(128);
-            break;
-        }
-        case 0x21:   /* FMOD */
-        {
-            uint64_t quotient = 0;
-            flag qsign = 0;
-            REG_FP[dst] = floatx80_mod(dstCopy, source, &quotient, &qsign, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            REG_FPSR &= 0xff00ffff;
-            REG_FPSR |= (uint)(quotient & 0x7f) << 16;
-            /* 符号ビットは剰余ではなく商の符号 */
-            if ((dstCopy.high ^ source.high) & 0x8000)
-                REG_FPSR |= 0x00800000;
-            USE_CYCLES(95);
-            break;
-        }
-        case 0x22:   /* FADD */
-            REG_FP[dst] = floatx80_add(dstCopy, source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            USE_CYCLES(76);
-            break;
-        case 0x23:   /* FMUL */
-            REG_FP[dst] = floatx80_mul(dstCopy, source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            USE_CYCLES(96);
-            break;
-        case 0x24:   /* FSGLDIV(MAME は f32 演算で代用。Hatari の専用関数で置き換え) */
-            REG_FP[dst] = floatx80_sgldiv(dstCopy, source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            USE_CYCLES(94);
-            break;
-        case 0x25:   /* FREM */
-        {
-            uint64_t quotient = 0;
-            flag qsign = 0;
-            REG_FP[dst] = floatx80_rem(dstCopy, source, &quotient, &qsign, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(dstCopy, source, EXC_ENB_UNDFLOW);
-            REG_FPSR &= 0xff00ffff;
-            REG_FPSR |= (uint)(quotient & 0x7f) << 16;
-            if ((dstCopy.high ^ source.high) & 0x8000)
-                REG_FPSR |= 0x00800000;
-            USE_CYCLES(125);
-            break;
-        }
-        case 0x26:   /* FSCALE */
-            REG_FP[dst] = floatx80_scale(dstCopy, source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            USE_CYCLES(66);
-            break;
-        case 0x27:   /* FSGLMUL(Hatari の専用関数) */
-            REG_FP[dst] = floatx80_sglmul(dstCopy, source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            USE_CYCLES(94);
-            break;
-        case 0x28: case 0x29: case 0x2a: case 0x2b:
-        case 0x2c: case 0x2d: case 0x2e: case 0x2f:   /* FSUB */
-            REG_FP[dst] = floatx80_sub(dstCopy, source, &s_fpst);
-            set_condition_codes(REG_FP[dst]);
-            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            USE_CYCLES(76);
-            break;
-        case 0x30: case 0x31: case 0x32: case 0x33:
-        case 0x34: case 0x35: case 0x36: case 0x37:   /* FSINCOS */
-        {
-            floatx80 cosine;
-            floatx80 sine = floatx80_sincos(source, &cosine, &s_fpst);
-            /* FPs と FPc が同じレジスタなら sin の結果が残る */
-            REG_FP[w2 & 7] = cosine;
-            REG_FP[dst] = sine;
-            set_condition_codes(REG_FP[dst]);   /* CC は sin の結果で立てる */
-            sync_exception_flags(source, dstCopy, EXC_ENB_INEXACT | EXC_ENB_UNDFLOW);
-            USE_CYCLES(474);
-            break;
-        }
-        case 0x38: case 0x39: case 0x3c: case 0x3d:   /* FCMP */
-            /* 減算ではなく比較: 同符号の無限大は等しく、quiet NaN はオペランドエラーにしない。
-             * I は常に消え、等しいとき N はデスティネーションの符号を表す */
-            REG_FPSR &= ~(FPCC_N | FPCC_Z | FPCC_I | FPCC_NAN);
-            if (fx_is_nan(dstCopy) || fx_is_nan(source))
-            {
-                REG_FPSR |= FPCC_NAN;
-            }
-            else if (floatx80_eq(dstCopy, source, &s_fpst))
-            {
-                REG_FPSR |= FPCC_Z;
-                if (dstCopy.high & 0x8000)
-                    REG_FPSR |= FPCC_N;
-            }
-            else if (floatx80_lt(dstCopy, source, &s_fpst))
-            {
-                REG_FPSR |= FPCC_N;
-            }
-            sync_exception_flags(source, dstCopy, 0);
-            USE_CYCLES(58);
-            break;
-        case 0x3a: case 0x3b: case 0x3e: case 0x3f:   /* FTST */
-            set_condition_codes(source);
-            sync_exception_flags(source, dstCopy, 0);
-            USE_CYCLES(56);
-            break;
-        default:   /* VALID_6888X で弾いているので到達しない(MAME: fatalerror) */
             fpu_fline(ST_FLINE_UNIMPL);
+            return;
+        }
+        USE_CYCLES(c);
+    }
+}
+
+/* P901: fmove_reg_mem() の L/S/W/D/B の値計算部を切り出したもの(CPU 経路と CIR 経路で共用)。
+ * 計算と FPSR 更新は切出し前と同一。out[0] に L/S/W/B の値(W は下位16bit、B は下位8bit)、
+ * D は out[0]=上位32bit・out[1]=下位32bit。X(2)・P(3/7)は扱わない(呼出し側で処理する) */
+static void fmove_out_value(int fmt, floatx80 v, uint32_t out[3])
+{
+    out[0] = out[1] = out[2] = 0;
+    switch (fmt)
+    {
+        case 0:   /* Long-Word Integer */
+            out[0] = (uint32_t)convert_to_int(v, INT32_MIN, INT32_MAX);
+            break;
+        case 1:   /* Single-precision Real */
+            clear_exception_flags();
+            out[0] = floatx80_to_float32(v, &s_fpst);
+            sync_exception_flags(v, v, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            break;
+        case 4:   /* Word Integer */
+            out[0] = (uint16_t)(int16_t)convert_to_int(v, INT16_MIN, INT16_MAX);
+            break;
+        case 5:   /* Double-precision Real */
+        {
+            uint64_t d;
+            clear_exception_flags();
+            d = floatx80_to_float64(v, &s_fpst);
+            sync_exception_flags(v, v, EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
+            out[0] = (uint32_t)(d >> 32);
+            out[1] = (uint32_t)d;
+            break;
+        }
+        case 6:   /* Byte Integer */
+            out[0] = (uint8_t)(int8_t)convert_to_int(v, INT8_MIN, INT8_MAX);
+            break;
+        default:
             break;
     }
 }
@@ -1151,17 +1210,16 @@ static void fmove_reg_mem(uint16_t w2)
     {
         case 0:   /* Long-Word Integer */
         {
-            int32_t d = convert_to_int(REG_FP[src], INT32_MIN, INT32_MAX);
-            WRITE_EA_32(ea, (uint32_t)d);
+            uint32_t out[3];
+            fmove_out_value(0, REG_FP[src], out);
+            WRITE_EA_32(ea, out[0]);
             break;
         }
         case 1:   /* Single-precision Real */
         {
-            uint32_t d;
-            clear_exception_flags();
-            d = floatx80_to_float32(REG_FP[src], &s_fpst);
-            sync_exception_flags(REG_FP[src], REG_FP[src], EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            WRITE_EA_32(ea, d);
+            uint32_t out[3];
+            fmove_out_value(1, REG_FP[src], out);
+            WRITE_EA_32(ea, out[0]);
             break;
         }
         case 2:   /* Extended-precision Real */
@@ -1175,23 +1233,23 @@ static void fmove_reg_mem(uint16_t w2)
         }
         case 4:   /* Word Integer */
         {
-            int16_t value = (int16_t)convert_to_int(REG_FP[src], INT16_MIN, INT16_MAX);
-            WRITE_EA_16(ea, (uint16_t)value);
+            uint32_t out[3];
+            fmove_out_value(4, REG_FP[src], out);
+            WRITE_EA_16(ea, (uint16_t)out[0]);
             break;
         }
         case 5:   /* Double-precision Real */
         {
-            uint64_t d;
-            clear_exception_flags();
-            d = floatx80_to_float64(REG_FP[src], &s_fpst);
-            sync_exception_flags(REG_FP[src], REG_FP[src], EXC_ENB_INEXACT | EXC_ENB_OVRFLOW | EXC_ENB_UNDFLOW);
-            WRITE_EA_64(ea, d);
+            uint32_t out[3];
+            fmove_out_value(5, REG_FP[src], out);
+            WRITE_EA_64(ea, ((uint64_t)out[0] << 32) | out[1]);
             break;
         }
         case 6:   /* Byte Integer */
         {
-            int8_t value = (int8_t)convert_to_int(REG_FP[src], INT8_MIN, INT8_MAX);
-            WRITE_EA_8(ea, (uint8_t)value);
+            uint32_t out[3];
+            fmove_out_value(6, REG_FP[src], out);
+            WRITE_EA_8(ea, (uint8_t)out[0]);
             break;
         }
         default:
@@ -1776,4 +1834,248 @@ int mx68k_m68kfpu_format_stats(char *out, size_t n)
                     s_st[ST_FSAVE], s_st[ST_FSAVE_NULL], s_st[ST_FRESTORE], s_st[ST_FRESTORE_NULL],
                     s_st[ST_FRESTORE_BADFMT], s_st[ST_FLINE_PACK], s_st[ST_FLINE_UNIMPL], s_st[ST_FLINE_FORMAT],
                     s_st[ST_PRIV]);
+}
+
+/* ======================================================================
+ * P901: X68000 世代 FPU ボード CZ-6BP1(MC68881)の CIR 経路から呼ぶ口。
+ * 宣言は m68kfpu_cir.h、呼出し元は Bridge/fpuboard_bridge.c。
+ *
+ * ボードは 68000 系機種でしか配線されず、そのとき Musashi の FPU(s_mx_fpu_present)は使われない
+ * (c68k 実行中も、Musashi 68000 実験経路でも、68000 命令は FPU フィールドに触れない)。各関数は入口で
+ * Musashi 側の FPU 状態を退避して ctx を載せ、出口で ctx へ書き戻してから退避値を復元するので、
+ * 観測上の副作用を持たない。ここからは USE_CYCLES・REG_PPC・REG_IR・READ_EA_xx・WRITE_EA_xx・
+ * fpu_fline() を一切呼ばない(test_condition は述語を $00-$1F に限定してから呼ぶ)。
+ * ====================================================================== */
+#include "m68kfpu_cir.h"
+#include "../../Bridge/fpu_packed.h"
+
+struct cir_saved {
+    floatx80 fpr[8];
+    uint fpcr, fpsr, fpiar;
+    int just_reset;
+    float_status fpst;
+    int model;
+    int abort_flag;
+};
+
+static void cir_enter(const struct mx68k_fpu_ctx *ctx, struct cir_saved *sv)
+{
+    int i;
+    for (i = 0; i < 8; i++) sv->fpr[i] = REG_FP[i];
+    sv->fpcr = REG_FPCR;
+    sv->fpsr = REG_FPSR;
+    sv->fpiar = REG_FPIAR;
+    sv->just_reset = m68ki_cpu.fpu_just_reset;
+    sv->fpst = s_fpst;
+    sv->model = s_mx_fpu_model;
+    sv->abort_flag = s_fpu_abort;
+
+    for (i = 0; i < 8; i++) REG_FP[i] = fx_make(ctx->fp_hi[i], ctx->fp_lo[i]);
+    REG_FPCR = ctx->fpcr;
+    REG_FPSR = ctx->fpsr;
+    REG_FPIAR = ctx->fpiar;
+    m68ki_cpu.fpu_just_reset = ctx->just_reset;
+    s_mx_fpu_model = 68881;      /* CZ-6BP1 は MC68881 固定 */
+    s_fpu_abort = 0;
+    fpu_status_init();           /* 例外フラグ0・tininess 等の固定設定・ctx の FPCR の丸めを載せる */
+}
+
+static void cir_leave(struct mx68k_fpu_ctx *ctx, const struct cir_saved *sv)
+{
+    int i;
+    for (i = 0; i < 8; i++) {
+        ctx->fp_hi[i] = REG_FP[i].high;
+        ctx->fp_lo[i] = REG_FP[i].low;
+    }
+    ctx->fpcr = REG_FPCR;
+    ctx->fpsr = REG_FPSR;
+    ctx->fpiar = REG_FPIAR;
+    ctx->just_reset = m68ki_cpu.fpu_just_reset ? 1 : 0;
+
+    for (i = 0; i < 8; i++) REG_FP[i] = sv->fpr[i];
+    REG_FPCR = sv->fpcr;
+    REG_FPSR = sv->fpsr;
+    REG_FPIAR = sv->fpiar;
+    m68ki_cpu.fpu_just_reset = sv->just_reset;
+    s_fpst = sv->fpst;
+    s_mx_fpu_model = sv->model;
+    s_fpu_abort = sv->abort_flag;
+}
+
+void mx68k_fpucir_reset(struct mx68k_fpu_ctx *ctx)
+{
+    struct cir_saved sv;
+    cir_enter(ctx, &sv);
+    do_frestore_null();
+    cir_leave(ctx, &sv);
+}
+
+int mx68k_fpucir_cmd_valid(uint16_t cmd)
+{
+    const uint64_t VALID_6888X = 0xfffffffff777f75fULL;   /* fpgen_rm_reg と同じマスク */
+    int opmode = cmd & 0x7f;
+    if (((cmd >> 13) & 7) == 2 && ((cmd >> 10) & 7) == 7)
+        return opmode < 0x40;   /* FMOVECR: $40-$7F は実機も F-line */
+    if (opmode & 0x40)
+        return 0;
+    return (int)((VALID_6888X >> opmode) & 1);
+}
+
+int mx68k_fpucir_gen(struct mx68k_fpu_ctx *ctx, uint16_t cmd, const uint32_t *in)
+{
+    struct cir_saved sv;
+    int opclass = (cmd >> 13) & 7;
+    int src = (cmd >> 10) & 7;
+    int dst = (cmd >> 7) & 7;
+    int pflags = 0, rc = 0;
+    floatx80 source;
+
+    if (opclass != 0 && opclass != 2) return -1;
+    if (!mx68k_fpucir_cmd_valid(cmd)) return -1;
+
+    cir_enter(ctx, &sv);
+    m68ki_cpu.fpu_just_reset = 0;
+    if (opclass == 0)
+    {
+        source = REG_FP[src];
+    }
+    else
+    {
+        switch (src)
+        {
+            case 0: source = int32_to_floatx80((int32_t)in[0]); break;
+            case 1: source = float32_to_floatx80(in[0], &s_fpst); break;
+            case 2: source = fx_make((uint16_t)(in[0] >> 16), ((uint64_t)in[1] << 32) | in[2]); break;
+            case 3:
+            {
+                uint16_t h;
+                uint64_t l;
+                pflags = mx_packed_to_ext(in, (int)((REG_FPCR >> 4) & 3), &h, &l);
+                source = fx_make(h, l);
+                break;
+            }
+            case 4: source = int32_to_floatx80((int32_t)(int16_t)in[0]); break;
+            case 5: source = float64_to_floatx80(((uint64_t)in[0] << 32) | in[1], &s_fpst); break;
+            case 6: source = int32_to_floatx80((int32_t)(int8_t)in[0]); break;
+            default:   /* FMOVECR(fpgen_rm_reg の rm=1・src=7 と同じ処理) */
+                if (!fmovecr_constant(cmd & 0x7f, &source))
+                {
+                    rc = -1;
+                    goto out;
+                }
+                REG_FP[dst] = source;
+                set_condition_codes(REG_FP[dst]);
+                goto out;
+        }
+    }
+
+    if (fpgen_compute(cmd, source) < 0)
+    {
+        rc = -1;
+        goto out;
+    }
+    /* パック10進入力の例外は演算の例外ステータスのクリアより後に立てる(INEX1 = 不正確な10進入力) */
+    if (pflags & MX_PACKED_INEXACT) REG_FPSR |= FPES_INEXDEC;
+    if (pflags & MX_PACKED_OPERR) REG_FPSR |= FPES_OPERR;
+    if (pflags) update_accrued_exceptions();
+out:
+    cir_leave(ctx, &sv);
+    return rc;
+}
+
+int mx68k_fpucir_out(struct mx68k_fpu_ctx *ctx, uint16_t cmd, int k, uint32_t out[3])
+{
+    struct cir_saved sv;
+    int fmt = (cmd >> 10) & 7;
+    int src = (cmd >> 7) & 7;
+    int n = 1;
+
+    out[0] = out[1] = out[2] = 0;
+    if (((cmd >> 13) & 7) != 3) return -1;
+
+    cir_enter(ctx, &sv);
+    m68ki_cpu.fpu_just_reset = 0;
+    switch (fmt)
+    {
+        case 0: case 1: case 4: case 6:
+            fmove_out_value(fmt, REG_FP[src], out);
+            n = 1;
+            break;
+        case 5:
+            fmove_out_value(5, REG_FP[src], out);
+            n = 2;
+            break;
+        case 2:   /* 拡張精度: 符号+指数、0、仮数上位、仮数下位 */
+            out[0] = (uint32_t)REG_FP[src].high << 16;
+            out[1] = (uint32_t)(REG_FP[src].low >> 32);
+            out[2] = (uint32_t)REG_FP[src].low;
+            n = 3;
+            break;
+        default:  /* 3=パック10進(静的K)、7=パック10進(動的K) */
+        {
+            int kk = ((fmt == 3) ? (int)cmd : k) & 0x7f;
+            int f;
+            if (kk & 0x40) kk -= 0x80;
+            clear_exception_flags();
+            f = mx_ext_to_packed(REG_FP[src].high, REG_FP[src].low, kk, (int)((REG_FPCR >> 4) & 3), out);
+            if (f & MX_PACKED_INEXACT) REG_FPSR |= FPES_INEXACT;
+            if (f & MX_PACKED_OPERR) REG_FPSR |= FPES_OPERR;
+            update_accrued_exceptions();
+            n = 3;
+            break;
+        }
+    }
+    cir_leave(ctx, &sv);
+    return n;
+}
+
+void mx68k_fpucir_ctl_write(struct mx68k_fpu_ctx *ctx, int regsel, const uint32_t *v)
+{
+    struct cir_saved sv;
+    int i = 0;
+    cir_enter(ctx, &sv);
+    m68ki_cpu.fpu_just_reset = 0;
+    /* 書込み順は fmove_fpcr と同じ FPCR→FPSR→FPIAR */
+    if (regsel & 4) REG_FPCR = v[i++] & FPCR_WRITE_MASK;
+    if (regsel & 2) REG_FPSR = v[i++] & FPSR_WRITE_MASK;
+    if (regsel & 1) REG_FPIAR = v[i++];
+    cir_leave(ctx, &sv);
+}
+
+int mx68k_fpucir_ctl_read(struct mx68k_fpu_ctx *ctx, int regsel, uint32_t *v)
+{
+    struct cir_saved sv;
+    int i = 0;
+    cir_enter(ctx, &sv);
+    m68ki_cpu.fpu_just_reset = 0;
+    if (regsel & 4) v[i++] = REG_FPCR;
+    if (regsel & 2) v[i++] = REG_FPSR;
+    if (regsel & 1) v[i++] = REG_FPIAR;
+    cir_leave(ctx, &sv);
+    return i;
+}
+
+int mx68k_fpucir_condition(struct mx68k_fpu_ctx *ctx, int pred)
+{
+    struct cir_saved sv;
+    int r;
+    if (pred < 0 || pred > 0x1f) return -1;   /* test_condition の default(fpu_fline)へ行かせない */
+    cir_enter(ctx, &sv);
+    m68ki_cpu.fpu_just_reset = 0;
+    r = test_condition(pred);
+    cir_leave(ctx, &sv);
+    return r ? 1 : 0;
+}
+
+int mx68k_fpucir_save_frame(const struct mx68k_fpu_ctx *ctx, uint32_t words[7])
+{
+    struct cir_saved sv;
+    struct mx68k_fpu_ctx tmp = *ctx;
+    unsigned int keep_null = s_st[ST_FSAVE_NULL];   /* 030 経路の観測カウンタは動かさない */
+    int n;
+    cir_enter(&tmp, &sv);
+    n = build_fsave_frame(words);
+    cir_leave(&tmp, &sv);
+    s_st[ST_FSAVE_NULL] = keep_null;
+    return n;
 }

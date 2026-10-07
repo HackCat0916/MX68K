@@ -56,6 +56,8 @@ class SettingsViewModel: ObservableObject {
     @Published var windrvHostPath: String = ""
     // P647: 書込み許可。windrvEnabled とは独立した第 2 のトグルで既定 OFF。
     @Published var windrvWriteEnabled: Bool = false
+    // P901: X68000 世代 FPU ボード CZ-6BP1(MC68881)。X68030 選択中も値は保持する。
+    @Published var fpuBoard: Bool = false
     // P555: ターボ ON 時に使う目標倍率(2〜5)。ターボ ON/OFF 自体は永続化しない。
     @Published var turboTargetMultiplier: Int = 3
     // P557: FD アクセス高速化(XM6「フロッピーディスク高速化」相当)。既定 OFF。
@@ -128,6 +130,7 @@ class SettingsViewModel: ObservableObject {
         config.extensions.windrvEnabled  = windrvEnabled     // P642
         config.extensions.windrvHostPath = windrvHostPath    // P642
         config.extensions.windrvWriteEnabled = windrvWriteEnabled   // P647
+        config.extensions.fpuBoard = fpuBoard   // P901
         config.performance.turboTargetMultiplier = turboTargetMultiplier   // P555
         config.fdd.fdFastAccess = fdFastAccess   // P557
     }
@@ -179,6 +182,7 @@ class SettingsViewModel: ObservableObject {
         windrvEnabled  = config.extensions.windrvEnabled     // P642
         windrvHostPath = config.extensions.windrvHostPath    // P642
         windrvWriteEnabled = config.extensions.windrvWriteEnabled   // P647
+        fpuBoard = config.extensions.fpuBoard   // P901
         // P556: Picker の tag 集合(2/3/4/5 + ノーウェイト = -1)から外れた値が
         // 入ると Picker が空表示になるため、他の 3 箇所と同じヘルパーを通す。
         // 現状 config 側は decode 時にクランプ済みなので値は変わらない(防御的)。

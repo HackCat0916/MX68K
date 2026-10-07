@@ -34,7 +34,12 @@ Contents:
                            notice) was consulted only as a reference, not used as a source.
                            Arithmetic and transcendental functions go to ThirdParty/softfloat_2a
                            (Hatari, SoftFloat 2a; transcendental functions from softfloat_fpsp.c).
-                           FMOVE.P (packed decimal) is not supported (line-1111).
+                           FMOVE.P (packed decimal) is not supported on the CPU instruction path
+                           (line-1111). The CZ-6BP1 CIR path (P901, mx68k_fpucir_* at the end of the
+                           file) supports it through Bridge/fpu_packed.c (MX68K's own converter).
+                           P901 also split two pieces out of existing functions without changing
+                           their behaviour: fpgen_compute() (the opmode switch of fpgen_rm_reg) and
+                           fmove_out_value() (the L/S/W/D/B value computation of fmove_reg_mem).
                            FSAVE/FRESTORE frames follow the selected chip (68881 IDLE 28B / 68882 IDLE
                            60B, Motorola MC68881/MC68882 User's Manual 1st ed. 1987).
                            FPU present only with MX68K_MUSASHI_FPU=1 on EC030 (Bridge/mx_cpu_musashi.c);
@@ -44,6 +49,12 @@ Contents:
                            FDBcc/FTRAPcc/FScc abs ($F248-$F24F, $F278-$F27F): m68ki_build_opcode_table()
                            lets cpdbcc/cptrapcc overwrite those 040fpu0 table entries; since P899 the
                            Bridge restores them at startup (see "Runtime jump-table changes" below).
+  MX68K-authored header (1) (contains the marker "MX68K作成のCIR入口ヘッダ"), P901:
+    m68kfpu_cir.h          declarations of the CIR entry points in m68kfpu.c (mx68k_fpucir_*) and the
+                           plain-integer FPU context struct mx68k_fpu_ctx, used by
+                           Bridge/fpuboard_bridge.c (X68000 FPU board CZ-6BP1, MC68881). Included from
+                           Bridge/ by relative path only; not added to the Xcode project. The
+                           Scripts/vendor_musashi.sh re-vendor never touches it.
   MX68K-authored stubs (2) — NOT upstream files (each contains the marker "MX68K作成のスタブ"):
     m68kmmu.h              m68881_mmu_ops: PMMU general form ($F000-$F03F) with EA Dn/(An) -> no-op
                            (reads the 2nd word only; EC030 has no MMU, as XEiJ irpPgen), every other

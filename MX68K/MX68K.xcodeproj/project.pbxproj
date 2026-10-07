@@ -232,6 +232,8 @@
 		A191C01D0000000000000001 /* ArchiveMountService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A191C01D0000000000000002 /* ArchiveMountService.swift */; };
 		A194C01D0000000000000001 /* InputSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A194C01D0000000000000002 /* InputSettingsView.swift */; };
 		A1B059BC01777CE0AF2528EC /* windrv_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000002 /* windrv_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F901A1B2C3D4E5F600000003 /* fpuboard_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F901A1B2C3D4E5F600000002 /* fpuboard_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F901A1B2C3D4E5F600000013 /* fpu_packed.c in Sources */ = {isa = PBXBuildFile; fileRef = F901A1B2C3D4E5F600000012 /* fpu_packed.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		A1B33C242F6065CB0E2B2794 /* PartialManager.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9919784DD4C99AF264437507 /* PartialManager.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
 		A228C01D0000000000000001 /* SoftKeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A228C01D0000000000000002 /* SoftKeyboardView.swift */; };
 		A237C01D0000000000000001 /* MouseCaptureState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A237C01D0000000000000002 /* MouseCaptureState.swift */; };
@@ -345,6 +347,8 @@
 		F5A343C35AFCB9EAAB4F10AE /* SincResampler.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 606CD03D7413752F4B44B3A8 /* SincResampler.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
 		F5DDEADF809D62327CE65257 /* dmac.c in Sources */ = {isa = PBXBuildFile; fileRef = EC1E1B22FEA98DBAE4E13AB0 /* dmac.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		F642A1B2C3D4E5F600000001 /* windrv_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000002 /* windrv_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F901A1B2C3D4E5F600000001 /* fpuboard_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = F901A1B2C3D4E5F600000002 /* fpuboard_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F901A1B2C3D4E5F600000011 /* fpu_packed.c in Sources */ = {isa = PBXBuildFile; fileRef = F901A1B2C3D4E5F600000012 /* fpu_packed.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		F642A1B2C3D4E5F600000003 /* WindrvSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000004 /* WindrvSettingsView.swift */; };
 		F642A1B2C3D4E5F600000005 /* libiconv.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = F642A1B2C3D4E5F600000006 /* libiconv.tbd */; };
 		F685F9F772A382F82D0BED00 /* Analog.cpp in Sources */ = {isa = PBXBuildFile; fileRef = CBB834C50C0E2AC51C5F88AD /* Analog.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
@@ -708,6 +712,10 @@
 		F642A1B2C3D4E5F600000004 /* WindrvSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindrvSettingsView.swift; sourceTree = "<group>"; };
 		F642A1B2C3D4E5F600000006 /* libiconv.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libiconv.tbd; path = usr/lib/libiconv.tbd; sourceTree = SDKROOT; };
 		F642A1B2C3D4E5F600000007 /* windrv_bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = windrv_bridge.h; sourceTree = "<group>"; };
+		F901A1B2C3D4E5F600000002 /* fpuboard_bridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = fpuboard_bridge.c; sourceTree = "<group>"; };
+		F901A1B2C3D4E5F600000007 /* fpuboard_bridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fpuboard_bridge.h; sourceTree = "<group>"; };
+		F901A1B2C3D4E5F600000012 /* fpu_packed.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = fpu_packed.c; sourceTree = "<group>"; };
+		F901A1B2C3D4E5F600000017 /* fpu_packed.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fpu_packed.h; sourceTree = "<group>"; };
 		F736FDFE6345019093EEAA2C /* ROMInfo.cpp */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.cpp.cpp; path = ROMInfo.cpp; sourceTree = "<group>"; };
 		F8572D2B0E96FEDB3D2E0956 /* ToolbarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolbarView.swift; sourceTree = "<group>"; };
 		F88B0AC8F71E3977DD0F86C7 /* EmulatorBridge.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = EmulatorBridge.c; sourceTree = "<group>"; };
@@ -899,6 +907,10 @@
 				F8A9B0C1D2E3F4A5B6C7D8E9 /* sram_ext_bridge.h */,
 				F642A1B2C3D4E5F600000002 /* windrv_bridge.c */,
 				F642A1B2C3D4E5F600000007 /* windrv_bridge.h */,
+				F901A1B2C3D4E5F600000002 /* fpuboard_bridge.c */,
+				F901A1B2C3D4E5F600000007 /* fpuboard_bridge.h */,
+				F901A1B2C3D4E5F600000012 /* fpu_packed.c */,
+				F901A1B2C3D4E5F600000017 /* fpu_packed.h */,
 				A2B3C4D5E6F7A8B9C0D1E2F3 /* scsi_disk.cpp */,
 				C4D5E6F7A8B9C0D1E2F3A4B5 /* scsi_disk.h */,
 				A3B4C5D6E7F8A9B0C1D2E3F4 /* scsi_spc.cpp */,
@@ -1661,6 +1673,8 @@
 				F6A7B8C9D0E1F2A3B4C5D6E7 /* scsi_ext_bridge.c in Sources */,
 				D6E7F8A9B0C1D2E3F4A5B6C7 /* sram_ext_bridge.c in Sources */,
 				F642A1B2C3D4E5F600000001 /* windrv_bridge.c in Sources */,
+				F901A1B2C3D4E5F600000001 /* fpuboard_bridge.c in Sources */,
+				F901A1B2C3D4E5F600000011 /* fpu_packed.c in Sources */,
 				B3C4D5E6F7A8B9C0D1E2F3A4 /* scsi_disk.cpp in Sources */,
 				B4C5D6E7F8A9B0C1D2E3F4A5 /* scsi_spc.cpp in Sources */,
 				B5C6D7E8F9A0B1C2D3E4F5A6 /* scsi_spc_bridge.cpp in Sources */,
@@ -1774,6 +1788,8 @@
 				48BDD6A136FC53B860F3898E /* scsi_ext_bridge.c in Sources */,
 				660D210660FF3A2B0AB1E81B /* sram_ext_bridge.c in Sources */,
 				A1B059BC01777CE0AF2528EC /* windrv_bridge.c in Sources */,
+				F901A1B2C3D4E5F600000003 /* fpuboard_bridge.c in Sources */,
+				F901A1B2C3D4E5F600000013 /* fpu_packed.c in Sources */,
 				2172E84D1CF6CE7D250D5314 /* scsi_disk.cpp in Sources */,
 				390D434674803D1B1FDBB1D4 /* scsi_spc.cpp in Sources */,
 				BF23348EC8212BE88E073460 /* scsi_spc_bridge.cpp in Sources */,

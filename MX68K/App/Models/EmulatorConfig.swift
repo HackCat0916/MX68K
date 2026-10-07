@@ -328,6 +328,11 @@ struct ExtensionsConfig: Codable {
     // P647: Windrv 書込み許可。windrvEnabled とは独立した第 2 のトグルで既定 false。
     // ★false のままなら P642/P643 と完全に同一挙動(読み取り専用)。
     var windrvWriteEnabled: Bool = false
+    // P901: X68000 世代 FPU ボード CZ-6BP1(MC68881、CIR 窓 $E9E000-$E9E01F)の装着。
+    // 既定 false = 未装着(Docs/05 §3「既定=全て未装着」)。hardware.fpuEnabled(X68030 の
+    // マザーボード FPU)とは別の物理ボードなので分離している。機種が X68030 のときは
+    // 値を保持したまま Bridge 側のラッチで配線しない。反映はハードリセット(⌘R)。
+    var fpuBoard: Bool = false
 
     init() {}   // init(from:) を書くとメンバワイズ init が消えるため必須
 
@@ -412,6 +417,8 @@ struct ExtensionsConfig: Codable {
         // 書込み禁止(= P642/P643 と同一の読み取り専用)へ落ちる。
         windrvWriteEnabled =
             try c.decodeIfPresent(Bool.self, forKey: .windrvWriteEnabled) ?? false
+        // P901: 新キー。既存 config.json には存在しないため `?? false` で未装着へ落ちる。
+        fpuBoard = try c.decodeIfPresent(Bool.self, forKey: .fpuBoard) ?? false
     }
 
     // P455: SASI 論理 unit 0..7 のパス。分岐を 1 か所に集約する

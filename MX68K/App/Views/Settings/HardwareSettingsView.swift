@@ -154,7 +154,7 @@ struct HardwareSettingsView: View {
                     case "SASI":
                         settingsViewModel.clockMHz = 10   // 機種既定クロック(後から自由に変更可)
                         settingsViewModel.scsiMode = "none"       // P274: 内蔵SCSI不可の機種へ切替時、既定へ戻す
-                        settingsViewModel.fpuEnabled = false      // P898: 68000型のFPUボード(CZ-6BP1/2)は未対応のため無効固定
+                        settingsViewModel.fpuEnabled = false      // P898: X68030用FPUはX68030以外では使えない(P901: 68000型はFPUボードの別トグル)
                     case "SCSI":
                         settingsViewModel.clockMHz = 16
                         settingsViewModel.scsiMode = "internal"   // P274: この機種は内蔵SCSI固定
@@ -265,15 +265,24 @@ struct HardwareSettingsView: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Toggle("FPU Enabled", isOn: $settingsViewModel.fpuEnabled)
-                    // P898: FPU(68881/68882)は X68030 でのみ対応。68000型のFPUボードは未対応のため無効固定
-                    .disabled(settingsViewModel.machineChoice != "X68030")
-                if settingsViewModel.machineChoice == "X68030" && settingsViewModel.fpuEnabled {
-                    Picker("FPU Model", selection: $settingsViewModel.fpuModel) {
-                        Text(verbatim: "MC68881").tag("68881")
-                        Text(verbatim: "MC68882").tag("68882")
+                // P898: X68030 のマザーボード FPU(68881/68882)は X68030 選択時だけ表示する。
+                // P901: それ以外の機種では、代わりに拡張ボード CZ-6BP1(MC68881)のトグルを表示する。
+                // 機種を切り替えても fpuBoard の値は消さない(X68030 では Bridge 側のラッチで配線されない)。
+                if settingsViewModel.machineChoice == "X68030" {
+                    Toggle("FPU Enabled", isOn: $settingsViewModel.fpuEnabled)
+                    if settingsViewModel.fpuEnabled {
+                        Picker("FPU Model", selection: $settingsViewModel.fpuModel) {
+                            Text(verbatim: "MC68881").tag("68881")
+                            Text(verbatim: "MC68882").tag("68882")
+                        }
+                        Text("Takes effect after hard reset. FDBcc/FTRAPcc are not yet functional (known limitation, see Docs).")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text("Takes effect after hard reset. FDBcc/FTRAPcc are not yet functional (known limitation, see Docs).")
+                } else {
+                    Toggle("FPU Board (CZ-6BP1, MC68881)", isOn: $settingsViewModel.fpuBoard)
+                    Text("Takes effect after hard reset. A floating-point driver such as FLOAT3.X is needed to use it from Human68k.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

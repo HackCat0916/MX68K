@@ -35,6 +35,10 @@ void mx68k_set_fpu_enabled(bool en);
 // P898: FPUの型(68881 または 68882、それ以外は 68882)。X68030(EC030)配線時のみ有効、
 // mx68k_set_fpu_enabled と同じくハードリセットで確定する。
 void mx68k_set_fpu_model(int model);
+// P901: X68000 世代 FPU ボード CZ-6BP1(MC68881、CIR 窓 $E9E000-$E9E01F)の装着設定。既定 false。
+// 設定値のみ保持し、配線は mx68k_reset_hard() で確定する(68000 系機種のみ。X68030 では配線しない)。
+// 開発者用: 環境変数 MX68K_FPUBOARD=1 で設定値に関わらず装着扱い(68000 系機種の条件は維持)。
+void mx68k_set_fpuboard_enabled(bool enabled);
 // P483: Mercury Unit(MK-MU1 / $ECC000)の装着設定。既定 false(未装着)。
 // mx68k_set_machine_type と同じく「設定値」と「配線確定値」を分離する:
 // 装着はハードリセット(mx68k_reset_hard)で初めて確定し、それまでは
