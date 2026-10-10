@@ -276,7 +276,7 @@ iOS版にはメニューバー・キーボードショートカットが無く�
 | ソフトリセット | 即時にソフトリセット |
 | Interrupt | NMI相当（即時実行） |
 | 一時停止/再開 | エミュレーションの一時停止・再開 |
-| FD0… / FD1… | 「選択…」でFilesアプリからディスクイメージを選んでマウント、「取り出し」でイジェクト |
+| FD0… / FD1… | 「選択…」でFilesアプリからディスクイメージを選んでマウント、「取り出し」でイジェクト、「Write Protect」で書込み禁止の切替(状態表示にロックマーク表示) |
 | ステート | 「ステートを保存」で即時保存、「ステートを読込…」で保存済み一覧を表示 |
 | ソフトウェアキーボード | 画面下部のソフトウェアキーボードの表示/非表示（画面幅が足りる場合のみ表示） |
 | 仮想パッド | 仮想パッドの表示/非表示 |
@@ -319,7 +319,7 @@ In portrait, the control buttons run along the top of the screen and the status 
 | Soft Reset | Immediate soft reset |
 | Interrupt | NMI equivalent (runs immediately) |
 | Pause/Resume | Pauses or resumes emulation |
-| FD0… / FD1… | "Select…" picks a disk image from the Files app and mounts it; "Eject" ejects it |
+| FD0… / FD1… | "Select…" picks a disk image from the Files app and mounts it; "Eject" ejects it; "Write Protect" toggles write protection (a lock mark appears in the status display) |
 | State | "Save State" saves instantly; "Load State…" shows the list of saved states |
 | Software Keyboard | Shows/hides the software keyboard at the bottom of the screen (shown only when the screen is wide enough) |
 | Virtual Pad | Shows/hides the virtual pad |

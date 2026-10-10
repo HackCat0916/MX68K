@@ -513,6 +513,9 @@ struct MX68KiOSRootView: View {
                     Text(lamp.label)
                         + Text(lamp.present ? "●" : "○")
                             .foregroundColor(lampColor(present: lamp.present, active: lamp.active))
+                        // P937 — 書込み禁止トグルON時はランプ記号の直後にロックマーク
+                        // (macOS `ToolbarView.swift` と同じ SF Symbol `lock.fill`)を連結する。
+                        + (lamp.writeProtected ? Text(Image(systemName: "lock.fill")) : Text(""))
                 }
                 let lines = fieldLines + lampLines
                 // 先頭行のみ改行を前置しない(項目が空でランプのみの場合も先頭から正しく連結される)。
@@ -532,6 +535,8 @@ struct MX68KiOSRootView: View {
                         + Text("  " + lamp.label)
                         + Text(lamp.present ? "●" : "○")
                             .foregroundColor(lampColor(present: lamp.present, active: lamp.active))
+                        // P937 — 縦積み版と同じくロックマークを連結する。
+                        + (lamp.writeProtected ? Text(Image(systemName: "lock.fill")) : Text(""))
                 }
                 .foregroundStyle(.green)
             }

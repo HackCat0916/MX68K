@@ -325,9 +325,22 @@ struct IOSSettingsBarButtons: View {
         }
         .font(.system(size: 14))
         .tint(.green)
+        // P937 — 書込み禁止トグルの config 永続化を一箇所へ集約する(macOS
+        // `EmulatorView.swift:49-52` と同型)。トグル操作・Eject・ZIP 強制保護・
+        // ゲスト起点イジェクト追従(reconcile)のいずれの経路もこのクロージャを通る。
+        // ★本ビューは topBand / sideButtonBand の 2 箇所で生成され得るが、登録内容は
+        //   同一(同じ configManager への書き込み)のため、上書き登録しても無害。
+        .onAppear {
+            viewModel.onFDDWriteProtectChanged = { drive, protect in
+                configManager.config.fdd.setWriteProtect(drive, protect)
+                configManager.save()
+            }
+        }
     }
 
-    /// P713 §方針2 — FDD 1 台分の Menu(Select… / Eject)。
+    /// P713 §方針2 — FDD 1 台分の Menu(Select… / Eject / Write Protect)。
+    /// P937 — 「Write Protect」トグルを追加。config 永続化は `onFDDWriteProtectChanged`
+    /// クロージャ経由で行うため、ここでは `configManager` を直接触らない。
     ///
     /// ラベル文言は P706 以来の "FDD0…" / "FDD1…" を維持する —— トップバーの幅制約
     /// (P707/P708)を踏まえ、マウント中ファイル名の表示などの拡張はスコープ外。
@@ -351,6 +364,10 @@ struct IOSSettingsBarButtons: View {
                 configManager.save()
             }
             .disabled(!mx68k_fdd_is_inserted(Int32(drive)))
+            Toggle("Write Protect", isOn: Binding(
+                get: { drive == 0 ? viewModel.fdd0WriteProtect : viewModel.fdd1WriteProtect },
+                set: { viewModel.setWriteProtect(drive: drive, protect: $0) }
+            ))
         }
         .modifier(IOSBarTouchTarget(active: axis == .vertical))
     }

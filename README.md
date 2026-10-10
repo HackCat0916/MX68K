@@ -124,6 +124,7 @@ iOS版（iPhone/iPad）はmacOS版と同じエミュレーションコア・設�
 - **ZIP圧縮FDイメージ** — ZIP内のFDイメージを展開してマウント（複数イメージ格納時は選択シート表示）
 - **HDD/SCSI/MO/CD-ROMのマウント** — ファイルをアプリ内へコピーせず、選択した元の場所を参照してマウント
 - **一時停止・ターボ/ノーウェイト・FDアクセス高速化**
+- **FDDの書込み禁止切替** — FDDメニューの「Write Protect」トグルで切替、ステータス表示にロックマーク表示
 - **設定タブ** — BIOS / Hardware / Audio / SASI / SCSI の5タブ
 
 **iOS版で現在使えない機能:**
@@ -133,7 +134,6 @@ iOS版（iPhone/iPad）はmacOS版と同じエミュレーションコア・設�
 - Windrv（共有フォルダ）
 - ドラッグ&ドロップによるマウント
 - General / Input / Windrv の各設定タブ（キーリマップ設定を含む）
-- FDDの書込み禁止切替
 - FD2/FD3の挿入・イジェクト
 - Mercury Unit（macOS版のみ）
 - 電源ボタン・ゲストソフトからの電源OFF要求の検出（現状macOS版のみ）
@@ -155,6 +155,7 @@ The iOS version (iPhone/iPad) shares the same emulation core and settings screen
 - **ZIP-compressed FD Images** — extracts and mounts FD images inside a ZIP (a selection sheet appears for multi-image archives)
 - **HDD/SCSI/MO/CD-ROM Mounting** — mounts the selected file in place, without copying it into the app
 - **Pause, Turbo/No-Wait, and Fast FD Access**
+- **FDD Write-Protect Toggle** — switch it from the FDD menu's "Write Protect" item; a lock mark appears in the status display
 - **Settings Tabs** — five tabs: BIOS / Hardware / Audio / SASI / SCSI
 
 **Features not currently available on iOS:**
@@ -164,7 +165,6 @@ The iOS version (iPhone/iPad) shares the same emulation core and settings screen
 - Windrv (shared folder)
 - Drag & drop mounting
 - The General / Input / Windrv settings tabs (including key remapping)
-- FDD write-protect toggle
 - Inserting/ejecting FD2/FD3
 - Mercury Unit (macOS only)
 - The power button and detection of guest power-off requests (currently macOS only)

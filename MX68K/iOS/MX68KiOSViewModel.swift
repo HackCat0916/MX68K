@@ -63,6 +63,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         let label: String    // "FD0:" / "FD1:" / "HDD:"
         let present: Bool    // media/HDD在席
         let active: Bool     // アクセス中(FD)/ビジー(HDD)
+        var writeProtected: Bool = false   // P937: 書込み禁止トグルON(FD0/FD1のみ、HDDは常にfalse)
     }
     /// P777 — FD0/FD1/HDD のランプ表示用(`statusFields` から分離)。
     /// 空配列 = 詳細状態なし(`statusFields` と同じタイミングでクリアする)。
@@ -76,6 +77,20 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// (`mountFDDFromArchive`)は他に `@Published` 変更を起こさず、既存の 1Hz
     /// `onStatusUpdate` ポーリングまで最悪約1秒 Eject の有効化が遅延する。
     @Published var fddMountGeneration: Int = 0
+    /// P937 — FDD書込み禁止トグルの状態(macOS版`EmulatorViewModel.fdd0WriteProtect`/
+    /// `fdd1WriteProtect`と同型)。iOSはFDD0/FDD1の2台のみUIを持つ(P712/P713のスコープ)。
+    /// `start(config:)`でconfigから無条件に初期化し、変更時は
+    /// `onFDDWriteProtectChanged`経由でルートビュー側がconfigへ永続化する。
+    @Published var fdd0WriteProtect: Bool = false
+    @Published var fdd1WriteProtect: Bool = false
+    /// P937 — 書込み禁止トグルの変更通知(macOS版`EmulatorViewModel.swift:214`と同型)。
+    /// config永続化はこのクロージャを登録したルートビュー側の一箇所に集約する
+    /// (トグル操作・Eject・ZIP強制保護・ゲスト起点イジェクト追従のすべてがここを通る)。
+    var onFDDWriteProtectChanged: ((Int, Bool) -> Void)?
+    /// P937 — 前回ステータス更新時点のメディア在席状態(`reconcileFDDWriteProtect`の
+    /// エッジトリガ判定用。在席→非在席の遷移でのみトグルをOFFへ戻す)。
+    private var fdd0MediaPresent = false
+    private var fdd1MediaPresent = false
     /// Metal 初期化に失敗したときの理由(EmulatorMetalView_iOS が設定する)。
     /// ★iOS では metallib の同梱漏れが現実的な失敗モードなので、macOS 側の
     /// `fatalError` とは違い、クラッシュさせずに画面へ出す(P703 計画 §D-2)。
@@ -251,10 +266,21 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
 
         // P706 §D-3: ブートディスクは config 由来。空でも**起動は止めない** ——
         // BIOS さえあれば IPL 画面までは進み、そこから「Boot Disk…」で入れられる。
+        // P937 — 書込み禁止トグルの初期状態をconfigから復元する。★ブートディスク挿入の
+        // `if`分岐の**外側で無条件に**行うこと——内側に置くと、ブートディスク未設定時に
+        // FD0の設定が復元されず、ブート挿入経路に乗らないFD1は常にfalseで起動してしまう。
+        fdd0WriteProtect = config.fdd.fdd0WriteProtect
+        fdd1WriteProtect = config.fdd.fdd1WriteProtect
+        fdd0MediaPresent = false
+        fdd1MediaPresent = false
         let bootDisk = config.fdd.lastFDD0Path
         if !bootDisk.isEmpty, fm.fileExists(atPath: bootDisk) {
             let inserted = bootDisk.withCString { mx68k_fdd_insert(0, $0) }
             mx68k_log("[Swift][iOS] mx68k_fdd_insert(0) -> \(inserted)")
+            // P937 — `mountDisk`を経由しない直接挿入のため、トグル状態の再適用をここで個別に行う。
+            if inserted == 0 && fdd0WriteProtect {
+                mx68k_fdd_set_write_protect(0, 1)
+            }
         } else {
             mx68k_log("[Swift][iOS] no boot disk in config (fdd.lastFDD0Path=\"\(bootDisk)\")")
         }
@@ -284,9 +310,15 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             ]
             // P777 — 在席判定は macOS 版 StatusBarView.swift と同じ fdd*_inserted
             // (FDD_IsReady() 由来)を使う(fdd*_media_present は別目的のフィールド)。
+            // P937 — ゲスト起点イジェクトへの書込み禁止トグル追従(macOS版
+            // `reconcileFDDMedia`相当)。ランプの在席判定(fdd*_inserted)とは別に、
+            // こちらは fdd*_media_present を使う。
+            self.reconcileFDDWriteProtect(status)
             self.statusLamps = [
-                StatusLampField(label: "FD0: ", present: status.fdd0_inserted, active: status.fdd0_active),
-                StatusLampField(label: "FD1: ", present: status.fdd1_inserted, active: status.fdd1_active),
+                StatusLampField(label: "FD0: ", present: status.fdd0_inserted, active: status.fdd0_active,
+                                writeProtected: self.fdd0WriteProtect),
+                StatusLampField(label: "FD1: ", present: status.fdd1_inserted, active: status.fdd1_active,
+                                writeProtected: self.fdd1WriteProtect),
                 StatusLampField(label: "HDD: ", present: status.hdd0_inserted || status.hdd1_inserted, active: status.hdd_busy),
             ]
         }
@@ -915,7 +947,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     ///
     /// 意味論も macOS `mountFDD` と同一 —— 稼働中は**ライブ差し替えのみ**でリセットせず、
     /// 確定は明示的な Reset ボタン待ち(改訂 1 で iOS も同じ挙動へ統一済み)。
-    /// write protect は iOS 未対応のまま(§0-2 非ゴール継続)。
+    /// write protect は P937 で対応——マウント成功時に現在のトグル状態を再適用する。
     /// config への保存は ConfigManager を所有するルートビュー側で行う。
     /// - Returns: 挿入に成功したか。
     @discardableResult
@@ -935,6 +967,12 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             // 表示経路のみ `showTransientMessage`(3秒自動消去)へ変更。
             showTransientMessage(String(localized: "Failed to mount \((path as NSString).lastPathComponent) on FD\(drive)"))
             return false
+        }
+        // P937 — 現在のトグル状態を維持してマウントする(macOS版
+        // `resolvedWriteProtectForNewMount`と同じ考え方)。トグル状態自体は変えない
+        // (configの既存状態を再適用するだけ)ため`onFDDWriteProtectChanged`は呼ばない。
+        if fddWriteProtect(drive) {
+            mx68k_fdd_set_write_protect(Int32(drive), 1)
         }
         // P730 — 通常ファイル経路・ZIP単一/複数イメージ経路(`mountFDDFromArchive` は
         // 内部でここを呼ぶ)を一括カバーする Eject 再描画トリガー。
@@ -956,13 +994,71 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     ///     (P706 §0-2 非ゴール継続)、復元すべき「ユーザーが設定した元の状態」が
     ///     存在しない。新しい挙動を発明せず、iOS に無い機能への呼び出しを削る
     ///     だけ(hardReset / softReset / nmi と同型)。
+    ///   ★P937 で更新 —— iOS にも書込み禁止トグルを追加したため、イジェクト時に
+    ///     トグルを OFF へ戻す処理(macOS `resetWriteProtectOnEject` 相当)は持ち込む。
+    ///     ZIP 展開前の状態への復元(`restoreWriteProtectIfNeeded`)は引き続き
+    ///     持ち込まない(P937 のスコープ外、計画で明示)。
     func ejectFDD(drive: Int) {
         releaseArchiveTempDir(drive: drive)
         mx68k_log("[Swift][iOS] ejectFDD drive=\(drive)")
         mx68k_fdd_eject(Int32(drive))
+        // P937 — イジェクト時は書込み禁止トグルをOFFへ戻す(macOS版
+        // `resetWriteProtectOnEject`相当)。config永続化はクロージャ経由。
+        setFddWriteProtect(drive, false)
+        onFDDWriteProtectChanged?(drive, false)
         // P730 — Eject 自体の直後反映を明示的に保証(既存の configManager.save() 頼みの
         // 暗黙的な反映に依存しない)。
         fddMountGeneration += 1
+    }
+
+    // MARK: - 書込み禁止トグル(P937)
+
+    /// macOS版`EmulatorViewModel.fddWriteProtect`(:1517-1525)相当。iOSはFDD0/FDD1のみ。
+    private func fddWriteProtect(_ drive: Int) -> Bool {
+        switch drive {
+        case 0: return fdd0WriteProtect
+        case 1: return fdd1WriteProtect
+        default: return false
+        }
+    }
+
+    /// macOS版`EmulatorViewModel.setFddWriteProtect`(:1527-1535)相当。iOSはFDD0/FDD1のみ。
+    private func setFddWriteProtect(_ drive: Int, _ v: Bool) {
+        switch drive {
+        case 0: fdd0WriteProtect = v
+        case 1: fdd1WriteProtect = v
+        default: break
+        }
+    }
+
+    /// FDDメニューの「Write Protect」トグルから呼ばれる公開API。
+    func setWriteProtect(drive: Int, protect: Bool) {
+        setFddWriteProtect(drive, protect)
+        if protect && mx68k_fdd_is_inserted(Int32(drive)) {
+            mx68k_fdd_set_write_protect(Int32(drive), 1)
+        }
+        // protect == false はCore側に解除関数が無くno-op
+        // (Bridge/EmulatorBridge.h:262-263のコメント通り、macOS版と同じ既知の制約を継承)
+        mx68k_log("[Swift][iOS] setWriteProtect drive=\(drive) protect=\(protect)")
+        onFDDWriteProtectChanged?(drive, protect)   // config永続化はクロージャ経由
+    }
+
+    /// macOS版`reconcileFDDMedia`(`EmulatorViewModel.swift:1824-1857`、P443/D-7)相当の
+    /// ゲスト起点イジェクト追従。iOSはSwift側にマウント済みパス追跡を持たないため、
+    /// 前回ステータス更新時点の在席状態との比較(在席→非在席の遷移)でのみ判定する
+    /// エッジトリガ方式とする——「挿入前に予めトグルONにしておく」使い方を誤って
+    /// 即リセットしないため。
+    private func reconcileFDDWriteProtect(_ status: MX68KStatus) {
+        if fdd0MediaPresent && !status.fdd0_media_present {
+            setFddWriteProtect(0, false)
+            onFDDWriteProtectChanged?(0, false)
+        }
+        fdd0MediaPresent = status.fdd0_media_present
+        if fdd1MediaPresent && !status.fdd1_media_present {
+            setFddWriteProtect(1, false)
+            onFDDWriteProtectChanged?(1, false)
+        }
+        fdd1MediaPresent = status.fdd1_media_present
     }
 
     // MARK: - ディスク(ZIP圧縮イメージ、P729)
@@ -1050,6 +1146,8 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// UIが無い(P706 §0-2非ゴール)ため、表示を同期させる対象自体が存在しない。
     /// これは新しい挙動の発明ではなく、存在しないUIへの同期呼び出しを削るだけ
     /// (ejectFDD等、既存のiOS簡略化と同型)。
+    /// ★P937で更新——iOSにも書込み禁止トグルUIを追加したため、上記の
+    /// 「南京錠トグル表示をONにする」同期(`setFddWriteProtect`)は持ち込むようになった。
     ///
     /// ★Code Review指摘により訂正——macOS版のコメント「マウント結果によらず
     ///   記録する。失敗時も次回のマウント/イジェクト、最悪でも次回起動時の
@@ -1067,6 +1165,10 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         let ok = mountDisk(drive: drive, path: extractedPath)
         if ok {
             mx68k_fdd_set_write_protect(Int32(drive), 1)
+            // P937 — トグル表示(ロックマーク)を実際の強制保護状態と一致させ、configにも反映する。
+            // mount失敗時に表示だけONになる不一致を避けるため、この`if ok`の内側に置く。
+            setFddWriteProtect(drive, true)
+            onFDDWriteProtectChanged?(drive, true)
         }
         // macOS: マウント結果によらず記録する(:1386-1387)。ここを`guard`で
         // ガードしない——失敗時も一時ディレクトリの追跡・掃除は必要。
