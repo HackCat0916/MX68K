@@ -13,10 +13,10 @@ class SettingsViewModel: ObservableObject {
     @Published var clockMHz: Int = 16
     @Published var fpuEnabled: Bool = false
     @Published var fpuModel: String = "68882"   // P898: "68881" / "68882"
-    // P872: CPUモデル("68000" / "EC030")。config.json では "68000" のときキーを書かない(nil)
+    // P872: CPUモデル("68000" / "EC030" / "68040" / "68060"[P916])。config.json では "68000" のときキーを書かない(nil)
     @Published var cpuModel: String = "68000"
     // P887/P889: ハイメモリ(なし / TS-6BE16相当 / 060turbo相当)。排他選択なので1つのenumで持つ。
-    // config.json へは X68030 のときだけ該当キーを書く
+    // config.json へは X68030筐体(X68030/040turbo/060turbo)のときだけ該当キーを書く
     enum HighMemorySelection: Hashable {
         case none
         case ts6be16
@@ -63,19 +63,36 @@ class SettingsViewModel: ObservableObject {
     // P557: FD アクセス高速化(XM6「フロッピーディスク高速化」相当)。既定 OFF。
     @Published var fdFastAccess: Bool = false
 
-    /// P872: 設定画面の「機種」Picker 用の合成値("SASI" / "SCSI" / "X68030")。
-    /// 保存上は machineType(SASI/SCSI)と cpuModel の組合せで、X68030 = SCSI + EC030。
+    /// P872: 設定画面の「機種」Picker 用の合成値("SASI" / "SCSI" / "X68030" / "X68030_040" / "X68030_060")。
+    /// 保存上は machineType(SASI/SCSI)と cpuModel の組合せで、X68030 = SCSI + EC030、
+    /// X68030_040(P910、040turbo)= SCSI + 68040、X68030_060(P916、060turbo)= SCSI + 68060。
     var machineChoice: String {
-        get { cpuModel == "EC030" ? "X68030" : machineType }
+        get {
+            cpuModel == "EC030" ? "X68030"
+                : cpuModel == "68040" ? "X68030_040"
+                : cpuModel == "68060" ? "X68030_060"
+                : machineType
+        }
         set {
             if newValue == "X68030" {
                 machineType = "SCSI"
                 cpuModel = "EC030"
+            } else if newValue == "X68030_040" {
+                machineType = "SCSI"
+                cpuModel = "68040"
+            } else if newValue == "X68030_060" {
+                machineType = "SCSI"
+                cpuModel = "68060"
             } else {
                 machineType = newValue
                 cpuModel = "68000"
             }
         }
+    }
+
+    /// P910: X68030筐体(X68030 / X68030+040turbo / X68030+060turbo[P916])を選んでいるか
+    var isX68030Chassis: Bool {
+        machineChoice == "X68030" || machineChoice == "X68030_040" || machineChoice == "X68030_060"
     }
 
     func apply(to config: inout EmulatorConfig) {
@@ -90,9 +107,9 @@ class SettingsViewModel: ObservableObject {
         config.hardware.clockMHz = clockMHz
         config.hardware.fpuEnabled = fpuEnabled
         config.hardware.fpuModel = (fpuModel == "68881") ? 68881 : 68882   // P898
-        config.hardware.cpuModel = (cpuModel == "EC030") ? "EC030" : nil   // P872: 68000 はキーを書かない
-        // P887/P889: 68000系機種ではキーを書かない
-        let isX68030 = (machineChoice == "X68030")
+        config.hardware.cpuModel = (cpuModel == "EC030" || cpuModel == "68040" || cpuModel == "68060") ? cpuModel : nil   // P872: 68000 はキーを書かない
+        // P887/P889: 68000系機種ではキーを書かない(P910/P916: 040turbo/060turbo でも書く)
+        let isX68030 = isX68030Chassis
         switch highMemorySelection {
         case .none:
             config.hardware.highMemoryMB = nil
@@ -147,7 +164,12 @@ class SettingsViewModel: ObservableObject {
         clockMHz = config.hardware.clockMHz
         fpuEnabled = config.hardware.fpuEnabled
         fpuModel = (config.hardware.fpuModel == 68881) ? "68881" : "68882"   // P898: nil・不正値は 68882
-        cpuModel = (config.hardware.cpuModel == "EC030") ? "EC030" : "68000"   // P872: nil は 68000
+        switch config.hardware.cpuModel {   // P872: nil・不正値は 68000(P910: "68040"、P916: "68060" を追加)
+        case "EC030": cpuModel = "EC030"
+        case "68040": cpuModel = "68040"
+        case "68060": cpuModel = "68060"
+        default:      cpuModel = "68000"
+        }
         // P887/P889: 不正値はなしへ正規化。両方指定時は TS-6BE16相当を優先(Bridge側と同じ)
         if config.hardware.highMemoryMB == 16 {
             highMemorySelection = .ts6be16

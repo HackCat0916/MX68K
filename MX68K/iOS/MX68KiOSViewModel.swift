@@ -686,7 +686,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         case -15:
             return String(localized: "This state file does not match the current memory size setting.")
         case -16:   // P872: 保存したCPUコア/型と実行中のものが違う
-            return String(localized: "This state file was saved with a different CPU model (X68000 / X68030) and cannot be loaded.")
+            return String(localized: "This state file was saved with a different CPU model (X68000 / X68030 / 040turbo / 060turbo) and cannot be loaded.")
         case -18:   // P890: 保存時のハイメモリ構成(種別・サイズ)が現在の設定と異なる
             return String(localized: "This state file was saved with different High Memory settings and cannot be loaded. Match the High Memory setting in Hardware settings, then reset, before loading.")
         case -2:
@@ -771,8 +771,16 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// 選択は引き続き iOS 非対応)。P831 — 内蔵 SC-55 の設定値も写すようにした。
     /// P846 — CoreMIDI デバイス index(出力/入力)も macOS と同じ経路で送るようにした。
     private func pushConfig(_ config: EmulatorConfig) {
-        // P872: CPUモデル(nil=68000、"EC030"=X68030)。ハードリセットで反映される
-        mx68k_set_cpu_model(config.hardware.cpuModel == "EC030" ? 1 : 0)
+        // P872: CPUモデル(nil=68000、"EC030"=X68030、"68040"=X68030+040turbo[P910]、
+        // "68060"=X68030+060turbo[P916])。ハードリセットで反映される
+        let cpuModelValue: Int32
+        switch config.hardware.cpuModel {
+        case "EC030": cpuModelValue = 1
+        case "68040": cpuModelValue = 2
+        case "68060": cpuModelValue = 3
+        default:      cpuModelValue = 0
+        }
+        mx68k_set_cpu_model(cpuModelValue)
         // P887: ハイメモリ(nil=なし、16=TS-6BE16相当)。X68030以外ではBridge側で無効。ハードリセットで反映
         mx68k_set_high_memory_mb(Int32(config.hardware.highMemoryMB ?? 0))
         // P889: 060turbo相当ハイメモリ(nil=なし、16〜768MB)。TS-6BE16相当とは排他(両方ならBridge側でTS-6BE16優先)

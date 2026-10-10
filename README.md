@@ -59,7 +59,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **走査線エフェクト** — CRTディスプレイ風の表示効果をオン/オフ切替
 - **拡張ボード** — MIDI（CZ-6BM1相当、外部MIDI出力）・Mercury Unit（MK-MU1相当）
 - **内蔵MIDI音源** — Roland MT-32（mt32emu）・Roland SC-55（Nuked-SC55）のソフトウェアエミュレーション内蔵。外部MIDI機器不要（ROMファイルは別途ご用意ください）
-- **26種のモニタパネル** — CPU/CRTC/ビデオコントローラ/BG/サウンド/パレット/入力/ストレージ/MIDI/RTC/スプライト/OPMシンセサイザー/逆アセンブル/DMAC/割込みレジスタ/デバッガ/ログビューワー等（System/Processor/Device/Sound/Peripherals/Video/Rendererの7グループに整理）
+- **28種のモニタパネル** — CPU/CRTC/ビデオコントローラ/BG/サウンド/パレット/入力/ストレージ/MIDI/RTC/スプライト/OPMキーボード/OPMオペレータ/MIDIキーボード/逆アセンブル/DMAC/割込みレジスタ/デバッガ/ログビューワー等（System/Processor/Device/Sound/Peripherals/Video/Rendererの7グループに整理）
 - **多言語対応** — 日本語/英語切り替え対応
 
 **English:**
@@ -88,7 +88,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **Scanline Effect** — toggleable CRT-style display effect
 - **Extension Boards** — MIDI (CZ-6BM1 equivalent, external MIDI output), Mercury Unit (MK-MU1 equivalent)
 - **Internal MIDI Synthesizers** — built-in software emulation of the Roland MT-32 (via mt32emu) and Roland SC-55 (via Nuked-SC55). No external MIDI device required (you must supply your own ROM files)
-- **26 Monitor Panels** — CPU/CRTC/video controller/BG/sound/palette/input/storage/MIDI/RTC/sprite/OPM synthesizer/disassembly/DMAC/interrupt registers/debugger/log viewer, etc. (organized into 7 groups: System/Processor/Device/Sound/Peripherals/Video/Renderer)
+- **28 Monitor Panels** — CPU/CRTC/video controller/BG/sound/palette/input/storage/MIDI/RTC/sprite/OPM keyboard/OPM operator/MIDI keyboard/disassembly/DMAC/interrupt registers/debugger/log viewer, etc. (organized into 7 groups: System/Processor/Device/Sound/Peripherals/Video/Renderer)
 - **Localization** — switchable Japanese/English UI
 
 ---

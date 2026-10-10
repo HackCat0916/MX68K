@@ -55,7 +55,8 @@ extern volatile int g_p776_poweroff_req;
  * シャドウへ戻す)。P51A_VEC23_SAFETY=0 で vec#2/#3 の RTE スタブ事前設置を
  * 無効化(縮小の挙動は変えない)。1箇所の編集で切り替えられることが
  * 分かるよう、マクロはここ(P29_RTE_STUB_ADDR の近く)に置く。
- * 根拠は /tmp/mx68k_P51A_plan.md §2 および §5.2 を参照。 */
+ * 根拠は /tmp/mx68k_P51A_plan.md §2 および §5.2 を参照。
+ * P918 (D-85): ベクタ領域のゼロクリアは電源投入相当(cold)のリセットだけに限定した([P918-VECCLEAR])。 */
 #define P51A_ENABLE              1
 #define P51A_VEC23_SAFETY        1
 #define P51A_VECTOR_SKIP_BEGIN   0x0008
@@ -367,6 +368,7 @@ extern uint8_t MIDI_MODULE;
 #include "sram_ext_bridge.h"   /* P493: 内蔵 SRAM 64KB 化(上位 48KB を Bridge が提供) */
 #include "windrv_bridge.h"     /* P642: Windrv(Mac フォルダのホスト共有) */
 #include "fpuboard_bridge.h"   /* P901: FPU ボード CZ-6BP1(MC68881)の CIR デバイス */
+#include "midi_note_shadow.h"  /* P929: MIDI Keyboard Viewer 用のノート状態 */
 
 // m68000_bridge.c 由来のプロトタイプ(Core/px68k/m68000/m68000.h)
 extern void m68000_init(void);
@@ -388,7 +390,7 @@ extern void mx68k_diag_mfp_int(int32_t irq, const char* src); /* P47-D-DIAG-G �
 extern uint32_t m68000_get_reg(int32_t regnum);   // P28-FIX
 extern void m68000_set_reg(int32_t regnum, uint32_t val); // P28-FIX
 /* P872: CPUコアの実行時切替(m68000_bridge.c で定義、Bridge内部用) */
-extern void     m68000_set_cpu_backend_model(int model);   /* 0=c68k、1=Musashi EC030 */
+extern void     m68000_set_cpu_backend_model(int model);   /* 0=c68k、1=Musashi EC030、2=Musashi 68040 */
 extern int      m68000_cpu_env_override(void);             /* MX68K_CPU_CORE 設定時に1 */
 extern uint32_t m68000_get_cpu_state_id(void);             /* ステートのCPU識別子 */
 extern int      m68000_cpu_backend_is_musashi(void);
@@ -614,11 +616,15 @@ static int  g_machine_type    = 0;
  * まで旧機種のまま(P238)。HDD/SCSI insert バックストップはこの確定値で判定し、
  * 未リセットの pending 機種で正当な操作を誤って拒否しないようにする。 */
 static int  g_wired_machine_type = 0;
-/* P872: CPUモデル(0=MC68000/c68k、1=MC68EC030/Musashi=X68030)。g_machine_type と同じ2変数方式で、
+/* P872: CPUモデル(0=MC68000/c68k、1=MC68EC030/Musashi=X68030、2=MC68040/Musashi=X68030+040turbo[P910]、
+ * 3=MC68060相当/Musashi 040型=X68030+060turbo[P916])。
+ * g_machine_type と同じ2変数方式で、
  * g_cpu_model は設定値(即時)、g_wired_cpu_model は mx68k_reset_hard() 冒頭でだけ確定する配線値。
  * s_ipl_loaded_model は IPL[] に今入っているROM(0=IPLROM.DAT、1=IPLROM30.DAT、-1=未読込み)。 */
 static int  g_cpu_model = 0;
 static int  g_wired_cpu_model = 0;
+/* P910: X68030筐体か(040turbo/060turbo[P916]はX68030マザーでのCPU換装なので、筐体由来の判定はすべてこれを使う) */
+static inline int cpu_is_030_chassis(int m) { return m == 1 || m == 2 || m == 3; }
 /* P887: X68030ハイメモリ(TS-6BE16相当、$01000000-$01FFFFFF の16MB固定)。g_cpu_model と同じ2変数方式で、
  * g_himem_mb は設定値(0 or 16、即時)、g_wired_himem_mb は mx68k_reset_hard() でだけ確定する配線値。
  * g_himem_buf はリセットでは解放・クリアしない(内容をリセット越しに保持、XEiJ XEiJ.java:8103-8123 準拠)。 */
@@ -661,6 +667,12 @@ static int  s_ipl_loaded_model = -1;
 static char g_iplrom_path[4096];
 static char g_iplrom30_path[4096];   /* mx68k_set_bios_path_030 が保存し、reset_hard が読み込む */
 static bool load_ipl_file(const char *path);
+/* P918 (D-85): load_ipl_file() が成功するたびに1増やす。機種切替や動作中の「適用」による
+ * IPL[] の差し替えを、リセット時のベクタ領域 cold/warm 判定で検出するための世代番号。 */
+static unsigned s_ipl_load_gen = 0;
+/* P918 (D-85): 前回のリセット時の配線キー。キーが変わったとき(と電源OFF→ON後の最初のリセット)
+ * だけベクタ領域 $0008..$07BF を0にし(cold)、それ以外のリセットでは保持する(warm)。 */
+static struct { int valid; int cpu; int mach; int mem; unsigned iplgen; } s_p918_ramkey;
 /* P872: [P872-CPUMODEL] ログ用。パスのファイル名部分(空なら "(none)") */
 static const char *p872_basename(const char *path) {
     if (!path || !path[0]) return "(none)";
@@ -703,6 +715,9 @@ extern void p636_mercury_pcm_poll_samples(void);
  * mx68k_p483_dump_mcry_counters がヘッダ宣言なのは、あちらが複数箇所から
  * 呼ばれる公開 API のためで、規約の不統一ではなく公開範囲に応じた使い分け。 */
 extern void p637_ch3_dump_summary(const char* tag);
+/* P935 (D-73): Bridge/midi_coremidi.c の MIDI 受信リング。どちらもエミュレーションスレッド専用。 */
+extern void mx68k_midi_rx_pump(void);
+extern void mx68k_midi_rx_ring_clear(void);
 /* P488: MIDI ボード(CZ-6BM1 / YM3802 / $EAE000)の装着状態。Mercury と同型に
  * 「設定値(g_midi_enabled)」と「配線確定値(g_midi_installed)」を分離する。
  * 配線は init / ハードリセットでのみ確定する。
@@ -724,6 +739,12 @@ static int  g_midi_reset_type        = 0;      /* 0=LA,1=GM,2=GS,3=XG(midi.c:82-
 static int  g_midi_delay_ms          = 0;
 static int  g_midi_out_device_index  = 0;      /* MIDI_Init() の midOutChg(0,0) 既定と同じ */
 static int  g_midi_in_device_index   = 0;      /* MIDI_Init() の midInChg(0) 既定と同じ */
+/* P935: MIDI 入出力デバイス切替の保留要求(-1 = 保留なし)。Swift メインスレッドが書き、
+ * consume_pending_ops()(エミュレーションスレッド)が消費して midOutChg()/midInChg() を呼ぶ。
+ * midOutChg() は全ノートオフを送出するため、内蔵 MT-32/SC-55 の
+ * 「書き手はエミュレーションスレッドのみ」という契約を守るにはエミュスレッドで実行する必要がある。 */
+static _Atomic(int) g_pending_midi_out_device = -1;
+static _Atomic(int) g_pending_midi_in_device  = -1;
 /* P493: 内蔵 SRAM 64KB 化(実機改造相当)の「設定値」。Mercury/MIDI と同型で、
  * 配線(MemRead/WriteTable[0x6A-0x6F] の差し替え)は init / ハードリセットで確定する。 */
 static bool g_sram_64k_enabled       = false;
@@ -1431,7 +1452,7 @@ static void ensure_app_support_dir(void) {
  * クロックから導出する。SASI/SCSI の機種種別とは直交する(SUPER = SCSI + 10MHz は
  * 0xFF を読み、XVIMode がストレージバスを表していないことを示す。code inv §1)。
  * 10MHz級->0 (0xFF)、16/24/25MHz->1 (0xFE)(P879/D-82: 25MHz も 16MHz級へ統合)。
- * X68030 選択時(cpu_model==1)は呼出し元でこの関数をバイパスし 3 (0xDC) を直接設定する。これは P146 の
+ * X68030 筐体選択時(cpu_model==1/2/3、X68030/040turbo/060turbo、P910/P916の`cpu_is_030_chassis()`参照)は呼出し元でこの関数をバイパスし 3 (0xDC) を直接設定する。これは P146 の
  * ハードコード XVIMode=3 を置き換える。あれは si がどのクロックでも 030/25MHz と
  * 誤報告する原因だった(D-15)。Config.XVIMode は Core 内でちょうど1箇所(sysport.c:86)
  * でしか読まれず、クロック/サイクルのタイミングには関与しない——$E8E00B のバイトを変えるだけ。 */
@@ -1580,7 +1601,7 @@ int mx68k_init(void) {
      * SysPort のバイトが妥当であるようにする念のための措置。完全な根拠は
      * p270_derive_xvimode / mx68k_reset_hard を参照。
      * P872: X68030機種の固定値(3)も reset_hard と同じ式で扱う(確定は直後の reset_hard)。 */
-    Config.XVIMode = (g_wired_cpu_model == 1 && !m68000_cpu_env_override())
+    Config.XVIMode = (cpu_is_030_chassis(g_wired_cpu_model) && !m68000_cpu_env_override())
                    ? 3 : p270_derive_xvimode(g_clock_mhz);
 
 #if P53_ENABLE
@@ -1610,7 +1631,8 @@ int mx68k_init(void) {
         /* 従来どおり RAM 本体 + P22-FIX の +4 バイトはゼロ埋め(byte-equivalent)。 */
         memset(MEM, 0, MX68K_RAM_BYTES + 4);
         /* P565: 追加分のみ ILLEGAL(0x4AFC)で埋める。ハードリセットでは
-         * MEM 全体の memset は行われない(ベクタ領域の部分クリアのみ)ため、
+         * MEM 全体の memset は行われない(ベクタ領域の部分クリアのみ、それも P918 以降は
+         * 電源投入相当[cold]のリセットに限る)ため、
          * このガードはプロセス寿命の間そのまま残る。 */
         mx68k_p565_fill_illegal(MEM + MX68K_RAM_BYTES + 4, P565_MEM_GUARD_BYTES);
 #if P135_ENABLE
@@ -2018,6 +2040,7 @@ void mx68k_shutdown(void) {
      * (戻さないと、X68030で電源OFF→ONしたとき set_bios_path が読込みを保留してしまう) */
     g_wired_cpu_model = 0;
     s_ipl_loaded_model = -1;
+    s_p918_ramkey.valid = 0;       /* P918: 電源OFF→ON後の最初のリセットは必ずベクタ領域を0にする(cold) */
     g_wired_fpu_enabled = false;   /* P898: FPUの配線確定値も cold 状態へ戻す */
     g_wired_fpuboard = false;      /* P901: FPU ボードの配線確定値も cold 状態へ戻す */
     /* P887: ハイメモリも cold 状態へ戻す(Musashi側の参照を先に外してから解放する) */
@@ -2092,6 +2115,13 @@ void mx68k_reset_hard(void) {
      * リセットもここを通る。NMI は時間会計を切らないので対象外。 */
     s_p808_carry = 0;
 
+    /* P929: MIDI Keyboard Viewer のノート状態を全消灯する。リセットでゲストが Note Off を
+     * 送らないまま止まるため、これが無いと直前の点灯がリセット後も残り続ける。 */
+    midi_note_shadow_clear_all();
+
+    /* P935: リセット前に届いて未汲み出しの MIDI 受信バイトを捨てる。 */
+    mx68k_midi_rx_ring_clear();
+
     /* P872: CPUモデルの配線確定。IPL→MEMシャドウ(リセットベクタのコピー)とXVIMode導出より前に
      * 置く必要がある。この区間ではCPUは実行されない(reset_hard はフレーム境界・エミュスレッド上)。
      * 環境変数 MX68K_CPU_CORE が設定されていればそちらを優先し、コア・型・IPLには触らない
@@ -2101,11 +2131,13 @@ void mx68k_reset_hard(void) {
     char p872_ipl[160] = "kept";   /* 読み込んだIPLファイル名と結果(読み込まなければ kept) */
     bool p872_ipl30_fail = false;
     if (p872_override) {
-        /* 表示・分類のみ: 実行中のコアが Musashi のEC030本番構成なら1 */
-        p872_latched = (m68000_get_cpu_state_id() == 0x0101u) ? 1 : 0;
+        /* 表示・分類のみ: 実行中のコアが Musashi のEC030本番構成なら1、MC68040なら2(P910)、060相当なら3(P916) */
+        uint32_t id = m68000_get_cpu_state_id();
+        p872_latched = (id == 0x0101u || id == 0x0102u) ? 1 : (id == 0x0103u || id == 0x0104u) ? 2
+                     : (id == 0x0105u || id == 0x0106u) ? 3 : 0;
     } else {
         p872_latched = g_cpu_model;
-        if (p872_latched == 1) {
+        if (cpu_is_030_chassis(p872_latched)) {
             if (s_ipl_loaded_model != 1) {
                 bool ok = load_ipl_file(g_iplrom30_path);
                 if (ok) s_ipl_loaded_model = 1;
@@ -2136,7 +2168,7 @@ void mx68k_reset_hard(void) {
      * m68000_set_cpu_backend_model() 内の環境変数駆動の設定より後に置くので、override で
      * なければ Bridge の設定値が最終的に勝つ。 */
     if (!p872_override) {
-        g_wired_fpu_enabled = (p872_latched == 1) && g_fpu_enabled;
+        g_wired_fpu_enabled = cpu_is_030_chassis(p872_latched) && g_fpu_enabled;   /* P910: 040もトグルに従う(案A) */
         g_wired_fpu_model = g_fpu_model;
         mx_cpu_musashi_set_fpu_config(g_wired_fpu_enabled ? 1 : 0, g_wired_fpu_model);
     }
@@ -2148,8 +2180,8 @@ void mx68k_reset_hard(void) {
         /* P889: TS-6BE16相当($01000000/16MB)と060turbo相当($10000000/可変)は排他。
          * 両方非ゼロ(config.json手動編集時のみ)なら TS-6BE16 を優先する。バッファは同じ種別・同じ容量の
          * ときだけ保持(kept)し、容量が変われば解放→再確保(new)する。 */
-        int want_ts = (!p872_override && g_wired_cpu_model == 1 && g_himem_mb == 16) ? 16 : 0;
-        int want_060 = (!want_ts && !p872_override && g_wired_cpu_model == 1 && himem060_valid_mb(g_himem060_mb))
+        int want_ts = (!p872_override && cpu_is_030_chassis(g_wired_cpu_model) && g_himem_mb == 16) ? 16 : 0;
+        int want_060 = (!want_ts && !p872_override && cpu_is_030_chassis(g_wired_cpu_model) && himem060_valid_mb(g_himem060_mb))
                        ? g_himem060_mb : 0;
         uint32_t want_base  = want_ts ? 0x01000000u : 0x10000000u;
         int      want_mb    = want_ts ? want_ts : want_060;
@@ -2185,7 +2217,7 @@ void mx68k_reset_hard(void) {
 
         /* テスト専用。IPL→MEMシャドウのコピーより前に置くので、復元が漏れてもMEM先頭は上書きされる */
         const char *st = getenv("MX68K_HIMEM_SELFTEST");
-        if (st && strcmp(st, "1") == 0 && g_wired_cpu_model == 1 && !p872_override) {
+        if (st && strcmp(st, "1") == 0 && cpu_is_030_chassis(g_wired_cpu_model) && !p872_override) {
             char line[384];
             mx_cpu_musashi_highmem_selftest(line, sizeof(line));
             debug_log("%s", line);
@@ -2211,7 +2243,7 @@ void mx68k_reset_hard(void) {
     /* P872: X68030機種(本番経路)は機種で決め、クロックに依らず XVIMode=3($E8E00B=$DC)に固定する
      * (XEiJ v0.26.01.08 MemoryMappedDevice.java:3381-3385 の isX68030()?0xdc と同方式)。
      * 環境変数優先時と68000機種は従来どおりクロックから導出する(68000+25MHzの$DCはD-82)。 */
-    Config.XVIMode = (g_wired_cpu_model == 1 && !p872_override) ? 3 : p270_derive_xvimode(g_clock_mhz);
+    Config.XVIMode = (cpu_is_030_chassis(g_wired_cpu_model) && !p872_override) ? 3 : p270_derive_xvimode(g_clock_mhz);
 
     debug_log("[P872-CPUMODEL] reset_hard requested=%d env_core=%.32s override=%d latched=%d backend=%s "
               "ipl=%s%s clock=%d xvimode=%d e8e00b=0x%02x frame=%d\n",
@@ -2262,25 +2294,52 @@ void mx68k_reset_hard(void) {
         MEM[2] = IPL[3]; MEM[3] = IPL[2];
         MEM[4] = IPL[5]; MEM[5] = IPL[4];
         MEM[6] = IPL[7]; MEM[7] = IPL[6];
-        /* P51-A: スキップしたベクタテーブル領域をゼロクリアする。手動ハードリセット
-         * 経路(line 669)で前セッションの BIOS 書込みの古い値が残らないようにするために
-         * 必要。コールドブート時は無害。 */
-#if P135_ENABLE
-        /* P135 Part1-B-memset: vector-skip 0 clear 実行を latch。範囲は [0x0008,0x07C0) で
-         *   0x1FF6 を含まないが、reset_hard がこの frame に走ったことの記録として捕捉。 */
+        /* P51-A/P918 (D-85): スキップしたベクタテーブル領域を0にするのは、電源投入相当(cold)の
+         * リセットだけにする。cold = 初回(mx68k_init 直後・電源OFF→ON後)、または CPUモデル・機種・
+         * メモリ容量・IPL の差し替えを伴うリセット(XM6 の「RAM容量変更時だけ0」と同じ形)。
+         * それ以外のリセット(⌘R/ソフトリセット)では保持する(warm)。根拠: IPLROM30 は $FF0052 で
+         * ベクタ初期化前に $0030 を読み、前回の IPL が書いた値($FF0770)が残っていればリセットと
+         * 判定して $0CBF=-1 にする($FF012C/$FF012E)。リセットで RAM を保持するのは px68k本家・
+         * px68k-libretro・XEiJ・XM6 の参照4実装と同じ。 */
         {
-            unsigned short b135 = p135_mem1ff6();
-            memset(MEM + P51A_VECTOR_SKIP_BEGIN, 0,
-                   P51A_VECTOR_SKIP_END - P51A_VECTOR_SKIP_BEGIN);
-            p135_host_latch(1u, g_mx68k_frame_num, b135, p135_mem1ff6());
-        }
+            const char *reason =
+                !s_p918_ramkey.valid                          ? "init" :
+                s_p918_ramkey.cpu    != g_wired_cpu_model      ? "cpu"  :
+                s_p918_ramkey.mach   != g_machine_type         ? "mach" :
+                s_p918_ramkey.mem    != g_memory_size_mb       ? "mem"  :
+                s_p918_ramkey.iplgen != s_ipl_load_gen         ? "ipl"  : "none";
+            /* g_machine_type はこの後 g_wired_machine_type へ確定させる、これから配線する値 */
+            int cold = strcmp(reason, "none") != 0;
+            if (cold) {
+#if P135_ENABLE
+                /* P135 Part1-B-memset: vector-skip 0 clear 実行を latch。範囲は [0x0008,0x07C0) で
+                 *   0x1FF6 を含まないが、reset_hard がこの frame に走ったことの記録として捕捉。 */
+                unsigned short b135 = p135_mem1ff6();
+                memset(MEM + P51A_VECTOR_SKIP_BEGIN, 0,
+                       P51A_VECTOR_SKIP_END - P51A_VECTOR_SKIP_BEGIN);
+                p135_host_latch(1u, g_mx68k_frame_num, b135, p135_mem1ff6());
 #else
-        memset(MEM + P51A_VECTOR_SKIP_BEGIN, 0,
-               P51A_VECTOR_SKIP_END - P51A_VECTOR_SKIP_BEGIN);
+                memset(MEM + P51A_VECTOR_SKIP_BEGIN, 0,
+                       P51A_VECTOR_SKIP_END - P51A_VECTOR_SKIP_BEGIN);
 #endif
-        /* P51-A: $0008..$07BF(68k 例外ベクタ + X68k IRQ 領域)をスキップする。
-         * 実ハンドラは BIOS がそこへ設置する。MPX68K/上流 px68k/px68k-libretro の
-         * リセット時挙動(IPL→MEM シャドウなし)と揃える。 */
+            }
+            debug_log("[P918-VECCLEAR] frame=%d decision=%s reason=%s "
+                      "prev={valid=%d cpu=%d mach=%d mem=%d iplgen=%u} "
+                      "now={cpu=%d mach=%d mem=%d iplgen=%u}\n",
+                      (int)g_mx68k_frame_num, cold ? "cold" : "warm", reason,
+                      s_p918_ramkey.valid, s_p918_ramkey.cpu, s_p918_ramkey.mach,
+                      s_p918_ramkey.mem, s_p918_ramkey.iplgen,
+                      g_wired_cpu_model, g_machine_type, g_memory_size_mb, s_ipl_load_gen);
+            s_p918_ramkey.valid  = 1;
+            s_p918_ramkey.cpu    = g_wired_cpu_model;
+            s_p918_ramkey.mach   = g_machine_type;
+            s_p918_ramkey.mem    = g_memory_size_mb;
+            s_p918_ramkey.iplgen = s_ipl_load_gen;
+        }
+        /* P51-A: $0008..$07BF(68k 例外ベクタ + X68k IRQ 領域)は IPL→MEM シャドウから除外する。
+         * 実ハンドラは BIOS がそこへ設置する。参照実装(MPX68K/上流 px68k/px68k-libretro)と揃うのは
+         * このシャドウを省いた点だけで、リセット時のゼロクリアはどの参照実装とも揃っていなかった
+         * (P918 で cold 時のみに限定)。$07C0 以降へのシャドウコピーは毎回行う(参照実装との乖離として残存)。 */
 #if P135_ENABLE
         /* P135 Part1-B-shadow: IPL→MEM byte-swap loop 実行を latch。範囲は
          *   [P51A_VECTOR_SKIP_END,0x20000) で 0x1FF6 を含む (IPLROM の非0値を書く)。 */
@@ -2299,7 +2358,7 @@ void mx68k_reset_hard(void) {
         }
 #endif
         debug_log("[P51-A] vector area $0008..$07BF excluded from IPL shadow "
-                  "(skip=%u bytes; manual-reset zeroed)\n",
+                  "(skip=%u bytes; zeroed only on cold (see [P918-VECCLEAR]))\n",
                   (unsigned)(P51A_VECTOR_SKIP_END - P51A_VECTOR_SKIP_BEGIN));
     }
 #else
@@ -3041,7 +3100,10 @@ void mx68k_reset_soft(void) {
      * (PC=$00000001)になっていた。個別移植は stub 欠落で再 stall のリスクが高いため、A> 到達
      * 実証済みの hard reset 本体をそのまま呼ぶ。X68000 実機の RESET スイッチも IPL からの
      * full reboot ゆえ挙動として妥当。現 MX は soft/hard で保存すべき差分状態を持たないため
-     * 実害なし(将来 soft の RAM 保持を厳密化する場合はここで再分岐する)。 */
+     * 実害なし(将来 soft の RAM 保持を厳密化する場合はここで再分岐する)。
+     * P918 (D-85): ハード/ソフトとも、配線が変わらないリセットではベクタ領域 $0008..$07BF を
+     * 含むメインRAMを保持するようになった(mx68k_reset_hard() の [P918-VECCLEAR] 判定)。
+     * 実機のリセットボタン相当であり、電源OFF→ON相当は電源ボタン(mx68k_shutdown→mx68k_init)が担う。 */
     mx68k_reset_hard();
 }
 
@@ -3577,6 +3639,22 @@ static int consume_pending_ops(void) {
      * fall-through する(1 フレームを潰さない、SASI キャッシュ無効化と同じ扱い)。
      * 先頭に置くのは、他の pending 操作の早期 return で 1 フレーム遅れないため。 */
     mx68k_mt32_apply_pending_reconfigure();
+    /* P935: MIDI 入出力デバイス切替の保留要求を消費する(mt32 再構成と同じく fall-through)。
+     * 要求から消費までの間に MIDI が外された場合は捨てる(旧実装の装着ガードと同じ扱い)。 */
+    {
+        int pending_out = atomic_exchange_explicit(&g_pending_midi_out_device, -1,
+                                                   memory_order_acquire);
+        if (pending_out >= 0 && g_midi_installed) {
+            midOutChg((uint32_t)pending_out, 0);
+            g_midi_out_device_index = pending_out;
+        }
+        int pending_in = atomic_exchange_explicit(&g_pending_midi_in_device, -1,
+                                                  memory_order_acquire);
+        if (pending_in >= 0 && g_midi_installed) {
+            midInChg((uint32_t)pending_in);
+            g_midi_in_device_index = pending_in;
+        }
+    }
     /* P503 (c2): SRAM ゼロクリアを hard/soft reset より**先**にチェックする。
      * 旧順序(hard_reset が先)では「Clear SRAM → ⌘R」を連続操作したとき、
      * hard reset が先に消費され(mx68k_reset_hard() は SRAM を再読込/再クリア
@@ -3663,7 +3741,41 @@ static inline void p822_clock_ratio(int mhz, int32_t *num, int32_t *den) {
     }
 }
 
+/* P918: テスト用の自動リセットフック MX68K_TEST_RESET_AT_FRAME(前例: mt32_bridge.c の
+ * MX68K_TEST_MT32_RECONF)。未設定なら何もしない。値は "N" / "N:hard" / "N:soft"(省略時 hard)。
+ * g_mx68k_frame_num == N になったフレーム境界で、通常の予約リセットと同じフラグを立てるだけで、
+ * 実行は直後の consume_pending_ops() に任せる(経路を通常のリセットと同一に保つ)。プロセス内で1回だけ。
+ * エミュレーションスレッドからのみ触るため同期不要。 */
+static int s_p918_test_reset_frame = -2;   /* -2 = 環境変数をまだ読んでいない / -1 = 無効 */
+static int s_p918_test_reset_soft  = 0;
+static int s_p918_test_reset_fired = 0;
+
+static void p918_test_reset_maybe_arm(void) {
+    if (s_p918_test_reset_frame == -2) {
+        const char *env = getenv("MX68K_TEST_RESET_AT_FRAME");
+        s_p918_test_reset_frame = -1;
+        if (env != NULL && env[0] != '\0') {
+            char *end = NULL;
+            long n = strtol(env, &end, 10);
+            if (end != env && n >= 0 && n <= 0x7FFFFFFFL) {
+                s_p918_test_reset_frame = (int)n;
+                s_p918_test_reset_soft = (end != NULL && strcmp(end, ":soft") == 0) ? 1 : 0;
+                debug_log("[P918-TESTRESET] armed frame=%d kind=%s\n",
+                          s_p918_test_reset_frame, s_p918_test_reset_soft ? "soft" : "hard");
+            }
+        }
+    }
+    if (s_p918_test_reset_frame < 0 || s_p918_test_reset_fired) return;
+    if (g_mx68k_frame_num != s_p918_test_reset_frame) return;
+    if (s_p918_test_reset_soft) g_pending_soft_reset = 1;
+    else                        g_pending_hard_reset = 1;
+    s_p918_test_reset_fired = 1;
+    debug_log("[P918-TESTRESET] fired frame=%d kind=%s\n",
+              g_mx68k_frame_num, s_p918_test_reset_soft ? "soft" : "hard");
+}
+
 void mx68k_run_frame(void) {
+    p918_test_reset_maybe_arm();
     if (consume_pending_ops()) return;
 
     /* P443 (D-7): ゲスト側イジェクト後も g_fdd_path[] に古いパスが残る副次不具合の
@@ -4661,6 +4773,9 @@ void mx68k_run_frame(void) {
              *  同一クロック単位 clk_line = line_usedclk を渡す)。
              * ★未装着時は呼ばない — 未装着時の挙動は完全に従来どおり。 */
             if (g_midi_installed) {
+                /* P935 (D-73): CoreMIDI 受信スレッドが積んだバイトを、ここ(エミュスレッド)で
+                 * Rx_buff へ移して Rx 割込みを発行する。MIDI_Timer と同じ実行文脈に揃える。 */
+                mx68k_midi_rx_pump();
                 MIDI_Timer((int32_t)line_usedclk);
                 MIDI_DelayOut((uint32_t)g_midi_delay_ms);   /* P490: 設定可変(ライブ反映) */
             }
@@ -7038,8 +7153,8 @@ static int do_load_state(const char* path) {
     {
         int ovr = m68000_cpu_env_override();
         int cpu_pending = (!ovr && g_cpu_model != g_wired_cpu_model);
-        int pend_ts  = (!ovr && g_wired_cpu_model == 1 && g_himem_mb == 16) ? 16 : 0;
-        int pend_060 = (!pend_ts && !ovr && g_wired_cpu_model == 1 && himem060_valid_mb(g_himem060_mb))
+        int pend_ts  = (!ovr && cpu_is_030_chassis(g_wired_cpu_model) && g_himem_mb == 16) ? 16 : 0;
+        int pend_060 = (!pend_ts && !ovr && cpu_is_030_chassis(g_wired_cpu_model) && himem060_valid_mb(g_himem060_mb))
                        ? g_himem060_mb : 0;
         if ((g_wired_himem_mb || g_wired_himem060_mb) &&
             (cpu_pending || pend_ts != g_wired_himem_mb || pend_060 != g_wired_himem060_mb)) {
@@ -7471,8 +7586,124 @@ static bool load_ipl_file(const char *path) {
         ok = false;
     }
     free(tmp);
+    if (ok) s_ipl_load_gen++;   /* P918: IPL 差し替えの世代(ベクタ領域 cold 判定用) */
     debug_log( "[MX68K] IPLROM: %s -> %s\n", path, ok ? "OK" : "FAIL");
     return ok;
+}
+
+/* P920 (D-86): CGROM の 6x12 フォント領域(ゲスト $FBF400-$FBFFFF = FONT[0xBF400..0xC0000))が
+ * 全部0のとき、X68000用IPLROMファイルから補完する。IPLROM30 の _FNTADR は 6x12 で
+ * $FBF400+code*12 を返すが、X68000から吸い出した CGROM.DAT ではこの領域が空のことがある
+ * (X68000用IPLROMは 6x12 を自身の中に持つため影響しない)。XEiJ ROM.java:350-362 に準じ、
+ * 12x254 バイトをコピーし残り24バイトは0にする(1.1 の254・255番目の位置はフォントではない FF 列)。
+ * コピー元の位置は版を決め打ちせず、_FNTADR の命令列 203C 00FF xxxx C2FC 000C から取り出す。
+ * X68030筐体では IPL[] に IPLROM30 が入っていることがあるので、IPL[] ではなくファイルを直接読む。
+ * 機種による分岐は設けない(XEiJ と同じく無条件)。CGROM のロード1回につき必ず1行ログを出す。 */
+#define P920_CG6X12_OFF   0xBF400u
+#define P920_CG6X12_LEN   3072u    /* 256文字 x 12バイト、0xBF400+0xC00 == 0xC0000(FONT末尾) */
+#define P920_FILL_BYTES   3048u    /* 254文字 x 12バイト */
+#define P920_IPL_SIZE     0x20000u
+#define P920_IPL_BASE     0xFE0000u  /* 128KB IPLROM ファイル先頭のゲストアドレス */
+#define P920_BANG         0x21u      /* '!'(XEiJ と同じ代表グリフ) */
+static void p920_fill_cg6x12_from_iplrom(const char *ipl_path) {
+    if (!FONT) {
+        /* 到達しない防御分岐(呼び出し元は FONT 非NULL の cg_ok 成立時のみ呼ぶ) */
+        debug_log("[P920-CG6X12-FILL] action=skip_nofont\n");
+        return;
+    }
+    uint32_t region_nz_before = 0;
+    for (uint32_t i = 0; i < P920_CG6X12_LEN; i++) if (FONT[P920_CG6X12_OFF + i]) region_nz_before++;
+
+    const char *reason = NULL;   /* NULL = コピー元が有効 */
+    uint8_t *buf = NULL;
+    uint32_t pat_hits = 0, fntadr_at = 0, src_addr = 0, src_off = 0, src_bang_nz = 0;
+
+    if (!ipl_path || !ipl_path[0]) {
+        reason = "no_path";
+    } else {
+        FILE *fp = fopen(ipl_path, "rb");
+        if (!fp) {
+            reason = "open_failed";
+        } else {
+            buf = (uint8_t *)malloc(P920_IPL_SIZE);
+            if (!buf || fread(buf, 1, P920_IPL_SIZE, fp) != P920_IPL_SIZE) reason = "short_read";
+            fclose(fp);
+        }
+    }
+    if (!reason) {
+        /* move.l #$00FFxxxx,d0 / mulu.w #12,d1 を偶数オフセットで走査する */
+        for (uint32_t i = 0; i + 10 <= P920_IPL_SIZE; i += 2) {
+            if (buf[i] == 0x20 && buf[i + 1] == 0x3C && buf[i + 2] == 0x00 && buf[i + 3] == 0xFF &&
+                buf[i + 6] == 0xC2 && buf[i + 7] == 0xFC && buf[i + 8] == 0x00 && buf[i + 9] == 0x0C) {
+                uint32_t a = 0x00FF0000u | ((uint32_t)buf[i + 4] << 8) | buf[i + 5];
+                if (pat_hits == 0) {
+                    fntadr_at = P920_IPL_BASE + i;
+                    src_addr = a;
+                } else if (a != src_addr) {
+                    reason = "pattern_ambiguous";   /* 同じ値の重複は許す */
+                }
+                pat_hits++;
+            }
+        }
+        if (pat_hits == 0) reason = "pattern_not_found";
+    }
+    if (!reason) {
+        src_off = src_addr - P920_IPL_BASE;
+        if (src_off + P920_FILL_BYTES > P920_IPL_SIZE) {
+            reason = "src_out_of_range";
+        } else {
+            for (uint32_t k = 0; k < 12; k++) if (buf[src_off + 12 * P920_BANG + k]) src_bang_nz++;
+            if (src_bang_nz == 0) reason = "src_glyph_empty";
+        }
+    }
+
+    const char *action;
+    uint32_t copied = 0, zeroed = 0, mismatch_bytes = 0;
+    int first_mismatch = -1;
+    if (region_nz_before == 0) {
+        if (!reason) {
+            /* buf はファイルのBEバイト列のまま、FONT 側は P174 のスワップ済みなので ^1 を付ける */
+            for (uint32_t i = 0; i < P920_FILL_BYTES; i++) FONT[(P920_CG6X12_OFF + i) ^ 1] = buf[src_off + i];
+            for (uint32_t i = P920_FILL_BYTES; i < P920_CG6X12_LEN; i++) FONT[(P920_CG6X12_OFF + i) ^ 1] = 0;
+            copied = P920_FILL_BYTES;
+            zeroed = P920_CG6X12_LEN - P920_FILL_BYTES;
+            action = "filled";
+        } else {
+            action = "skip_nosrc";
+        }
+    } else {
+        if (!reason) {
+            /* 既存の領域は変更せず、参照と比較して違えば警告だけ出す(FONT 側に ^1、buf はそのまま) */
+            for (uint32_t i = 0; i < P920_FILL_BYTES; i++) {
+                if (FONT[(P920_CG6X12_OFF + i) ^ 1] != buf[src_off + i]) {
+                    if (first_mismatch < 0) first_mismatch = (int)i;
+                    mismatch_bytes++;
+                }
+            }
+            for (uint32_t i = P920_FILL_BYTES; i < P920_CG6X12_LEN; i++) {
+                if (FONT[(P920_CG6X12_OFF + i) ^ 1] != 0) {
+                    if (first_mismatch < 0) first_mismatch = (int)i;
+                    mismatch_bytes++;
+                }
+            }
+            action = mismatch_bytes ? "present_mismatch" : "present_match";
+        } else {
+            action = "present_nosrc";
+        }
+    }
+
+    uint32_t region_nz_after = 0;
+    for (uint32_t i = 0; i < P920_CG6X12_LEN; i++) if (FONT[P920_CG6X12_OFF + i]) region_nz_after++;
+    char bang[25];
+    for (uint32_t k = 0; k < 12; k++) {
+        snprintf(bang + k * 2, 3, "%02X", (unsigned)FONT[(P920_CG6X12_OFF + 12 * P920_BANG + k) ^ 1]);
+    }
+    free(buf);
+    debug_log("[P920-CG6X12-FILL] action=%s reason=%s src=%s pat_hits=%u fntadr_at=%06X src_addr=%06X src_off=%05X src_bang_nz=%u region_nz_before=%u copied=%u zeroed=%u region_nz_after=%u mismatch_bytes=%u first_mismatch=%d bang=%s\n",
+              action, reason ? reason : "-", p872_basename(ipl_path),
+              (unsigned)pat_hits, (unsigned)fntadr_at, (unsigned)src_addr, (unsigned)src_off,
+              (unsigned)src_bang_nz, (unsigned)region_nz_before, (unsigned)copied, (unsigned)zeroed,
+              (unsigned)region_nz_after, (unsigned)mismatch_bytes, first_mismatch, bang);
 }
 
 void mx68k_set_bios_path(const char* iplrom, const char* cgrom) {
@@ -7481,11 +7712,11 @@ void mx68k_set_bios_path(const char* iplrom, const char* cgrom) {
     if (iplrom) {
         strncpy(g_iplrom_path, iplrom, sizeof(g_iplrom_path) - 1);
         g_iplrom_path[sizeof(g_iplrom_path) - 1] = '\0';
-        if (g_wired_cpu_model == 1 && !m68000_cpu_env_override()) {
-            /* P872: X68030で動作中に「適用」されても、IPLROM.DAT で IPL[] を上書きしない
-             * (次のハードリセットで機種に応じて読み込む) */
+        if (cpu_is_030_chassis(g_wired_cpu_model) && !m68000_cpu_env_override()) {
+            /* P872: X68030筐体(P910/P916: 040turbo/060turboを含む)で動作中に「適用」されても、IPLROM.DAT で IPL[] を
+             * 上書きしない(次のハードリセットで機種に応じて読み込む) */
             ipl_ok = (s_ipl_loaded_model >= 0);
-            debug_log("[P872-CPUMODEL] set_bios_path: IPL load deferred (wired=EC030)\n");
+            debug_log("[P872-CPUMODEL] set_bios_path: IPL load deferred (wired=%d)\n", g_wired_cpu_model);
         } else {
             ipl_ok = load_ipl_file(iplrom);
             if (ipl_ok) s_ipl_loaded_model = 0;
@@ -7512,6 +7743,25 @@ void mx68k_set_bios_path(const char* iplrom, const char* cgrom) {
                         FONT[i]     = FONT[i + 1];
                         FONT[i + 1] = t;
                     }
+#if P919_ENABLE
+                    /* P919 (D-85): ロード直後(スワップ後)の FONT[] の状態を 1 回だけ記録する。
+                     * bang6x12 は XEiJ ROM.java:355 と同じ '!'(0x21) の 12 バイトを、
+                     * スワップを戻してゲスト側のバイト順で出す。観測のみ。 */
+                    {
+                        uint32_t p919_fb_nz = 0, p919_cg_nz = 0;
+                        char p919_bang[25];
+                        for (uint32_t i = 0xBF400; i < 0xC0000; i++) if (FONT[i]) p919_fb_nz++;
+                        for (uint32_t i = 0x3A800; i < 0x3B800; i++) if (FONT[i]) p919_cg_nz++;
+                        for (uint32_t k = 0; k < 12; k++) {
+                            snprintf(p919_bang + k * 2, 3, "%02X", (unsigned)FONT[(0xBF58C + k) ^ 1]);
+                        }
+                        debug_log("[P919-CG6X12-LOAD] fb6x12_nzbytes=%u cg8x16_nzbytes=%u bang6x12=%s\n",
+                                  (unsigned)p919_fb_nz, (unsigned)p919_cg_nz, p919_bang);
+                    }
+#endif
+                    /* P920 (D-86): 6x12 領域が空なら X68000用IPLROMから補完する(上の
+                     * [P919-CG6X12-LOAD] は補完前の状態の記録として残す) */
+                    p920_fill_cg6x12_from_iplrom(g_iplrom_path);
                 }
             }
             fclose(fp);
@@ -7680,8 +7930,8 @@ bool mx68k_midi_get_output_device_name(int idx, char *buf, int len) {
 void mx68k_midi_set_output_device(int idx) {
     if (!g_midi_installed) return;
     if (idx < 0 || idx >= mx68k_midi_get_output_device_count()) return;
-    midOutChg((uint32_t)idx, 0);
-    g_midi_out_device_index = idx;
+    /* P935: 実際の切替は consume_pending_ops()(エミュレーションスレッド)で行う。 */
+    atomic_store_explicit(&g_pending_midi_out_device, idx, memory_order_release);
 }
 
 int mx68k_midi_get_input_device_count(void) {
@@ -7696,8 +7946,8 @@ bool mx68k_midi_get_input_device_name(int idx, char *buf, int len) {
 void mx68k_midi_set_input_device(int idx) {
     if (!g_midi_installed) return;
     if (idx < 0 || idx >= mx68k_midi_get_input_device_count()) return;
-    midInChg((uint32_t)idx);
-    g_midi_in_device_index = idx;
+    /* P935: 実際の切替は consume_pending_ops()(エミュレーションスレッド)で行う。 */
+    atomic_store_explicit(&g_pending_midi_in_device, idx, memory_order_release);
 }
 
 /* P693: MIDI Viewer 向け — YM3802 レジスタ状態のスナップショット。
@@ -7711,8 +7961,8 @@ void mx68k_midi_set_input_device(int idx) {
  *   Core/px68k/x68k/midi.c:665,677,704,715,720,739,750-752 と
  *   MIDI_Timer 経路の MIDI_Buffered--)。本関数の呼び出し元も同じ
  *   エミュレーションスレッド(EmulatorEngine.fetchMonitorsAndPerfStats)
- *   なのでロック不要。MIDI_IntEnable / MIDI_R35 は mid_In_callback() から
- *   *読まれる* が書かれないため、この判断には影響しない。
+ *   なのでロック不要。MIDI_IntEnable / MIDI_R35 を読む受信処理も、P935 以降は
+ *   エミュレーションスレッドの mx68k_midi_rx_pump() で行う。
  *
  * ★MIDI_IntFlag / MIDI_IntVect は意図的に含めない(EmulatorBridge.h の
  *   MX68K_MIDIRegs コメント参照 — D-73 の既知競合に読み手を足さないため)。
@@ -7735,10 +7985,11 @@ void mx68k_get_midi_regs(MX68K_MIDIRegs* out) {
     out->tx_fifo_used = MIDI_Buffered;
 }
 
-/* P872: CPUモデル(0=MC68000、1=MC68EC030=X68030)。設定値を保存するだけで、
+/* P872: CPUモデル(0=MC68000、1=MC68EC030=X68030、2=MC68040=X68030+040turbo[P910]、
+ * 3=MC68060相当=X68030+060turbo[P916])。設定値を保存するだけで、
  * 次の mx68k_reset_hard() で g_wired_cpu_model へ確定する */
 void mx68k_set_cpu_model(int model) {
-    g_cpu_model = (model == 1) ? 1 : 0;
+    g_cpu_model = (model >= 1 && model <= 3) ? model : 0;
 }
 
 /* P887: 16のみ有効、それ以外は0。次の mx68k_reset_hard() で反映する */
@@ -10312,6 +10563,20 @@ void mx68k_get_opm_status(MX68K_OPMStatus* out) {
  * note/octave の算出は上の mx68k_get_opm_status() と同一の note_table / 繰上り条件を
  * 使う(表示が 2 パネル間でずれないようにするため — 式を変える場合は両方直すこと)。
  * CSM(reg $14)に関する既知の制約も上と同じくそのまま当てはまる。 */
+/* P929: MIDI Keyboard Viewer 用のノート状態(契約は EmulatorBridge.h 側のコメント)。 */
+void mx68k_get_midi_note_status(MX68K_MIDINoteStatus* out) {
+    if (!out) return;
+    uint16_t mask = 0;
+    for (int ch = 0; ch < 16; ch++) {
+        for (int k = 0; k < 128; k++) {
+            uint8_t v = atomic_load_explicit(&g_midi_note_vel[ch][k], memory_order_relaxed);
+            out->vel[ch][k] = v;
+            if (v) mask |= (uint16_t)(1u << ch);
+        }
+    }
+    out->active_mask = mask;
+}
+
 void mx68k_get_opm_detail_status(MX68K_OPMDetailStatus* out) {
     if (!out) return;
     memset(out, 0, sizeof(*out));
@@ -10392,6 +10657,56 @@ void mx68k_get_opm_detail_status(MX68K_OPMDetailStatus* out) {
         if (vol < 0)   vol = 0;
         if (vol > 127) vol = 127;
         d->volume_est = (int32_t)vol;
+    }
+}
+
+/* P933: OPM Operator Viewer 用(契約は EmulatorBridge.h 側のコメント)。
+ * ビット抽出式は Core/px68k/fmgen/opm.cpp:271-313 の OPM::SetParameter() と同一。
+ * レジスタアドレスは $X0 + (slot<<3) + ch で、slot はレジスタ上のスロット番号。
+ * 出力インデックス idx(M1/C1/M2/C2 = op[] 順)へは slottable[4]={0,2,1,3}
+ * (opm.cpp:278、op = slottable[slot])で写像する。この表は自己逆写像なので
+ * slot = slottable[idx] としても同じ値になる。 */
+void mx68k_get_opm_operator_status(MX68K_OPMOperatorStatus* out) {
+    if (!out) return;
+    memset(out, 0, sizeof(*out));
+    extern uint8_t g_opm_shadow[256];
+    extern uint8_t g_opm_written[256];
+    extern uint8_t g_opm_keyon[8];
+
+    static const uint8_t slottable[4] = { 0, 2, 1, 3 };
+
+    for (int ch = 0; ch < 8; ch++) {
+        MX68K_OPMOperatorChannel* d = &out->ch[ch];
+        uint8_t reg_alg_fb = g_opm_shadow[0x20 + ch];
+        out->alg[ch]   = reg_alg_fb & 0x07;
+        out->fb[ch]    = (reg_alg_fb >> 3) & 0x07;
+        out->keyon[ch] = g_opm_keyon[ch];
+
+        for (int slot = 0; slot < 4; slot++) {
+            int idx = slottable[slot];
+            int off = (slot << 3) + ch;
+            uint8_t r40 = g_opm_shadow[0x40 + off];
+            uint8_t r60 = g_opm_shadow[0x60 + off];
+            uint8_t r80 = g_opm_shadow[0x80 + off];
+            uint8_t rA0 = g_opm_shadow[0xA0 + off];
+            uint8_t rC0 = g_opm_shadow[0xC0 + off];
+            uint8_t rE0 = g_opm_shadow[0xE0 + off];
+
+            d->written[idx] = (g_opm_written[0x40 + off] | g_opm_written[0x60 + off] |
+                               g_opm_written[0x80 + off] | g_opm_written[0xA0 + off] |
+                               g_opm_written[0xC0 + off] | g_opm_written[0xE0 + off]) != 0;
+            d->dt1[idx]   = (r40 >> 4) & 0x07;
+            d->mul[idx]   = r40 & 0x0F;
+            d->tl[idx]    = r60 & 0x7F;
+            d->ks[idx]    = (r80 >> 6) & 0x03;
+            d->ar[idx]    = r80 & 0x1F;
+            d->amsen[idx] = (rA0 & 0x80) ? 1 : 0;
+            d->d1r[idx]   = rA0 & 0x1F;
+            d->dt2[idx]   = (rC0 >> 6) & 0x03;
+            d->d2r[idx]   = rC0 & 0x1F;
+            d->d1l[idx]   = (rE0 >> 4) & 0x0F;
+            d->rr[idx]    = rE0 & 0x0F;
+        }
     }
 }
 
@@ -10648,11 +10963,12 @@ void mx68k_get_bg_page_rgba(int page, uint8_t* out_rgba, int* out_size) {
     VLINEBG = save_vlinebg; BG_VLINE = save_bgvline; TextDotX = save_textdotx;
 }
 
-/* P348/P690: グラフィックページ(GRP)を512x512のRGBAバッファへダンプする。GVRAMの
- * アドレス計算はgvram.cのモード別の実際の読出し経路
- * (Grp_DrawLine4 / Grp_DrawLine8TR / Grp_DrawLine16)を踏襲し、走査線スクロール
- * の項を除いたもの——走査線に依存しない直接のページダンプ。
- * このダンプが対象としないモードでは0を返す(バッファはゼロのまま)。 */
+/* P348/P690/P934: グラフィックページ(GRP)を1024x1024(ストライド1024*4)のRGBA
+ * バッファへダンプする(16色1024dotモード時は1024x1024全面、それ以外は左上512x512)。
+ * GVRAMのアドレス計算はgvram.cのモード別の実際の読出し経路
+ * (Grp_DrawLine4 / Grp_DrawLine4h / Grp_DrawLine8TR / Grp_DrawLine16)を踏襲し、
+ * 走査線スクロールの項を除いたもの——走査線に依存しない直接のページダンプ。
+ * 全モードが復号対象で、out_rgbaがNULLのときのみ0を返す。 */
 extern uint16_t Pal16Adr[256];   /* gvram.c:22——gvram.hでは宣言されていない */
 
 /* P690: D11 (CRTC R20 bit3) をここに一元化する。gvram.c:94 GVRAM_Read /
@@ -10664,17 +10980,21 @@ static int grp_page_mode(void) {
     return (CRTC_Regs[0x28] & 8) ? 3 : (CRTC_Regs[0x28] & 3);
 }
 
-int mx68k_get_grp_page_rgba(int page, uint8_t* out_rgba) {
+int mx68k_get_grp_page_rgba(int page, uint8_t* out_rgba, int* out_size) {
     if (!out_rgba) return 0;
-    memset(out_rgba, 0, 512 * 512 * 4);
+    memset(out_rgba, 0, 1024 * 1024 * 4);
     int mode = grp_page_mode();   /* 0=16色4面 / 1,2=256色2面 / 3=65536色1面 */
-    if (mode == 0 && (CRTC_Regs[0x28] & 4)) return 0;   /* 1024dot モードは対象外 */
-    for (int y = 0; y < 512; y++) {
-        for (int x = 0; x < 512; x++) {
+    int is1024 = (mode == 0) && (CRTC_Regs[0x28] & 4);
+    int dim = is1024 ? 1024 : 512;
+    if (out_size) *out_size = dim;
+    for (int y = 0; y < dim; y++) {
+        for (int x = 0; x < dim; x++) {
             uint32_t base = (uint32_t)(y & 0x1ff) * 1024 + (uint32_t)(x & 0x1ff) * 2;
             uint32_t col = 0;
             if (mode == 0) {                     /* 16色4面(gvram.c Grp_DrawLine4 準拠) */
-                int p = page & 3;
+                /* 1024dot時は象限→ページ: 左上=0 / 右上=1 / 左下=2 / 右下=3
+                 * (Grp_DrawLine4h 準拠、idx0は4面モードと同じく透過扱い) */
+                int p = is1024 ? (((y >> 9) & 1) * 2 + ((x >> 9) & 1)) : (page & 3);
                 uint8_t idx = (uint8_t)((GVRAM[base + (p >> 1)] >> (4 * (p & 1))) & 0x0f);
                 if (idx) col = px68k_color_to_rgba(GrphPal32[idx]);
             } else if (mode == 3) {              /* 65536色1面(gvram.c Grp_DrawLine16 準拠) */
@@ -10690,17 +11010,17 @@ int mx68k_get_grp_page_rgba(int page, uint8_t* out_rgba) {
                 uint8_t idx = GVRAM[base + (page & 1)];
                 if (idx) col = px68k_color_to_rgba(GrphPal32[idx]);
             }
-            if (col) *(uint32_t*)(out_rgba + (y * 512 + x) * 4) = col;
+            if (col) *(uint32_t*)(out_rgba + (y * 1024 + x) * 4) = col;
         }
     }
     return 1;
 }
 
-/* P690: 現在の色モードで有効なページ数(Picker 段数の動的化用)。
- * 0=非対応(16色1024dot モード)、1=65536色、2=256色、4=16色。 */
+/* P690/P934: 現在の色モードで有効なページ数(Picker 段数の動的化用)。
+ * 1=65536色または16色1024dot(1024x1024の1面)、2=256色、4=16色。 */
 int mx68k_get_grp_page_count(void) {
     int mode = grp_page_mode();
-    if (mode == 0) return (CRTC_Regs[0x28] & 4) ? 0 : 4;
+    if (mode == 0) return (CRTC_Regs[0x28] & 4) ? 1 : 4;
     if (mode == 3) return 1;
     return 2;
 }

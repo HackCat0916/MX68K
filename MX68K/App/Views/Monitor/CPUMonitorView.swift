@@ -110,6 +110,8 @@ extension MX68KStatus {
     /// 区分表示を省略する(XM6 TypeGの`si`も「X68030」のみ表示)。
     var machineDisplayName: String {
         if cpu_model == 1 { return "X68030" }
+        if cpu_model == 2 { return "X68030 + 040turbo" }   // P910
+        if cpu_model == 3 { return "X68030 + 060turbo" }   // P916
         let bus = machine_type == 4 ? "SCSI" : "SASI"
         return "X68000 (\(bus))"
     }

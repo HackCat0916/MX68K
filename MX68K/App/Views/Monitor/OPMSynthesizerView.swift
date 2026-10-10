@@ -69,7 +69,7 @@ struct OPMSynthesizerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("OPM Synthesizer (YM2151 FM 8ch)").font(.headline)
+            Text("OPM Keyboard (YM2151 FM 8ch)").font(.headline)
             Divider()
             // 1ch = 「ステータス → 鍵盤 → オクターブ目盛り」の縦積みブロック。
             // 情報欄を対応する鍵盤の真上に置くことで、横幅が広がっても両者が離れない。

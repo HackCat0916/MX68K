@@ -11,14 +11,15 @@ void mx68k_set_bios_path(const char* iplrom_path, const char* cgrom_path);
 void mx68k_set_bios_path_030(const char* iplrom30_path);
 
 // ---- CPUモデル(P872) ----
-// 0=MC68000(c68k)、1=MC68EC030(X68030、Musashi)。ハードリセット(ソフトリセットも同じ
-// mx68k_reset_hard() を通る)で反映。環境変数 MX68K_CPU_CORE 設定時はそちらが優先。
-// 1 のとき IPLROM30.DAT(mx68k_set_bios_path_030)を読み込み、読込みに失敗したら 0 で起動する。
+// 0=MC68000(c68k)、1=MC68EC030(X68030、Musashi)、2=MC68040(X68030+040turbo、Musashi、P910)、
+// 3=MC68060相当(X68030+060turbo、Musashi 040型、P916)。
+// ハードリセット(ソフトリセットも同じ mx68k_reset_hard() を通る)で反映。環境変数 MX68K_CPU_CORE 設定時はそちらが優先。
+// 1/2/3 のとき IPLROM30.DAT(mx68k_set_bios_path_030)を読み込み、読込みに失敗したら 0 で起動する。
 void mx68k_set_cpu_model(int model);
 // 配線確定したCPUモデル(直近の mx68k_reset_hard() で確定した値)
 int mx68k_get_cpu_model(void);
 // P887: X68030ハイメモリ(TS-6BE16相当、$01000000-$01FFFFFF)。16=有効(16MB固定)、それ以外=無効。
-// ハードリセット(ソフトリセットも同じ mx68k_reset_hard() を通る)で反映。X68030(CPUモデル1)以外、
+// ハードリセット(ソフトリセットも同じ mx68k_reset_hard() を通る)で反映。X68030筐体(CPUモデル1/2)以外、
 // および環境変数 MX68K_CPU_CORE 設定時は無効。内容はリセットでは保持し、アプリ起動時はゼロ。
 // 有効中はステートセーブ/ロードを rc=-17 で拒否する。
 void mx68k_set_high_memory_mb(int mb);
@@ -205,11 +206,11 @@ uint32_t mx68k_midi_get_rx_last(void);
  * ★ここに入れる 7 項目はいずれもエミュレーションスレッドだけが書く値で、
  *   読み出しも同じエミュレーションスレッド(fetchMonitorsAndPerfStats)から
  *   行うためロック不要。
- * ★MIDI_IntFlag / MIDI_IntVect は意図的に含めない —— この 2 つは
+ * ★MIDI_IntFlag / MIDI_IntVect は含めていない —— 当時(P693)は
  *   mid_In_callback()(CoreMIDI コールバックスレッド)からも書かれており、
- *   エミュレーションスレッド側の書込みと無同期の read-modify-write 競合に
- *   なっている(Docs/09 の D-73、本サイクルのスコープ外)。既知の競合に
- *   読み手を足さないため除外する。 */
+ *   既知の競合(Docs/09 の D-73)に読み手を足さないため除外した。
+ *   P935 で受信処理をエミュレーションスレッド(mx68k_midi_rx_pump)へ移したため
+ *   この競合は解消済みだが、構造体の定義は変更していない。 */
 typedef struct {
     uint8_t  reg_high;      /* MIDI_RegHigh — レジスタバンク選択(R00 下位4bit) */
     uint8_t  vector;        /* MIDI_Vector — 割込みベクタ上位(R02 の data&0xe0) */
@@ -700,7 +701,7 @@ typedef struct {
     uint32_t isp;
     int      clock_mhz;
     int      machine_type;
-    int      cpu_model;      // 0=MC68000(c68k)、1=MC68EC030(Musashi、X68030)。配線確定値[mx68k_get_cpu_model()と同じ]
+    int      cpu_model;      // 0=MC68000(c68k)、1=MC68EC030(Musashi、X68030)、2=MC68040(Musashi、040turbo)、3=MC68060相当(X68030+060turbo、Musashi 040型、P916)。配線確定値[mx68k_get_cpu_model()と同じ]
     int      memory_mb;
     int      high_memory_mb;   // P887/P889: ハイメモリの配線確定値(MB、0=無効。TS-6BE16相当=16、060turbo相当=16〜768)
     bool     fpu_enabled;    // P898: 配線確定値(X68030かつFPU有効でハードリセット済みのときだけtrue)
@@ -980,6 +981,56 @@ typedef struct {
 
 void mx68k_get_opm_detail_status(MX68K_OPMDetailStatus* out);
 
+/* P933: OPM Operator Viewer(独立ウィンドウ)用の、オペレータ単位の詳細パラメータ。
+ * mx68k_get_opm_detail_status() と同じ「ロックなしスナップショットコピー」契約、read-only。
+ * 値は Bridge 側 OPM シャドウ(P479 由来 g_opm_shadow[] / g_opm_written[] と g_opm_keyon[])から導出する。
+ * 既存 MX68K_OPMDetailChannel を拡張しないのは、OPM Keyboard Viewer の毎フレーム取得コストを
+ * 増やさないため。
+ *
+ * ★配列インデックス [0..3] = M1/C1/M2/C2(信号流れ順 = fmgen の op[] 順 = g_opm_keyon[] の bit 順)。
+ * レジスタ上のスロット順(slot0=M1, slot1=M2, slot2=C1, slot3=C2)とは異なるため、Bridge 側で
+ * opm.cpp:278-281 の slottable[4]={0,2,1,3} に従って並べ替えてから出力する
+ * (MX68K_OPMDetailChannel.tl[] はスロット順のままなので混同しないこと)。
+ * 各値はレジスタの生ビット値(AR/D1R/D2R は 0-31、RR は 0-15 で、fmgen 内部の ×2 / ×4+2
+ * 換算前の値)。 */
+typedef struct {
+    bool    written[4];   /* そのOPの $40/$60/$80/$A0/$C0/$E0 系いずれかに一度でも書込みがあったか */
+    uint8_t dt1[4];       /* 0-7:   reg $40 系 bit4-6 */
+    uint8_t mul[4];       /* 0-15:  reg $40 系 bit0-3 */
+    uint8_t tl[4];        /* 0-127: reg $60 系 bit0-6 */
+    uint8_t ks[4];        /* 0-3:   reg $80 系 bit6-7 */
+    uint8_t ar[4];        /* 0-31:  reg $80 系 bit0-4 */
+    uint8_t amsen[4];     /* 0-1:   reg $A0 系 bit7 */
+    uint8_t d1r[4];       /* 0-31:  reg $A0 系 bit0-4 */
+    uint8_t dt2[4];       /* 0-3:   reg $C0 系 bit6-7 */
+    uint8_t d2r[4];       /* 0-31:  reg $C0 系 bit0-4 */
+    uint8_t d1l[4];       /* 0-15:  reg $E0 系 bit4-7 */
+    uint8_t rr[4];        /* 0-15:  reg $E0 系 bit0-3 */
+} MX68K_OPMOperatorChannel;
+
+typedef struct {
+    MX68K_OPMOperatorChannel ch[8];
+    uint8_t alg[8];   /* 0-7: reg $20+ch の bit0-2 */
+    uint8_t fb[8];    /* 0-7: reg $20+ch の bit3-5 */
+    uint8_t keyon[8]; /* bit0-3 = M1/C1/M2/C2(g_opm_keyon[] そのまま、並べ替え不要) */
+} MX68K_OPMOperatorStatus;
+
+void mx68k_get_opm_operator_status(MX68K_OPMOperatorStatus* out);
+
+/* P929: MIDI Keyboard Viewer(独立ウィンドウ、16ch 縦並びの鍵盤表示)用のノート状態。
+ * mx68k_get_opm_detail_status() と同じ「ロックなしスナップショットコピー」契約、read-only。
+ * 値は Bridge/midi_coremidi.c の p633_midi_send_bytes() が、内蔵 MT-32 / 内蔵 SC-55 /
+ * 外部 CoreMIDI の 3 経路共通に記録するシャドウ(Bridge/midi_note_shadow.h)から導出する。
+ * ★「ゲストが送信した Note On/Off」の結果であり、音源が実際に発音中のボイスとは一致しない
+ *   (リリース中の残響・ボイス数上限・CC64 ホールドは反映されない)。
+ * ★relaxed 読み: 16×128 個の値は互いに厳密な同一瞬間の値ではない(モニタ表示専用)。 */
+typedef struct {
+    uint8_t  vel[16][128];   /* [ch][note] = 直近 Note On のベロシティ 1-127、0 = OFF */
+    uint16_t active_mask;    /* bit n = ch n が 1 つ以上 ON のノートを持つ */
+} MX68K_MIDINoteStatus;
+
+void mx68k_get_midi_note_status(MX68K_MIDINoteStatus* out);
+
 /* P491: サウンドモニタ(Mercury Unit の FM 部 = YMF288 / OPN3-L)。
  * mx68k_get_opm_status() と同じ「ロックなしスナップショットコピー」契約、
  * read-only(Core状態は一切変更しない)。値は全て Bridge 側 OPN シャドウ
@@ -1121,15 +1172,16 @@ int mx68k_get_bg_layer_visible(int layer);   /* layer: 0=BG0, 1=BG1。現在の�
 
 void mx68k_diag_set_last_frame_ms(double ms);   /* P526: 直前フレームの実経過ms(Swift計測値) */
 
-/* P348/P690: out_rgba には呼出し側が確保した512*512*4バイトのバッファを渡す。
- * 16色(4面)/256色(2面)/65536色(1面)の各モードで、指定グラフィック面ページを
- * GVRAMから直接読み出しBGRA8888で書き込む(透過ドットは alpha=0)。
- * 16色1024dotモードは非対応で、out_rgbaをゼロ埋めしたまま0を返す
- * (呼出し側は「非対応」として扱うこと)。成功時は1を返す。read-only。 */
-int mx68k_get_grp_page_rgba(int page, uint8_t* out_rgba);
+/* P348/P690/P934: out_rgba には呼出し側が確保した1024*1024*4バイトのバッファを渡す
+ * (ストライドは常に1024*4)。16色(4面)/256色(2面)/65536色(1面)/16色1024dot(1面)
+ * の各モードで、指定グラフィック面ページをGVRAMから直接読み出しBGRA8888で書き込む
+ * (透過ドットは alpha=0)。out_sizeには実際の有効サイズ(16色1024dotなら1024、
+ * それ以外は512)を返す——out_rgbaの左上out_size x out_size領域のみ内容があり、
+ * 残りは透過(0)。成功時は1を返す。read-only。 */
+int mx68k_get_grp_page_rgba(int page, uint8_t* out_rgba, int* out_size);
 
-/* P690: 現在の色モードで有効なグラフィック面ページ数。
- * 0=非対応(16色1024dotモード) / 1=65536色 / 2=256色 / 4=16色。read-only。 */
+/* P690/P934: 現在の色モードで有効なグラフィック面ページ数。
+ * 1=65536色または16色1024dot / 2=256色 / 4=16色。read-only。 */
 int  mx68k_get_grp_page_count(void);
 
 /* P690: CRTC R20 の D11(拡張VRAM配置、px68k実装が「Nemesis技法」と呼ぶ)経路で
@@ -3792,6 +3844,16 @@ void p602_workarea_snapshot(const char* tag);
  * (出力自体は 300 フレームごと。P492 と同じ周期・同じ位置)。フレーム番号は
  * 引数で渡さず、関数内部で g_mx68k_frame_num を直接参照する。 */
 void p602_periodic_dump(void);
+#endif
+
+/* ==== P919 (D-85): 6x12/8x16 フォント領域の読み出し計数プローブ ====
+ *  [P919-CG6X12] / [P919-CG6X12-S](m68000_bridge.c)と
+ *  [P919-CG6X12-LOAD](EmulatorBridge.c、CGROM ロード直後に 1 回)。
+ *  観測のみで、ゲストへ返す値・制御の流れは変えない。
+ *  0 にするとプローブ追加前とバイト単位で同じ動作になる。
+ *  Fix Plan: .mx68k_cycles/P919_plan.md */
+#ifndef P919_ENABLE
+#define P919_ENABLE            1   /* D-85調査用[P919-CG6X12]プローブ(0=休止, 1=計測有効) */
 #endif
 
 /* ===== P863: 常時コンパイルだった旧診断の既定無効化 =====

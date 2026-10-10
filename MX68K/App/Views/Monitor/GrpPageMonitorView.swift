@@ -2,8 +2,8 @@ import SwiftUI
 
 // P348/P690: グラフィック面(GRP)ページの生内容を画像として表示するモニタ。
 // XM6のグラフィック画面モニタと同じ「ページの生内容をそのまま見る」用途。
-// 色モードに応じてページ数が変わる(16色=4面 / 256色=2面 / 65536色=1面)。
-// 16色1024dotモードのみ非対応(512×512固定バッファに収まらないため)。
+// 色モードに応じてページ数が変わる(16色=4面 / 256色=2面 / 65536色=1面 /
+// 16色1024dot=1024×1024の1面)。
 struct GrpPageMonitorView: View {
     @EnvironmentObject var emulatorViewModel: EmulatorViewModel
     @State private var selectedPage = 0
@@ -12,10 +12,15 @@ struct GrpPageMonitorView: View {
 
     private var modeDescription: String {
         switch pageCount {
-        case 4: return "16色モード(4面)"
-        case 2: return "256色モード(2面)"
-        case 1: return "65536色モード(1面)"
-        default: return "非対応モード"
+        case 4: return String(localized: "16色モード(4面)")
+        case 2: return String(localized: "256色モード(2面)")
+        case 1:
+            // 1面は65536色と16色1024dotの2通りあり、ページ数だけでは区別できない
+            if emulatorViewModel.grpPageImages[0]?.width == 1024 {
+                return String(localized: "16色1024×1024モード(1面)")
+            }
+            return String(localized: "65536色モード(1面)")
+        default: return String(localized: "非対応モード")
         }
     }
 
@@ -52,7 +57,7 @@ struct GrpPageMonitorView: View {
                         .fill(Color.secondary.opacity(0.1))
                         .frame(width: 512, height: 512)
                         .overlay(
-                            Text("エミュレーション未実行、または16色1024×1024モード(モニタ非対応)です")
+                            Text("エミュレーション未実行です")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)

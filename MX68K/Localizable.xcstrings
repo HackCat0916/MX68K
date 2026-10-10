@@ -2551,32 +2551,32 @@
         }
       }
     },
-    "OPM Synthesizer Viewer": {
+    "OPM Keyboard Viewer": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "OPMシンセサイザービューア"
+            "value": "OPMキーボードビューア"
           }
         }
       }
     },
-    "OPM Synthesizer": {
+    "OPM Keyboard": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "OPMシンセサイザー"
+            "value": "OPMキーボード"
           }
         }
       }
     },
-    "OPM Synthesizer (YM2151 FM 8ch)": {
+    "OPM Keyboard (YM2151 FM 8ch)": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "OPM シンセサイザー (YM2151 FM 8ch)"
+            "value": "OPM キーボード (YM2151 FM 8ch)"
           }
         }
       }
@@ -5607,32 +5607,72 @@
         }
       }
     },
-    "This state file was saved with a different CPU model (X68000 / X68030) and cannot be loaded.": {
+    "This state file was saved with a different CPU model (X68000 / X68030 / 040turbo / 060turbo) and cannot be loaded.": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "このステートファイルは異なるCPUモデル(X68000 / X68030)で保存されたため、読み込めません。"
+            "value": "このステートファイルは異なるCPUモデル(X68000 / X68030 / 040turbo / 060turbo)で保存されたため、読み込めません。"
           }
         }
       }
     },
-    "X68030 (Experimental)": {
+    "X68030": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "X68030 (実験的)"
+            "value": "X68030"
           }
         }
       }
     },
-    "X68030 requires IPLROM30.DAT to be set in the BIOS settings.": {
+    "X68030, 040turbo and 060turbo require IPLROM30.DAT to be set in the BIOS settings.": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "X68030にはBIOS設定でIPLROM30.DATの指定が必要です。"
+            "value": "X68030・040turbo・060turboを選ぶには、BIOS設定でIPLROM30.DATを指定してください。"
+          }
+        }
+      }
+    },
+    "X68030 + 040turbo (MC68040, Experimental)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "X68030 + 040turbo (MC68040、実験的)"
+          }
+        }
+      }
+    },
+    "The real MC68040 always has a built-in FPU, so turning it off is a test-only configuration that does not exist on real hardware. When on, MX68K emulates it as an MC68881/68882-compatible FPU (approximation).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実機のMC68040は常にFPUを内蔵しているため、OFFは実機に存在しない検証用の構成です。ONのときはMC68881/68882互換として近似します。"
+          }
+        }
+      }
+    },
+    "X68030 + 060turbo (MC68060, Experimental)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "X68030 + 060turbo (MC68060、実験的)"
+          }
+        }
+      }
+    },
+    "The real MC68060 has a built-in FPU with a reduced instruction set (the missing instructions are emulated in software by 060turbo.sys), so turning it off is a test-only configuration. When on, MX68K emulates it as an MC68881/68882-compatible FPU (approximation; a superset of the real MC68060 FPU).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実機のMC68060は命令セットを縮小したFPUを内蔵しています(足りない命令は060turbo.sysがソフトウェアで実行します)。そのためOFFは検証用の構成です。ONのときはMC68881/68882互換として近似します(実機MC68060のFPUの上位互換)。"
           }
         }
       }
@@ -6319,22 +6359,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "拡張VRAM配置(CRTC R20 D11)を検出 — 色解釈は参考表示です(実機仕様の裏付け未確認)"
-          }
-        }
-      }
-    },
-    "エミュレーション未実行、または16色1024×1024モード(モニタ非対応)です": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Emulation is not running, or this is 16-color 1024×1024 mode (not supported by this monitor)"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "エミュレーション未実行、または16色1024×1024モード(モニタ非対応)です"
           }
         }
       }
@@ -7225,6 +7249,276 @@
           "stringUnit": {
             "state": "translated",
             "value": "MEM: %dMB+%dMB"
+          }
+        }
+      }
+    },
+    "MIDI Keyboard Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIDIキーボードビューア"
+          }
+        }
+      }
+    },
+    "MIDI Keyboard (16ch)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIDIキーボード (16ch)"
+          }
+        }
+      }
+    },
+    "Show all channels": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全チャンネル表示"
+          }
+        }
+      }
+    },
+    "Notes above B6 (MIDI 96-127) are on": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "B6より上のノート(MIDI 96-127)がオン"
+          }
+        }
+      }
+    },
+    "MIDI Keyboard": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MIDIキーボード"
+          }
+        }
+      }
+    },
+    "OPM Operator Viewer": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPMオペレータビューア"
+          }
+        }
+      }
+    },
+    "OPM Operator": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPMオペレータ"
+          }
+        }
+      }
+    },
+    "OPM Operator (YM2151 FM 8ch × 4OP)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OPM オペレータ (YM2151 FM 8ch × 4OP)"
+          }
+        }
+      }
+    },
+    "Envelope (schematic)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エンベロープ(模式図)"
+          }
+        }
+      }
+    },
+    "Channel": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "チャンネル"
+          }
+        }
+      }
+    },
+    "Key Off": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キーオフ"
+          }
+        }
+      }
+    },
+    "※ エンベロープ図は設定パラメータ(TL/AR/D1R/D1L/D2R/RR)から描いた理論上の模式図であり、実際の発音タイミング・位相・音量とは一致しません": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ The envelope graph is a theoretical schematic drawn from the register parameters (TL/AR/D1R/D1L/D2R/RR); it does not match the actual note timing, phase, or level"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ エンベロープ図は設定パラメータ(TL/AR/D1R/D1L/D2R/RR)から描いた理論上の模式図であり、実際の発音タイミング・位相・音量とは一致しません"
+          }
+        }
+      }
+    },
+    "※ 簡易モデルのため KS・LFO(AMS)・CSM は考慮していません。横軸はレートを線形に割り当てた相対尺度で、キーオフ位置は固定です": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ Simplified model: KS, LFO (AMS) and CSM are not taken into account. The time axis is a relative scale with rates mapped linearly, and the key-off point is fixed"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ 簡易モデルのため KS・LFO(AMS)・CSM は考慮していません。横軸はレートを線形に割り当てた相対尺度で、キーオフ位置は固定です"
+          }
+        }
+      }
+    },
+    "※ AR/D1R/D2R(0-31)・RR(0-15)はレジスタの生値です。OP 列は信号の流れ順(M1/C1/M2/C2)で、レジスタのスロット順(M1/M2/C1/C2)とは異なります": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ AR/D1R/D2R (0-31) and RR (0-15) are raw register values. The OP rows are in signal-flow order (M1/C1/M2/C2), which differs from the register slot order (M1/M2/C1/C2)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ AR/D1R/D2R(0-31)・RR(0-15)はレジスタの生値です。OP 列は信号の流れ順(M1/C1/M2/C2)で、レジスタのスロット順(M1/M2/C1/C2)とは異なります"
+          }
+        }
+      }
+    },
+    "※ 「--」はそのオペレータのレジスタにまだ一度も書込みが無いことを示します": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ \"--\" means that operator's registers have never been written yet"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ 「--」はそのオペレータのレジスタにまだ一度も書込みが無いことを示します"
+          }
+        }
+      }
+    },
+    "エミュレーション未実行です": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emulation is not running"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エミュレーション未実行です"
+          }
+        }
+      }
+    },
+    "16色モード(4面)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "16-color mode (4 pages)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "16色モード(4面)"
+          }
+        }
+      }
+    },
+    "256色モード(2面)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "256-color mode (2 pages)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "256色モード(2面)"
+          }
+        }
+      }
+    },
+    "65536色モード(1面)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "65536-color mode (1 page)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "65536色モード(1面)"
+          }
+        }
+      }
+    },
+    "16色1024×1024モード(1面)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "16-color 1024×1024 mode (1 page)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "16色1024×1024モード(1面)"
+          }
+        }
+      }
+    },
+    "非対応モード": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsupported mode"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "非対応モード"
           }
         }
       }

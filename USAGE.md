@@ -350,11 +350,11 @@ The iOS Settings screen has five tabs: **BIOS / Hardware / Audio / SASI / SCSI**
 
 ## 6. モニタパネル / Monitor Panels
 
-Monitor メニューから、CPU・CRTC・ビデオコントローラ・BG・スプライト・サウンド（OPMシンセサイザー含む）・パレット・入力状態・ストレージ・MIDI・RTC・逆アセンブル・DMAC・割込みレジスタなど、26種類のモニタパネルを個別に開けます（System / Processor / Device / Sound / Peripherals / Video / Renderer の7グループに分類）。ほとんどは読み取り専用の観測用ウィンドウですが、Debugger（PCブレークポイント+シングルステップ実行）とLog Viewer（診断ログのライブ表示、記録のON/OFF切替）の2つは実行制御・操作機能を持ちます。
+Monitor メニューから、CPU・CRTC・ビデオコントローラ・BG・スプライト・サウンド（OPMキーボード・OPMオペレータ含む）・パレット・入力状態・ストレージ・MIDI（MIDIキーボード含む）・RTC・逆アセンブル・DMAC・割込みレジスタなど、28種類のモニタパネルを個別に開けます（System / Processor / Device / Sound / Peripherals / Video / Renderer の7グループに分類）。ほとんどは読み取り専用の観測用ウィンドウですが、Debugger（PCブレークポイント+シングルステップ実行）とLog Viewer（診断ログのライブ表示、記録のON/OFF切替）の2つは実行制御・操作機能を持ちます。
 
 **English:**
 
-From the Monitor menu, you can open any of 26 monitor panels individually — CPU, CRTC, video controller, BG, sprite, sound (including an OPM synthesizer view), palette, input state, storage, MIDI, RTC, disassembly, DMAC, interrupt registers, and more (organized into 7 groups: System / Processor / Device / Sound / Peripherals / Video / Renderer). Most are read-only observation windows, except for two: the Debugger (PC breakpoint + single-instruction stepping) and the Log Viewer (live diagnostic-log display with an on/off toggle for logging), which provide execution control and interactive operations.
+From the Monitor menu, you can open any of 28 monitor panels individually — CPU, CRTC, video controller, BG, sprite, sound (including an OPM keyboard view and an OPM operator view), palette, input state, storage, MIDI (including a MIDI keyboard view), RTC, disassembly, DMAC, interrupt registers, and more (organized into 7 groups: System / Processor / Device / Sound / Peripherals / Video / Renderer). Most are read-only observation windows, except for two: the Debugger (PC breakpoint + single-instruction stepping) and the Log Viewer (live diagnostic-log display with an on/off toggle for logging), which provide execution control and interactive operations.
 
 ## 7. トラブルシューティング / Troubleshooting
 

@@ -45,9 +45,11 @@ void     mx_cpu_musashi_state_restore_run(uint32_t run_status, int32_t irq_line)
 typedef void (*mx_cpu_musashi_logf)(const char *fmt, ...);
 /* P869: MX68K_MUSASHI_MODEL を読みCPU型等を設定する。mx_cpu_musashi_init の直後・最初のリセット前に1回だけ呼ぶ */
 void mx_cpu_musashi_set_model_from_env(mx_cpu_musashi_logf logf);
-/* P872: 本番経路のCPU型設定(1=EC030、0=68000型)。環境変数を読まず、P869プローブも有効にしない */
-void mx_cpu_musashi_set_model(int ec030);
-/* P872: 現在の型の分類。0x00=68000型、0x01=EC030(本番構成)、0x02=EC030+ハイメモリ有効(P887)、0xFF=それ以外 */
+/* P872: 本番経路のCPU型設定(0=68000型、1=EC030、2=MC68040[P910]、3=MC68060相当[P916、Musashi 040型+060のMOVEC応答])。環境変数を読まず、P869プローブも有効にしない */
+void mx_cpu_musashi_set_model(int model);
+/* P872: 現在の型の分類。0x00=68000型、0x01=EC030(本番構成)、0x02=EC030+ハイメモリ有効(P887)、
+ * 0x03=MC68040(24bit・HAS_PMMU=0)、0x04=MC68040+ハイメモリ有効(P910)、
+ * 0x05=MC68060相当(24bit)、0x06=MC68060相当+ハイメモリ有効(P916)、0xFF=それ以外 */
 uint32_t mx_cpu_musashi_get_model_id(void);
 /* P887/P889: ハイメモリのバッファと配置(base/bytes)。NULL=無効(アドレスマスク24bit、base/bytesは0を渡す)、
  * 非NULL=有効(32bit)。TS-6BE16相当=$01000000/16MB、060turbo相当=$10000000/可変。
@@ -70,5 +72,7 @@ int  mx_cpu_musashi_get_fpu_model(void);
 const char *mx_cpu_musashi_fpu_env_raw(void);
 /* P897: [P897-FPU] の定期行(FPU装着時のみ出す、観測カウンタは累計) */
 void mx_cpu_musashi_p897_tick(int frame, mx_cpu_musashi_logf logf);
+/* P910: [P910-040EXEC] の定期行(040型のときだけ出す、カウンタはプロセス内の累計) */
+void mx_cpu_musashi_p910_tick(int frame, mx_cpu_musashi_logf logf);
 
 #endif /* MX_CPU_MUSASHI_H */

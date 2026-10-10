@@ -50,6 +50,8 @@
 #import <CoreMIDI/CoreMIDI.h>
 #import <mach/mach_time.h>
 
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -58,6 +60,7 @@
 #include "../Core/px68k/x68k/irqh.h"       /* IRQH_Int() */
 #include "px68k_compat.h"                  /* menu_items -> mx68k_menu_items */
 #include "midi_shadow.h"                   /* P693: MIDI Viewer 用の送受信カウンタ */
+#include "midi_note_shadow.h"              /* P929: MIDI Keyboard Viewer 用のノート状態 */
 #include "EmulatorBridge.h"                /* P693: mx68k_midi_get_* の宣言と照合するため */
 #include "mt32_bridge.h"                   /* P825: mt32_bridge_send_bytes() */
 #include "sc55_bridge.h"                   /* P826: sc55_bridge_send_bytes() */
@@ -106,6 +109,113 @@ _Atomic(uint32_t)           g_midi_tx_last     = 0;
 _Atomic(unsigned long long) g_midi_rx_messages = 0;
 _Atomic(unsigned long long) g_midi_rx_bytes    = 0;
 _Atomic(uint32_t)           g_midi_rx_last     = 0;
+
+/* -----------------------------------------------------------------
+ *  P929: MIDI Keyboard Viewer 用のノート状態の実体(宣言は Bridge/midi_note_shadow.h)。
+ *  P693 のカウンタと同じく、MIDI 送出経路そのものを持つ本ファイルに閉じて定義する。
+ * ----------------------------------------------------------------- */
+_Atomic(uint8_t) g_midi_note_vel[16][128];
+
+static void
+p929_note_clear_channel(int ch)
+{
+	for (int k = 0; k < 128; k++) {
+		atomic_store_explicit(&g_midi_note_vel[ch][k], 0, memory_order_relaxed);
+	}
+}
+
+void
+midi_note_shadow_clear_all(void)
+{
+	for (int ch = 0; ch < 16; ch++) {
+		p929_note_clear_channel(ch);
+	}
+}
+
+/* 音源全体をリセットする SysEx か。デバイス ID 相当のバイトは機器設定で変わりうるため
+ * 比較から外す(mask=0x00 のバイトは任意値を許す)。
+ *   GM System On : F0 7E 7F 09 01 F7                    (data[2] = デバイス ID)
+ *   GS Reset     : F0 41 10 42 12 40 00 7F 00 41 F7     (data[2] = デバイス ID)
+ *   XG System On : F0 43 10 4C 00 00 7E 00 F7           (data[2] 下位 4bit = デバイス番号)
+ *   MT-32 系リセット(Core/px68k/x68k/midi.c:115 の EXCV_LARESET):
+ *                  F0 41 10 16 12 7F 01 F7              (data[2] = デバイス ID)
+ * GM/GS/XG の 3 つは Core/px68k/x68k/midi.c:116-118 が MIDI_Reset() 時に送る列とも一致する。 */
+static bool
+p929_is_reset_sysex(const uint8_t *data, uint32_t len)
+{
+	static const struct {
+		uint8_t bytes[11];
+		uint8_t mask[11];
+		uint32_t len;
+	} k_resets[] = {
+		{ { 0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7 },
+		  { 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF }, 6 },
+		{ { 0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7 },
+		  { 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }, 11 },
+		{ { 0xF0, 0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7 },
+		  { 0xFF, 0xFF, 0xF0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }, 9 },
+		{ { 0xF0, 0x41, 0x10, 0x16, 0x12, 0x7F, 0x01, 0xF7 },
+		  { 0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }, 8 },
+	};
+	for (size_t i = 0; i < sizeof(k_resets) / sizeof(k_resets[0]); i++) {
+		if (len != k_resets[i].len) continue;
+		bool match = true;
+		for (uint32_t j = 0; j < len; j++) {
+			if ((data[j] & k_resets[i].mask[j]) != (k_resets[i].bytes[j] & k_resets[i].mask[j])) {
+				match = false;
+				break;
+			}
+		}
+		if (match) return true;
+	}
+	return false;
+}
+
+/* 1 メッセージ分を解釈してノート状態へ反映する。呼び出し元(midiOutShortMsg /
+ * midiOutLongMsg)は 1 回の呼び出しで 1 メッセージを渡す(ランニングステータスは
+ * Core/px68k/x68k/midi.c の midi_data_out() で解決済み)。
+ * CC64(ホールド)は意図的に無視する — 表示は Note On〜Note Off のみで決める。 */
+static void
+p929_note_track(const uint8_t *data, uint32_t len)
+{
+	uint8_t status = data[0];
+
+	if (status == 0xFF) {			/* System Reset */
+		midi_note_shadow_clear_all();
+		return;
+	}
+	if (status == 0xF0) {
+		if (p929_is_reset_sysex(data, len)) {
+			midi_note_shadow_clear_all();
+		}
+		return;
+	}
+	if (status < 0x80 || status >= 0xF0 || len < 3) {
+		return;
+	}
+
+	int     ch  = status & 0x0F;
+	uint8_t d1  = data[1] & 0x7F;
+	uint8_t d2  = data[2] & 0x7F;
+
+	switch (status & 0xF0) {
+	case 0x90:
+		atomic_store_explicit(&g_midi_note_vel[ch][d1], d2, memory_order_relaxed);
+		break;
+	case 0x80:
+		atomic_store_explicit(&g_midi_note_vel[ch][d1], 0, memory_order_relaxed);
+		break;
+	case 0xB0:
+		/* 0x78 All Sound Off / 0x7B All Notes Off。0x7C-0x7F(Omni/Mono/Poly 切替)も
+		 * MIDI 規格上 All Notes Off を伴うため同様に扱う。 */
+		if (d1 == 0x78 || d1 >= 0x7B) {
+			p929_note_clear_channel(ch);
+		}
+		break;
+	default:
+		break;
+	}
+}
 
 /* P825/P826: MIDI 出力先。0 = 外部 CoreMIDI、1 = 内蔵 MT-32(Bridge/mt32_bridge.c)、
  * 2 = 内蔵 SC-55(Bridge/sc55_bridge.c)。 */
@@ -166,6 +276,9 @@ p633_midi_send_bytes(const uint8_t *data, uint32_t len)
 	atomic_fetch_add_explicit(&g_midi_tx_messages, 1, memory_order_relaxed);
 	atomic_store_explicit(&g_midi_tx_last, p693_pack_last_msg(data, len),
 	                      memory_order_relaxed);
+
+	/* P929: 出力先(内蔵 MT-32 / 内蔵 SC-55 / 外部)の分岐より前に置き、3 経路で共通に記録する。 */
+	p929_note_track(data, len);
 
 	/* P832: 内蔵/外部の分岐前に到達を記録する(ログが 1 行も無ければ本関数自体が呼ばれていない)。 */
 	{
@@ -292,7 +405,31 @@ p633_store_endpoint_name(MIDIEndpointRef endpoint, char *dst, size_t dst_size)
 }
 
 /* -----------------------------------------------------------------
+ *  P935 (D-73): MIDI 受信用 SPSC ロックフリーリング
+ *
+ *  書き手: CoreMIDI の受信スレッド(mid_In_callback、唯一の書き手)
+ *  読み手: エミュレーションスレッド(mx68k_midi_rx_pump / mx68k_midi_rx_ring_clear、唯一の読み手)
+ *
+ *  旧実装は callback が Core 側の Rx_buff / RxW_point / MIDI_IntFlag / MIDI_IntVect を
+ *  直接書き、IRQH_Int() まで呼んでいた。c68k 経路では IRQH_Int → C68k_Set_IRQ が
+ *  実行中 CPU のサイクルカウンタを書き換えるため、別スレッドから呼ぶとライン予算が
+ *  狂いうる。callback はリングへ積むだけにし、Core 状態への反映と割込み発行は
+ *  エミュレーションスレッド(MIDI_Timer の直前)に移す。
+ *
+ *  インデックスの規律は sc55_bridge.c の入力リングと同一: 自分のインデックスは relaxed で
+ *  load、相手のインデックスは acquire で load、自分のインデックス更新は release で store。
+ *  インデックスは [0, MIDI_RX_RING_SIZE) に剰余で保ち、満杯と空を区別するため 1 バイトは
+ *  常に空けておく(実効容量 4095)。満杯時は残りを破棄して s_midi_rx_dropped に計上する。
+ * ----------------------------------------------------------------- */
+#define MIDI_RX_RING_SIZE 4096
+static uint8_t           s_midi_rx_ring[MIDI_RX_RING_SIZE];
+static _Atomic(uint32_t) s_midi_rx_write   = 0;
+static _Atomic(uint32_t) s_midi_rx_read    = 0;
+static _Atomic(uint32_t) s_midi_rx_dropped = 0;
+
+/* -----------------------------------------------------------------
  *  OS からの受信コールバック(移設元 midi_darwin.c:39-63)
+ *  P935: Core 変数には一切触れず、受信バイトを上のリングへ積むだけにした。
  * ----------------------------------------------------------------- */
 static void
 mid_In_callback(const MIDIPacketList *packetList,
@@ -302,29 +439,40 @@ mid_In_callback(const MIDIPacketList *packetList,
 	(void)readProcRefCon;
 	(void)srcConnRefCon;
 
-	if ((MIDI_R35 & 0x01) == 0x00) return;	/* Rx-FIFO 受信禁止 */
+	/* P935: 旧実装の「MIDI_R35 bit0 = 0(Rx-FIFO 受信禁止)なら即 return」は削除した。
+	 * R35 は Core 変数で、ここで読むこと自体が D-73 の無同期共有にあたるため。
+	 * 受信禁止中のバイトは mx68k_midi_rx_pump() が pop して捨てる(実機同様に消失)。 */
+
+	uint32_t w = atomic_load_explicit(&s_midi_rx_write, memory_order_relaxed);
+	uint32_t r = atomic_load_explicit(&s_midi_rx_read, memory_order_acquire);
+	uint32_t dropped = 0;
 
 	MIDIPacket *packet = (MIDIPacket *)packetList->packet;
 	uint32_t count = packetList->numPackets;
 	for (uint32_t j = 0; j < count; j++) {
 		for (uint32_t i = 0; i < packet->length; i++) {
-			Rx_buff[RxW_point] = packet->data[i];
-			if (RxW_point < 250) { RxW_point++; }	/* バッファ満杯 */
+			uint32_t next = (w + 1) % MIDI_RX_RING_SIZE;
+			if (next == r) {
+				dropped++;	/* 満杯: 破棄 */
+				continue;
+			}
+			s_midi_rx_ring[w] = packet->data[i];
+			w = next;
 		}
 
 		/* P693: 受信の計上。★Rx_buff / RxW_point / RxR_point は一切読まない
-		 * (既知の 2 スレッド無同期共有 = Docs/09 の D-73 に、新たな読み手を
-		 * 足さないため)。ここで足すのは本サイクル新設の atomic だけ。
+		 * (Docs/09 の D-73 の無同期共有に読み手を足さないため)。ここで触るのは atomic だけ。
 		 *
 		 * ★計上の単位は CoreMIDI パケット。1 パケットに複数の MIDI
 		 *   メッセージが載ることがあるので rx_messages は厳密な
 		 *   「メッセージ数」ではなく「受信パケット数」だが、
 		 *   rx_bytes(実バイト数)の分母として機能するという役割は同じ。
-		 * ★上の early return(MIDI_R35 bit0 = Rx-FIFO 受信禁止)より後なので、
-		 *   ゲストが受信を禁止している間に届いたバイトは計上されない。
-		 *   MIDI_R35 はレジスタ節にそのまま表示するため、rx が 0 のときに
-		 *   「機器が送っていない」のか「ゲストが受信を止めている」のかは
-		 *   同一画面で区別できる。 */
+		 * ★P935 で挙動が変わった: 旧実装は MIDI_R35 bit0 = 0(Rx-FIFO 受信禁止)のとき
+		 *   この計上より前で return していたが、R35 の判定をエミュレーションスレッド側の
+		 *   mx68k_midi_rx_pump() へ移したため、ゲストが受信を禁止している間に届いた
+		 *   バイトもここで計上されるようになった(診断表示のみへの影響)。
+		 *   rx が増えているのにゲストが受け取っていない場合は、レジスタ節の MIDI_R35 を
+		 *   見て受信禁止かどうかを判断する。 */
 		if (packet->length > 0) {
 			atomic_fetch_add_explicit(&g_midi_rx_messages, 1,
 			                          memory_order_relaxed);
@@ -340,11 +488,61 @@ mid_In_callback(const MIDIPacketList *packetList,
 		packet = MIDIPacketNext(packet);
 	}
 
-	if (MIDI_IntEnable & 0x20) {		/* 割り込み許可? */
+	atomic_store_explicit(&s_midi_rx_write, w, memory_order_release);
+	if (dropped > 0) {
+		atomic_fetch_add_explicit(&s_midi_rx_dropped, dropped, memory_order_relaxed);
+	}
+}
+
+/* -----------------------------------------------------------------
+ *  P935: エミュレーションスレッド専用。リングの中身を Core の Rx_buff へ移し、
+ *  必要なら Rx 割込みを発行する(旧 callback 本体の処理をこちらへ移したもの)。
+ *  EmulatorBridge.c の毎ライン処理から、MIDI_Timer() の直前(g_midi_installed ゲート内)で呼ぶ。
+ *
+ *  ★R35 の状態に関わらず、呼ばれたら必ずリングを空にする(read を進める)。
+ *    受信禁止中(MIDI_R35 bit0 = 0)のバイトは Rx_buff へ移さず捨てる —— 実機/上流と同じく
+ *    禁止中のデータは消失させ、リングにバックログを残さない(残すと受信再開時に
+ *    溜まったバイトが一括流入する)。
+ *  ★割込みは「1 回の汲み出しで 1 バイト以上移した」ときに 1 回だけ発行する。
+ *    旧実装の「1 CoreMIDI パケットごと」から、同一ライン内に来た複数パケットが
+ *    1 回に合流する形に変わる(IRQH はレベル保留なので実害は無いと推定、Fix Plan 残留リスク(b))。
+ * ----------------------------------------------------------------- */
+void
+mx68k_midi_rx_pump(void)
+{
+	uint32_t w = atomic_load_explicit(&s_midi_rx_write, memory_order_acquire);
+	uint32_t r = atomic_load_explicit(&s_midi_rx_read, memory_order_relaxed);
+	if (r == w) {
+		return;
+	}
+
+	bool rx_enabled = (MIDI_R35 & 0x01) != 0;	/* Rx-FIFO 受信許可? */
+	bool any = false;
+	while (r != w) {
+		uint8_t b = s_midi_rx_ring[r];
+		r = (r + 1) % MIDI_RX_RING_SIZE;
+		if (rx_enabled) {
+			Rx_buff[RxW_point] = b;
+			if (RxW_point < 250) { RxW_point++; }	/* バッファ満杯 */
+			any = true;
+		}
+	}
+	atomic_store_explicit(&s_midi_rx_read, r, memory_order_release);
+
+	if (any && (MIDI_IntEnable & 0x20)) {	/* 割り込み許可? */
 		MIDI_IntFlag |= 0x20;		/* Rx int 発生 */
 		MIDI_IntVect  = 0x0a;		/* ベクタ設定 */
 		IRQH_Int(4, &MIDI_Int);		/* 割り込みレベル 4 */
 	}
+}
+
+/* P935: リングを空にする(エミュレーションスレッド専用、mx68k_reset_hard() から呼ぶ)。
+ * 読み手が自分の read を現在の write へ揃えるだけなので、書き手と並走しても安全。 */
+void
+mx68k_midi_rx_ring_clear(void)
+{
+	uint32_t w = atomic_load_explicit(&s_midi_rx_write, memory_order_acquire);
+	atomic_store_explicit(&s_midi_rx_read, w, memory_order_release);
 }
 
 /* -----------------------------------------------------------------

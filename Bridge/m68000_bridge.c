@@ -24283,6 +24283,89 @@ void p602_periodic_dump(void) {
 }
 #endif /* P602_ENABLE */
 
+#if P919_ENABLE
+/* ---------------------------------------------------------------- */
+/* P919 (D-85): 6x12/8x16 フォント領域の読み出し計数(観測のみ・返却値は不変)。
+ * 区間はすべて半開区間 [LO,HI)。根拠は P919_plan.md の記号表
+ * (IPLROM30.DAT $FF73E6/$FF73F8、IPLROM.DAT $FF6F14/$FF6F22 の _FNTADR)。 */
+#define P919_FB6X12_LO      0x00FBF400u   /* CGROM ANK 6x12(256文字×12B) */
+#define P919_FB6X12_HI      0x00FC0000u
+#define P919_CG8X16_LO      0x00F3A800u   /* CGROM ANK 8x16(256文字×16B)。フック配線の分母 */
+#define P919_CG8X16_HI      0x00F3B800u
+#define P919_IPL6X12_LO     0x00FFD344u   /* X68000用IPLROM内の 6x12(68000機種の比較用) */
+#define P919_IPL6X12_HI     0x00FFDF44u
+#define P919_IPL6X12_PCLO   0x00FFD000u   /* この区間の PC からの読み出し = 命令フェッチの目印 */
+#define P919_IPL6X12_PCHI   0x00FFE000u
+#define P919_NSAMPLE        8u            /* 個別に出す fb6x12 読み出しの件数 */
+#define P919_PERIOD         60            /* 集計行の間隔(フレーム)。値が変わったときだけ出す */
+
+static struct {
+    uint32_t fb_rb, fb_rw, fb_nz, fb_z;        /* CGROM 6x12 [$FBF400,$FC0000) */
+    uint32_t cg_r, cg_nz;                      /* CGROM 8x16 [$F3A800,$F3B800) */
+    uint32_t ipl_r, ipl_nz, ipl_pcin;          /* IPLROM 6x12 [$FFD344,$FFDF44) */
+    uint32_t raw_hi;                           /* ReadB: 上位8bit非0の生アドレスで区間に当たった件数 */
+    int      fb_first_f;                       /* 初期値 -1 */
+    uint32_t nsample;
+    uint64_t last_sig;                         /* 前回出力時の合計(変化検出) */
+} s_p919 = { .fb_first_f = -1 };
+
+/* trace_Memory_Read{B,W} の return 直前から呼ぶ。raw_addr はマスク前の値
+ * (ReadW は関数冒頭で 24bit マスク済みなので raw_hi は常に 0 = ReadB 専用の指標)。
+ * 区間外なら符号なし比較 3 回で戻る。 */
+static void p919_font_read_note(uint32_t raw_addr, uint32_t val, int size /*1|2*/)
+{
+    uint32_t a = raw_addr & 0x00FFFFFFu;
+    uint32_t v = (size == 1) ? (val & 0xFFu) : (val & 0xFFFFu);
+    int hit = 0;
+
+    if ((a - P919_FB6X12_LO) < (P919_FB6X12_HI - P919_FB6X12_LO)) {
+        hit = 1;
+        if (size == 1) s_p919.fb_rb++; else s_p919.fb_rw++;
+        if (v != 0u) s_p919.fb_nz++; else s_p919.fb_z++;
+        if (s_p919.fb_first_f == -1) s_p919.fb_first_f = g_mx68k_frame_num;
+        if (s_p919.nsample < P919_NSAMPLE) {
+            /* pc は Musashi では次にフェッチする PC なので参考値(P868 の方針) */
+            debug_log("[P919-CG6X12-S] n=%u f=%d raw_addr=%08X size=%c val=%04X pc=%06X cpu=%d be=%s\n",
+                      (unsigned)s_p919.nsample, g_mx68k_frame_num,
+                      (unsigned)raw_addr, (size == 1) ? 'B' : 'W', (unsigned)v,
+                      (unsigned)(MX68KQ_GUEST_PC() & 0x00FFFFFFu),
+                      mx68k_get_cpu_model(), mx_cpu_be_musashi() ? "musashi" : "c68k");
+            s_p919.nsample++;
+        }
+    } else if ((a - P919_CG8X16_LO) < (P919_CG8X16_HI - P919_CG8X16_LO)) {
+        hit = 1;
+        s_p919.cg_r++;
+        if (v != 0u) s_p919.cg_nz++;
+    } else if ((a - P919_IPL6X12_LO) < (P919_IPL6X12_HI - P919_IPL6X12_LO)) {
+        uint32_t pc = (uint32_t)MX68KQ_GUEST_PC() & 0x00FFFFFFu;
+        hit = 1;
+        s_p919.ipl_r++;
+        if (v != 0u) s_p919.ipl_nz++;
+        if ((pc - P919_IPL6X12_PCLO) < (P919_IPL6X12_PCHI - P919_IPL6X12_PCLO)) s_p919.ipl_pcin++;
+    }
+    if (hit && (raw_addr & 0xFF000000u) != 0u) s_p919.raw_hi++;
+}
+
+/* m68000_reset_pcguard_count() から毎フレーム呼ぶ(c68k/Musashi 共通)。
+ * 累計値をそのまま出し、リセットしてもクリアしない。差分は読む側が取る。 */
+static void p919_tick(void)
+{
+    uint64_t sig = (uint64_t)s_p919.fb_rb + s_p919.fb_rw + s_p919.fb_nz + s_p919.fb_z
+                 + s_p919.cg_r + s_p919.cg_nz + s_p919.ipl_r + s_p919.ipl_nz
+                 + s_p919.ipl_pcin + s_p919.raw_hi;
+    if (sig == s_p919.last_sig) return;
+    s_p919.last_sig = sig;
+    debug_log("[P919-CG6X12] f=%d cpu=%d be=%s fb6x12_rb=%u fb6x12_rw=%u fb6x12_nz=%u fb6x12_z=%u fb_first_f=%d "
+              "cg8x16_r=%u cg8x16_nz=%u ipl6x12_r=%u ipl6x12_nz=%u ipl6x12_pcin=%u raw_hi=%u\n",
+              g_mx68k_frame_num, mx68k_get_cpu_model(), mx_cpu_be_musashi() ? "musashi" : "c68k",
+              (unsigned)s_p919.fb_rb, (unsigned)s_p919.fb_rw, (unsigned)s_p919.fb_nz,
+              (unsigned)s_p919.fb_z, s_p919.fb_first_f,
+              (unsigned)s_p919.cg_r, (unsigned)s_p919.cg_nz,
+              (unsigned)s_p919.ipl_r, (unsigned)s_p919.ipl_nz, (unsigned)s_p919.ipl_pcin,
+              (unsigned)s_p919.raw_hi);
+}
+#endif /* P919_ENABLE */
+
 static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     uint32_t val;
 #if P424_ENABLE
@@ -25079,6 +25162,11 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     if (g_mercury_installed) {
         p637_stat_read_note(addr, val, /*size=*/1);
     }
+#if P919_ENABLE
+    /* P919 (D-85): フォント領域の読み出し計数。全診断・差し替えの後、return 直前。
+     * addr はマスク前の引数をそのまま渡す(raw_hi の判定に使う)。観測のみ。 */
+    p919_font_read_note(addr, val, 1);
+#endif
     return val;
 }
 
@@ -26781,6 +26869,12 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     if (fpuboard_claims_addr(addr)) {
         val = fpuboard_read(addr & 0x00FFFFFFu, /*size=*/2);
     }
+#if P919_ENABLE
+    /* P919 (D-85): フォント領域の読み出し計数。P58Z ブロックの外 = P58Z の設定に
+     * よらず全 return より前。ロング読み出しは c68k(READ_LONG_F)・Musashi とも
+     * ReadW 2 回に分かれて届くので追加対応は不要。観測のみ。 */
+    p919_font_read_note(addr, val, 2);
+#endif
 #if P58Z_ENABLE
     /* P58-Z — ReadW の上位バイト除去 (P57A_DIAG_READW の Path Z 確認に対する
      * 処置レイヤ)。c68k コールバック境界で暗黙の契約 `(val >> 16) == 0`
@@ -32794,6 +32888,10 @@ int32_t m68000_execute(int32_t cycles)
 // イベントが常にログ出力されるようにする。
 void m68000_reset_pcguard_count(void)
 {
+#if P919_ENABLE
+    /* P919 (D-85): [P919-CG6X12] 集計行。Musashi 限定の if の外 = c68k でも出す。 */
+    if ((g_mx68k_frame_num % P919_PERIOD) == 0) p919_tick();
+#endif
     /* P868: [P868-MUSASHI-CHUNK](一時プローブ)。Musashi実行時かつ60フレーム毎に1行出してゼロクリア。
      * 出力するのは直前の窓の生の計数のみ(f= は出力時点の g_mx68k_frame_num)。 */
     if (mx_cpu_be_musashi() && (g_mx68k_frame_num % P868_MUSASHI_CHUNK_PERIOD) == 0) {
@@ -32808,6 +32906,8 @@ void m68000_reset_pcguard_count(void)
         mx_cpu_musashi_p869_tick(g_mx68k_frame_num);
         /* P897: [P897-FPU] 定期行(FPU装着時のみ) */
         mx_cpu_musashi_p897_tick(g_mx68k_frame_num, debug_log);
+        /* P910: [P910-040EXEC] 定期行(040型のときのみ) */
+        mx_cpu_musashi_p910_tick(g_mx68k_frame_num, debug_log);
     }
     g_p14_pcguard_count = 0;
     /* P19-DIAG: フレームごとのベクタテーブル異常カウンタもリセットする */
@@ -34551,12 +34651,13 @@ void mx_cpu_state_restore_run(uint32_t run_status, int32_t irq_line) {
 /* --- P872: 本番経路(設定画面の機種選択)からのCPUコア切替 ---
  * mx68k_reset_hard() の冒頭(m68000_reset() より前、CPUは実行されない区間)からだけ呼ぶ。 */
 
-/* model: 0=c68k(MC68000)、1=Musashi EC030(X68030) */
+/* model: 0=c68k(MC68000)、1=Musashi EC030(X68030)、2=Musashi MC68040(X68030+040turbo、P910)、
+ * 3=Musashi 040型+060のMOVEC応答(X68030+060turbo、P916) */
 void m68000_set_cpu_backend_model(int model)
 {
-    if (model == 1) {
+    if (model == 1 || model == 2 || model == 3) {
         s_mx_cpu_backend = MX_CPU_BE_MUSASHI;
-        mx_cpu_musashi_set_model(1);
+        mx_cpu_musashi_set_model(model);
     } else {
         s_mx_cpu_backend = MX_CPU_BE_C68K;
     }
@@ -34575,7 +34676,8 @@ int m68000_cpu_env_override(void)
 }
 
 /* ステートのCPU識別子。上位バイト=バックエンド(0=c68k/1=Musashi)、下位バイト=Musashiの型
- * (0x00=68000型、0x01=EC030、0xFF=それ以外)。c68k は 0 */
+ * (0x00=68000型、0x01=EC030、0x02=EC030+ハイメモリ、0x03=MC68040、0x04=MC68040+ハイメモリ、
+ *  0x05=MC68060相当、0x06=MC68060相当+ハイメモリ[P916]、0xFF=それ以外)。c68k は 0 */
 uint32_t m68000_get_cpu_state_id(void)
 {
     if (!mx_cpu_be_musashi()) return 0u;

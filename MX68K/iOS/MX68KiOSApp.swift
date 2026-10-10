@@ -502,17 +502,28 @@ struct MX68KiOSRootView: View {
                     .foregroundStyle(.green)
             } else if axis == .vertical {
                 // 側方帯: 項目ごとに1行(要望どおりの縦積み)。
-                ForEach(Array(viewModel.statusFields.enumerated()), id: \.offset) { _, field in
-                    Text(field)
-                        .foregroundStyle(.green)
-                }
-                // P777 — FD0/FD1/HDD は macOS 版と同じ色分けランプ(点滅なし)。
-                ForEach(Array(viewModel.statusLamps.enumerated()), id: \.offset) { _, lamp in
-                    (Text(lamp.label)
+                // P923 — 全行を改行(\n)で連結した単一の Text にする(D-90)。
+                // P922 では行ごとに独立した Text + .lineLimit(1) にしたが、minimumScaleFactor は
+                // Text 単位で独立に計算されるため、長い行(「MEM: 12MB+256MB」)だけが縮小され
+                // 行ごとにフォントサイズが不揃いになった。単一 Text にすれば帯の
+                // minimumScaleFactor(0.7)が内容全体に1つの縮小率として一律に適用される。
+                // P777 — FD0/FD1/HDD ランプは `Text + Text` 連結で色分けを保持する(点滅なし)。
+                let fieldLines = viewModel.statusFields.map { Text($0) }
+                let lampLines = viewModel.statusLamps.map { lamp in
+                    Text(lamp.label)
                         + Text(lamp.present ? "●" : "○")
-                            .foregroundColor(lampColor(present: lamp.present, active: lamp.active)))
-                        .foregroundStyle(.green)
+                            .foregroundColor(lampColor(present: lamp.present, active: lamp.active))
                 }
+                let lines = fieldLines + lampLines
+                // 先頭行のみ改行を前置しない(項目が空でランプのみの場合も先頭から正しく連結される)。
+                lines.enumerated().reduce(Text("")) { acc, item in
+                    item.offset == 0 ? item.element : acc + Text("\n") + item.element
+                }
+                .foregroundStyle(.green)
+                // 行数ちょうどに制限する: 帯全体の .lineLimit(nil)(P708)のままだと SwiftUI は
+                // 縮小より折り返しを優先し、MEM 行が2行に割れる D-89 が再発する。行数を固定すると
+                // 折り返しの余地が無くなり、はみ出す場合は全体が同じ率で縮小される。
+                .lineLimit(lines.count)
             } else {
                 // 下部帯: 従来どおり2スペース区切りの1行(横画面以外の既存見た目を維持)。
                 // P777 — ランプは `Text + Text` で同じ1行へ連結(セグメントごとの色を保持)。
@@ -750,8 +761,11 @@ struct MX68KiOSRootView: View {
 
         let cpuWorst = String(format: String(localized: "CPU: %dMHz"), 200)
         let memWorst = String(format: String(localized: "MEM: %dMB"), 12)
+        // P924(D-90追加修正) — ハイメモリ有効時の表示形式もworst-case候補に含める
+        // (P837当時はハイメモリ機能が存在せず漏れていた、.mx68k_cycles/P924_width_inv.md参照)。
+        let memHighWorst = String(format: String(localized: "MEM: %dMB+%dMB"), 12, 768)
         let spdWorst = String(format: String(localized: "Spd: %3d%%"), 9999)
-        let widths = [("cpu", cpuWorst, w(cpuWorst)), ("mem", memWorst, w(memWorst)), ("spd", spdWorst, w(spdWorst))]
+        let widths = [("cpu", cpuWorst, w(cpuWorst)), ("mem", memWorst, w(memWorst)), ("memHigh", memHighWorst, w(memHighWorst)), ("spd", spdWorst, w(spdWorst))]
         let worst = widths.map(\.2).max() ?? 0
         let detail = widths.map { String(format: "%@=\"%@\"(%.2f)", $0.0, $0.1, $0.2) }.joined(separator: " ")
         mx68k_log("[Swift][iOS][P837-CONTENTW] worst=\(String(format: "%.2f", worst)) \(detail)")

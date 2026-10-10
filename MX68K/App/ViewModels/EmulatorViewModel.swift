@@ -114,6 +114,10 @@ class EmulatorViewModel: ObservableObject {
     /// 閉じていても更新され続ける。opmStatus と同じく一時停止時の特別なリセットは
     /// 行わない(表示内容がレジスタの「設定値」であるため)。
     @Published var opmDetailStatus = MX68K_OPMDetailStatus()       // P631
+    /// P929 — MIDI Keyboard Viewer(独立ウィンドウ)。engine.midiKeyboardVisible で更新される。
+    @Published var midiNoteStatus = MX68K_MIDINoteStatus()         // P929
+    /// P933 — OPM Operator Viewer(独立ウィンドウ)。engine.opmOperatorVisible で更新される。
+    @Published var opmOperatorStatus = MX68K_OPMOperatorStatus()   // P933
     /// P490 — MIDI 入出力デバイス名一覧。Core 側(midi_darwin.c)が MIDI_Init() 実行時に
     /// 埋め直すため、MIDI 装着 + init/ハードリセット後にのみ中身がある。
     /// 設定画面の .onAppear で refreshMidiDeviceList() を呼んで更新する。
@@ -457,6 +461,12 @@ class EmulatorViewModel: ObservableObject {
         engine.onOPMDetailStatusUpdate = { [weak self] s in   // P631
             self?.opmDetailStatus = s
         }
+        engine.onMIDINoteStatusUpdate = { [weak self] s in   // P929
+            self?.midiNoteStatus = s
+        }
+        engine.onOPMOperatorStatusUpdate = { [weak self] s in   // P933
+            self?.opmOperatorStatus = s
+        }
         engine.onBGSPCompositeUpdate = { [weak self] image in   // P365
             self?.bgspCompositeImage = image
         }
@@ -540,8 +550,16 @@ class EmulatorViewModel: ObservableObject {
     /// 起動時 config プッシュ（挙動不変で startEmulation から抽出・applySettings と共有）。
     /// mx68k_set_* グローバルは mx68k_init()/reset のみが消費する。
     private func pushConfig(_ config: EmulatorConfig) {
-        // P872: CPUモデル(nil=68000、"EC030"=X68030)。ハードリセットで反映される
-        mx68k_set_cpu_model(config.hardware.cpuModel == "EC030" ? 1 : 0)
+        // P872: CPUモデル(nil=68000、"EC030"=X68030、"68040"=X68030+040turbo[P910]、
+        // "68060"=X68030+060turbo[P916])。ハードリセットで反映される
+        let cpuModelValue: Int32
+        switch config.hardware.cpuModel {
+        case "EC030": cpuModelValue = 1
+        case "68040": cpuModelValue = 2
+        case "68060": cpuModelValue = 3
+        default:      cpuModelValue = 0
+        }
+        mx68k_set_cpu_model(cpuModelValue)
         // P887: ハイメモリ(nil=なし、16=TS-6BE16相当)。X68030以外ではBridge側で無効。ハードリセットで反映
         mx68k_set_high_memory_mb(Int32(config.hardware.highMemoryMB ?? 0))
         // P889: 060turbo相当ハイメモリ(nil=なし、16〜768MB)。TS-6BE16相当とは排他(両方ならBridge側でTS-6BE16優先)
@@ -1201,7 +1219,7 @@ class EmulatorViewModel: ObservableObject {
         case -15:
             return String(localized: "This state file does not match the current memory size setting.")
         case -16:   // P872: 保存したCPUコア/型と実行中のものが違う
-            return String(localized: "This state file was saved with a different CPU model (X68000 / X68030) and cannot be loaded.")
+            return String(localized: "This state file was saved with a different CPU model (X68000 / X68030 / 040turbo / 060turbo) and cannot be loaded.")
         case -18:   // P890: 保存時のハイメモリ構成(種別・サイズ)が現在の設定と異なる
             return String(localized: "This state file was saved with different High Memory settings and cannot be loaded. Match the High Memory setting in Hardware settings, then reset, before loading.")
         case -2:

@@ -145,7 +145,14 @@ struct HardwareSettingsView: View {
                 Picker("Machine Type", selection: $settingsViewModel.machineChoice) {
                     Text("SASI Model (Initial – EXPERT II)").tag("SASI")
                     Text("SCSI Model (SUPER – XVI)").tag("SCSI")
-                    Text("X68030 (Experimental)").tag("X68030")
+                    Text("X68030").tag("X68030")
+                        .disabled(!iplrom30Valid)
+                    // P910: 040turbo は X68030 マザーでの CPU 換装(専用ROM無し、IPLROM30.DAT を使う)
+                    Text("X68030 + 040turbo (MC68040, Experimental)").tag("X68030_040")
+                        .disabled(!iplrom30Valid)
+                    // P916: 060turbo も X68030 マザーでのCPU換装扱い。IPLROM30.DAT を使い、MOVEP 等の060で削除された命令は
+                    // そのまま実行する(上位互換)
+                    Text("X68030 + 060turbo (MC68060, Experimental)").tag("X68030_060")
                         .disabled(!iplrom30Valid)
                 }
                 .onChange(of: settingsViewModel.machineChoice) { newValue in
@@ -162,6 +169,12 @@ struct HardwareSettingsView: View {
                     case "X68030":
                         settingsViewModel.clockMHz = 25           // X68030 定格
                         settingsViewModel.scsiMode = "internal"   // 内蔵SCSI機(XVI用SCSIINROM overlay のまま)
+                    case "X68030_040":
+                        settingsViewModel.clockMHz = 25           // P910: 040turbo のバスクロック(040turbo書籍p.312-313)
+                        settingsViewModel.scsiMode = "internal"
+                    case "X68030_060":
+                        settingsViewModel.clockMHz = 50           // P916: XEiJ MHZ_060TURBO_VALUE(XEiJ.java:4290)
+                        settingsViewModel.scsiMode = "internal"
                     default: break
                     }
                 }
@@ -170,15 +183,15 @@ struct HardwareSettingsView: View {
                 // P872: IPLROM30.DAT が未指定/大きさ不一致だと X68030 は選べない。macOS の Picker で項目単位の
                 // .disabled が効かない場合に備えて注意文も出す(選んでも Bridge は68000で起動するので安全側)。
                 if !iplrom30Valid {
-                    Text("X68030 requires IPLROM30.DAT to be set in the BIOS settings.")
+                    Text("X68030, 040turbo and 060turbo require IPLROM30.DAT to be set in the BIOS settings.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                // P887/P889: ハイメモリ(TS-6BE16相当 / 060turbo相当)は X68030 選択時だけ表示する。機種を変えても
-                // 値は消さず、保存時に X68030 以外ならキーを落とす(SettingsViewModel.apply)
-                if settingsViewModel.machineChoice == "X68030" {
+                // P887/P889: ハイメモリ(TS-6BE16相当 / 060turbo相当)は X68030筐体(P910/P916: 040turbo/060turbo を含む)選択時だけ
+                // 表示する。機種を変えても値は消さず、保存時に X68030筐体以外ならキーを落とす(SettingsViewModel.apply)
+                if settingsViewModel.isX68030Chassis {
                     Picker("High Memory", selection: $settingsViewModel.highMemorySelection) {
                         Text("None").tag(SettingsViewModel.HighMemorySelection.none)
                         Text("16MB (TS-6BE16 equivalent)").tag(SettingsViewModel.HighMemorySelection.ts6be16)
@@ -265,11 +278,23 @@ struct HardwareSettingsView: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // P898: X68030 のマザーボード FPU(68881/68882)は X68030 選択時だけ表示する。
+                // P898: X68030 のマザーボード FPU(68881/68882)は X68030筐体(P910/P916: 040turbo/060turbo を含む)選択時だけ表示する。
                 // P901: それ以外の機種では、代わりに拡張ボード CZ-6BP1(MC68881)のトグルを表示する。
                 // 機種を切り替えても fpuBoard の値は消さない(X68030 では Bridge 側のラッチで配線されない)。
-                if settingsViewModel.machineChoice == "X68030" {
+                if settingsViewModel.isX68030Chassis {
                     Toggle("FPU Enabled", isOn: $settingsViewModel.fpuEnabled)
+                    if settingsViewModel.machineChoice == "X68030_040" {
+                        Text("The real MC68040 always has a built-in FPU, so turning it off is a test-only configuration that does not exist on real hardware. When on, MX68K emulates it as an MC68881/68882-compatible FPU (approximation).")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if settingsViewModel.machineChoice == "X68030_060" {
+                        // P916: 実機MC68060のFPUは命令セットが縮小されている(不足命令は060turbo.sysがソフトで実行)
+                        Text("The real MC68060 has a built-in FPU with a reduced instruction set (the missing instructions are emulated in software by 060turbo.sys), so turning it off is a test-only configuration. When on, MX68K emulates it as an MC68881/68882-compatible FPU (approximation; a superset of the real MC68060 FPU).")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if settingsViewModel.fpuEnabled {
                         Picker("FPU Model", selection: $settingsViewModel.fpuModel) {
                             Text(verbatim: "MC68881").tag("68881")

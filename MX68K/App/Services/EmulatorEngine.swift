@@ -51,6 +51,12 @@ class EmulatorEngine: ObservableObject {
     /// P550 で同じ理由から専用フラグにされたのと同じ判断)。
     /// OPMSynthesizerView の .onAppear / .onDisappear が設定する。
     var opmSynthVisible: Bool = false   // ⌘⌥Y
+    /// P929 — MIDI Keyboard Viewer(独立ウィンドウ)専用の可視性ゲート。opmSynthVisible と
+    /// 同じ理由で他のフラグには相乗りしない。MIDIKeyboardView の .onAppear / .onDisappear が設定する。
+    var midiKeyboardVisible: Bool = false   // ⌘⌥X
+    /// P933 — OPM Operator Viewer(独立ウィンドウ)専用の可視性ゲート。opmSynthVisible と
+    /// 同じ理由で他のフラグには相乗りしない。OPMOperatorView の .onAppear / .onDisappear が設定する。
+    var opmOperatorVisible: Bool = false   // ⌘⌥Z
     /* P486: 重量系モニタ(CGImage生成を伴う)のパネル可視性ゲート。soundMonitorVisible
      * (P484b)と同じパターン——Bool 1個、Viewの.onAppear/.onDisappearが設定する。
      * ここでは"更新レート"は変えない(1秒ゲートのまま)。パネルが閉じている間、
@@ -241,6 +247,8 @@ class EmulatorEngine: ObservableObject {
     var onMercuryPCMStatusUpdate: ((MX68K_MercuryPCMStatus) -> Void)?   // P635
     var onAudioBufferStatusUpdate: ((MX68K_AudioBufferStatus) -> Void)?  // P549
     var onOPMDetailStatusUpdate: ((MX68K_OPMDetailStatus) -> Void)?      // P631
+    var onMIDINoteStatusUpdate: ((MX68K_MIDINoteStatus) -> Void)?       // P929
+    var onOPMOperatorStatusUpdate: ((MX68K_OPMOperatorStatus) -> Void)?  // P933
 
     // P287: パフォーマンス計測用の集計状態(1秒ウィンドウ毎にリセット)
     private var perfFrameCount = 0
@@ -745,19 +753,21 @@ class EmulatorEngine: ObservableObject {
             var grpPageUsesNemesis = false   // P690
             if grpPageVisible {
                 grpPageUsesNemesis = mx68k_get_grp_page_uses_nemesis()
-                // P690: ページ数は色モード依存(16色=4 / 256色=2 / 65536色=1 / 非対応=0)。
+                // P690/P934: ページ数は色モード依存(16色=4 / 256色=2 / 65536色=1 / 16色1024dot=1)。
                 for page in 0..<Int(mx68k_get_grp_page_count()) {
-                    var rgba = [UInt8](repeating: 0, count: 512 * 512 * 4)
+                    var rgba = [UInt8](repeating: 0, count: 1024 * 1024 * 4)
+                    var size: Int32 = 0
                     let ok: Int32 = rgba.withUnsafeMutableBufferPointer { buf in
-                        mx68k_get_grp_page_rgba(Int32(page), buf.baseAddress)
+                        mx68k_get_grp_page_rgba(Int32(page), buf.baseAddress, &size)
                     }
-                    guard ok != 0 else { continue }
+                    guard ok != 0, size > 0 else { continue }
+                    let dim = Int(size)
                     let data = Data(rgba)
                     if let provider = CGDataProvider(data: data as CFData) {
                         let bitmapInfo = CGBitmapInfo(rawValue:
                             CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
-                        if let img = CGImage(width: 512, height: 512, bitsPerComponent: 8, bitsPerPixel: 32,
-                                             bytesPerRow: 512 * 4, space: CGColorSpaceCreateDeviceRGB(),
+                        if let img = CGImage(width: dim, height: dim, bitsPerComponent: 8, bitsPerPixel: 32,
+                                             bytesPerRow: 1024 * 4, space: CGColorSpaceCreateDeviceRGB(),
                                              bitmapInfo: bitmapInfo, provider: provider, decode: nil,
                                              shouldInterpolate: false, intent: .defaultIntent) {
                             grpPageImages[page] = img
@@ -1025,6 +1035,26 @@ class EmulatorEngine: ObservableObject {
             mx68k_get_opm_detail_status(&opmDetailStatus)
             DispatchQueue.main.async { [weak self] in
                 self?.onOPMDetailStatusUpdate?(opmDetailStatus)
+            }
+        }
+
+        // P929 — MIDI Keyboard Viewer(独立ウィンドウ)。上の opmSynthVisible ブロックと同型で、
+        // 閉じている間は mx68k_get_midi_note_status() を一度も呼ばない。
+        if midiKeyboardVisible {
+            var midiNoteStatus = MX68K_MIDINoteStatus()
+            mx68k_get_midi_note_status(&midiNoteStatus)
+            DispatchQueue.main.async { [weak self] in
+                self?.onMIDINoteStatusUpdate?(midiNoteStatus)
+            }
+        }
+
+        // P933 — OPM Operator Viewer(独立ウィンドウ)。上の opmSynthVisible ブロックと同型で、
+        // 閉じている間は mx68k_get_opm_operator_status() を一度も呼ばない。
+        if opmOperatorVisible {
+            var opmOperatorStatus = MX68K_OPMOperatorStatus()
+            mx68k_get_opm_operator_status(&opmOperatorStatus)
+            DispatchQueue.main.async { [weak self] in
+                self?.onOPMOperatorStatusUpdate?(opmOperatorStatus)
             }
         }
     }

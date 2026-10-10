@@ -104,6 +104,35 @@ Musashi's runtime behaviour, so it is recorded here:
     "[P899-CPFIX] ABORT reason=..." line) shows whether the table layout still matches. If a new
     upstream changes NUM_CPU_TYPES (m68kops.c), update MX_MUSASHI_NUM_CPU_TYPES in the Bridge too.
 
+Runtime jump-table changes (P910, MC68040 / 040turbo) — again the files above stay unmodified:
+  - Where: Bridge/mx_cpu_musashi.c mx_musashi_fix_040_dispatch(), called once from
+    mx_cpu_musashi_init() right after mx_musashi_fix_cp_dispatch() (it depends on P899 having run).
+  - What:
+    (a) MOVEC $4E7A/$4E7B are wrapped (2 entries). On CPU_TYPE_040 in supervisor mode the wrapper
+        pre-reads the extension word and, for CAAR ($802), raises the illegal-instruction exception
+        instead of calling the original handler (upstream accepts CAAR on 040 because
+        CPU_TYPE_IS_EC020_PLUS includes 040; the 68040 has no CAAR). Every other case calls the
+        original handler, so non-040 types are unchanged.
+    (b) CINV/CPUSH $F400-$F4FF with scope != 0 (192 entries, all line-1111 after P899) ->
+        a Bridge no-op handler on 040 (privilege violation in user mode); non-040 types still take
+        line-1111. Only the 040 cycle column (m68ki_cycles[4]) of those entries is set to 4.
+  - Re-vendor check: the startup log line "[P910-040FIX] cinv=192 skipped=0 movec=2" (or an
+    "[P910-040FIX] ABORT reason=..." line); Scripts/smoke_test.sh fails the run on any mismatch.
+
+Runtime jump-table changes (P913/P916, MC68060 / 060turbo) — again the files above stay unmodified:
+  - Musashi has no 68060 type. MX68K's "X68030 + 060turbo" (Bridge cpu model 3) runs the
+    M68K_CPU_TYPE_68040 type with a Bridge-side flag (s_is_060 in Bridge/mx_cpu_musashi.c).
+  - MOVEP ($0108/$0148/$0188/$01C8 families, 256 entries) is wrapped by mx_musashi_fix_movep_dispatch()
+    (P913, called from mx_musashi_fix_040_dispatch()). On the production 060 path the wrapper just
+    calls the original handler (MOVEP executes as on 040; P914 showed the stock IPLROM30 needs this).
+    Re-vendor check: "[P913-INIT] movep=256 mismatch=0" (Scripts/smoke_test.sh gates on it).
+  - The P910 MOVEC wrapper (no new jump-table entries) additionally handles, only when s_is_060:
+    PCR ($808) and BUSCR ($008) are readable/writable via Bridge shadow registers
+    (PCR read = $0430 << 16 | revision 7 << 8 | writable bits 0x83; BUSCR writable bits 0xF0000000;
+    both cleared on reset), and MSP/ISP/MMUSR ($803/$804/$805) raise the illegal-instruction
+    exception like CAAR ($802) (MC68060 UM p.D-22 note 1). All other control registers fall through
+    to the original 040 handler.
+
 Notes for 68030 support (to do in that cycle):
   - P869 implemented the minimal EC030 + no-FPU stubs above; P897 replaced the FPU stub with the
     MAME-derived port (environment-variable gated). Not implemented: PMMU no-op for the remaining EA

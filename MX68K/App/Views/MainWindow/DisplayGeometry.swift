@@ -66,7 +66,15 @@ enum DisplayViewport {
     /// 必要幅を反映していなかった(P835/Fable5監査で判明)。
     /// 導出: "CPU: 200MHz"(プリセット最大、SF Mono 10pt)実測68.00pt
     /// + `.padding(6)`×2(12pt)= 80.0pt。詳細は `.mx68k_cycles/P837_plan.md`。
-    static let minSideBandContentWidth: CGFloat = 80.0
+    /// ★P924(D-90追加修正) — ハイメモリ(060turbo相当、最大768MB)有効時の
+    /// "MEM: 12MB+768MB"がworst-caseとなり実測92.72ptを要した(80.0ptでは不足、
+    /// iPad Pro 12.9で実効スケール73.3%まで縮小・iPad miniとの機種間不揃いの原因)。
+    /// 導出: ceil(92.72)+12=105.0ptが最小必要値だが、余裕が0.3%しかなく
+    /// P837と同じ「余裕ゼロ設計」の再発を避けるため110.0ptへ安全マージンを
+    /// 上乗せした。iPad mini 6の`.side`分岐自然余白(推定108.5pt、未確定)を
+    /// 下回り分岐反転の可能性があるが、hands-on確認(H-1)で直接検証する。
+    /// 詳細は `.mx68k_cycles/P924_width_inv.md`。
+    static let minSideBandContentWidth: CGFloat = 110.0
 
     /// P834(D-80) — iOS 版の帯配置モード。
     enum BandPlacement: Equatable {

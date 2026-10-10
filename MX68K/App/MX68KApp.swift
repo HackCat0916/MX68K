@@ -208,8 +208,20 @@ struct MX68KApp: App {
         // P631 — OPM シンセサイザーパネル(チャンネルごとの鍵盤 8 段 + KCF/V/PAN)。
         // サウンドモニタのウィンドウとは独立: 専用の表示ゲート
         // (EmulatorEngine.opmSynthVisible)を持つため、片方を閉じてももう片方は止まらない。
-        Window("OPM Synthesizer", id: "monitor-opm-synth") {
+        Window("OPM Keyboard", id: "monitor-opm-synth") {
             OPMSynthesizerView()
+                .environmentObject(emulatorViewModel)
+        }
+        // P929 — MIDI 鍵盤パネル(MIDI チャンネルごとの鍵盤 16 段)。専用の表示ゲート
+        // (EmulatorEngine.midiKeyboardVisible)を持ち、他のモニタとは独立に開閉できる。
+        Window("MIDI Keyboard", id: "monitor-midi-keyboard") {
+            MIDIKeyboardView()
+                .environmentObject(emulatorViewModel)
+        }
+        // P933 — OPM オペレータパネル(8ch×4OP の詳細パラメータ一覧 + EG 理論形状の模式図)。
+        // 専用の表示ゲート(EmulatorEngine.opmOperatorVisible)を持ち、他のモニタとは独立に開閉できる。
+        Window("OPM Operator", id: "monitor-opm-operator") {
+            OPMOperatorView()
                 .environmentObject(emulatorViewModel)
         }
         // P551 — 入力モニタ(ゲームパッドのポート割り当て / 生のジョイスティックバイト / マウス状態)。
@@ -653,8 +665,17 @@ struct MonitorCommands: Commands {
                 Button("Sound Viewer") { openWindow(id: "monitor-sound") }
                     .keyboardShortcut("3", modifiers: [.command, .option])
                 // P631 — OPM シンセサイザーパネル(⌘⌥Y、未使用キーを新規割当)。
-                Button("OPM Synthesizer Viewer") { openWindow(id: "monitor-opm-synth") }
+                Button("OPM Keyboard Viewer") { openWindow(id: "monitor-opm-synth") }
                     .keyboardShortcut("y", modifiers: [.command, .option])
+                // P929 — MIDI 鍵盤パネル(⌘⌥X、未使用キーを新規割当)。
+                // ★"M"/"K" は P693 と同じ理由(⌥⌘M との衝突・ソフトウェアキーボード ⌘⌥K)で採らず、
+                //   "D"/"H"/"W" も macOS 標準の ⌥⌘D/⌥⌘H/⌥⌘W と衝突するため、残る {q/x/z} から選んだ。
+                Button("MIDI Keyboard Viewer") { openWindow(id: "monitor-midi-keyboard") }
+                    .keyboardShortcut("x", modifiers: [.command, .option])
+                // P933 — OPM オペレータパネル(⌘⌥Z、未使用キーを新規割当)。
+                // ★P929 と同じ理由で残る {q/z} から選び、⌘Q(終了)の押し間違いを避けて "Z" とした。
+                Button("OPM Operator Viewer") { openWindow(id: "monitor-opm-operator") }
+                    .keyboardShortcut("z", modifiers: [.command, .option])
             }
 
             // Peripherals(入力/ストレージ/MIDI/RTC 等の周辺機器) — P696 で Device から分離。
