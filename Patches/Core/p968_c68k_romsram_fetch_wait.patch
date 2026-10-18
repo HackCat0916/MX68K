@@ -1,0 +1,152 @@
+# P968: ROM/SRAM命令フェッチウェイト(c68k、Class B: 参照実装に逐語移植可能な既存修正なし)
+#
+# 分類: B(ハードウェア仕様準拠修正——参照実装に逐語移植可能な既存修正なし)
+# 一次資料: 該当ページ無し(Inside X68000/テクニカルデータブック/Outside X68000/68000ファミリハンドブックを
+#   ページ検証付きで調査、.mx68k_cycles/P968_spec_inv.md §1)。代替根拠: 実機X68000 XVI実測
+#   (BASIC PEEK。SRAM[CH30]: 16MHz $0CB8=1387/$0CBA=1643、10MHz 832/977。IPL ROM[CH30非常駐]: 16MHz 1390/1645、10MHz 834/979)
+#   +XEiJ収録の第三者実機実測表(XEiJ.java:6812-6837)
+# 実測根拠: [P964-CLOCKWORK]/[P965-CLOCKWRITE] MXでSRAM/RAM=1740/1740(比1.000)vs 実機0.844/0.852、予測10/12=0.833
+# 上流欠陥同定: c68k(Stephane Dallongeville)のFETCH_*マクロがFetch[]を直接読み、領域ごとのウェイトの概念を持たない(px68k系の共通祖先)
+# 同系先例: Bridge p806_io_wait()(I/Oデータアクセスのウェイト、C68k_Add_Cycle方式)
+# 参照実装調査: px68k本家 74ddbb37 m68000/c68kmacro.h:57 / px68k-libretro 617574fc m68000/c68k/c68kmac.inc:185,216 /
+#   MPX68K 42fc3401 X68000 Shared/px68k/m68000/c68k/c68kmac.inc:185,216 — いずれも欠落。
+#   XM6 2.06(git無し、sha256 sram.cpp f2cff406… / memory.cpp c5e0c7b2…)— 命令フェッチは欠落(Starscreamのプログラム領域から直接読む、vm/memory.cpp:1084-1135)。
+#   SRAMのデータアクセスにだけWait(1)がある(vm/sram.cpp:307,339,377,433)。
+#   XEiJ 0.26.10.08(推定、git無し)は実装あり(MC68000.java:31-34, XEiJ.java:6849)、Java・デバイス関数方式のため逐語移植不可(2026-10-18ユーザー決定でClass B維持)
+#   XEiJファイル固定点(sha256): MC68000.java 40b55529…a4a17 / XEiJ.java b7a6cad9…47181 / MemoryMappedDevice.java 817b2b90…b0a3e
+#   一次資料の代替の扱い: Step 4 Q1のユーザー判断(今回限り/恒久)をここに記録する
+# Bridge代替検討: 命令フェッチはRead_Wordを経由しない(FETCH_WORD直接読み)ため、Bridgeでは課金不能。チャンク境界近似は精度不足で却下
+# 対象ファイル:行範囲: Core/c68k/c68k.h:125-160,188 / Core/c68k/c68kmac.inc:70-73,182-236 / Core/c68k/c68k.c:217-225,293-297
+# 由来サイクル: P968
+#
+# 適用方法: git apply Patches/Core/p968_c68k_romsram_fetch_wait.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#
+# 併用が必須の Bridge 側変更: あり。Bridge/m68000_bridge.c が C68K.FetchWait / C68K.FetchWaitTbl /
+#   C68k_Set_FetchWait() を参照する(mx_cpu_c68k_jump_raw32 と c68k_init 末尾)。★本パッチを適用しない
+#   状態では Bridge のビルドが失敗する(未定義のフィールド/シンボル)。
+#
+# 挙動の同一性: FetchWaitTbl は C68k_Init の memset で全0。Bridge は環境変数
+#   MX68K_DEBUG_ROMSRAM_WAIT=1 のときだけテーブルを設定するため、既定では FETCH_WAIT(n) は常に 0 を引き、
+#   CCnt/CycleIO の値は適用前とビット単位で同一。
+#
+diff --git a/Core/c68k/c68k.c b/Core/c68k/c68k.c
+index 95ebef9..7f34d41 100644
+--- a/Core/c68k/c68k.c
++++ b/Core/c68k/c68k.c
+@@ -224,6 +224,18 @@ void C68k_Set_Fetch(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, uintpt
+     while (i <= j) cpu->Fetch[i++] = fetch_adr;
+ }
+ 
++void C68k_Set_FetchWait(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, int32_t w)
++{
++    uint32_t i, j, cur;
++
++    i = (low_adr >> C68K_FETCH_SFT) & C68K_FETCH_MASK;
++    j = (high_adr >> C68K_FETCH_SFT) & C68K_FETCH_MASK;
++    while (i <= j) cpu->FetchWaitTbl[i++] = (uint8_t)w;
++
++    cur = (uint32_t)(cpu->PC - cpu->BasePC);
++    cpu->FetchWait = cpu->FetchWaitTbl[(cur >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
++}
++
+ void C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func)
+ {
+     cpu->Read_Byte = Func;
+@@ -293,6 +305,7 @@ void C68k_Set_AReg(c68k_struc *cpu, uint32_t num, uint32_t val)
+ void C68k_Set_PC(c68k_struc *cpu, uint32_t val)
+ {
+     cpu->BasePC = cpu->Fetch[(val >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
++    cpu->FetchWait = cpu->FetchWaitTbl[(val >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
+     cpu->PC = val + cpu->BasePC;
+ }
+ 
+diff --git a/Core/c68k/c68k.h b/Core/c68k/c68k.h
+index 4100c02..c38b94c 100644
+--- a/Core/c68k/c68k.h
++++ b/Core/c68k/c68k.h
+@@ -157,6 +157,9 @@ typedef struct {
+     C68K_RESET_CALLBACK *Reset_CallBack;
+ 
+ 	uintptr_t Fetch[C68K_FETCH_BANK];             // 32 bytes aligned
++
++    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(clk)
++    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(0=なし)
+ } c68k_struc;
+ 
+ 
+@@ -186,6 +189,7 @@ void    FASTCALL C68k_Release_Cycle(c68k_struc *cpu);
+ void    FASTCALL C68k_Add_Cycle(c68k_struc *cpu, int32_t cycle);
+ 
+ void    C68k_Set_Fetch(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, uintptr_t fetch_adr);
++void    C68k_Set_FetchWait(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, int32_t w);
+ 
+ void    C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func);
+ void    C68k_Set_ReadW(c68k_struc *cpu, C68K_READ *Func);
+diff --git a/Core/c68k/c68kmac.inc b/Core/c68k/c68kmac.inc
+index bbf2488..2e546e8 100644
+--- a/Core/c68k/c68kmac.inc
++++ b/Core/c68k/c68kmac.inc
+@@ -70,6 +70,7 @@ extern void TRACE(int,c68k_struc*,int,int);
+ #define SET_PC(A)               \
+     CPU->BasePC = CPU->Fetch[((A) >> C68K_FETCH_SFT) & C68K_FETCH_MASK];    \
+     CPU->BasePC -= (A) & 0xFF000000;    \
++    CPU->FetchWait = CPU->FetchWaitTbl[((A) >> C68K_FETCH_SFT) & C68K_FETCH_MASK];    \
+     PC = (A) + CPU->BasePC;
+ 
+ #define PRE_IO                  \
+@@ -179,20 +180,25 @@ extern void TRACE(int,c68k_struc*,int,int);
+     CPU->A[7] += 4;
+ #endif
+ 
++// P968: ROM/SRAM命令フェッチウェイト。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
++#define FETCH_WAIT(n)       \
++(CCnt -= CPU->FetchWait * (n), CPU->CycleIO -= CPU->FetchWait * (n))
++
+ #define FETCH_BYTE          \
+-((*(u16*)PC) & 0xFF)
++(FETCH_WAIT(1), ((*(u16*)PC) & 0xFF))
+ 
+ #define FETCH_WORD          \
+-(*(u16*)PC)
++(FETCH_WAIT(1), (*(u16*)PC))
+ 
+ 
+ #define FETCH_LONG          \
+-(*(u32*)PC)
++(FETCH_WAIT(2), (*(u32*)PC))
+ 
+ #define DECODE_EXT_WORD     \
+ {                           \
+     u32 ext;                \
+                             \
++    FETCH_WAIT(1);          \
+     ext = (*(u16*)PC);      \
+     PC += 2;                \
+                             \
+@@ -205,21 +211,21 @@ extern void TRACE(int,c68k_struc*,int,int);
+ #ifdef C68K_BYTE_SWAP_OPT
+     #undef FETCH_LONG
+     #define FETCH_LONG          \
+-    ((((u32)(*(u16*)PC)) << 16) | ((u32)(*(u16*)(PC + 2))))
++    (FETCH_WAIT(2), ((((u32)(*(u16*)PC)) << 16) | ((u32)(*(u16*)(PC + 2)))))
+ //    ((((u32)(*(u8*)(PC + 2))) | (((u32)(*(u8*)(PC + 3))) << 8) | (((u32)(*(u8*)PC)) << 16) | (((u32)(*(u8*)(PC + 1))) << 24)))
+ #else
+     #undef FETCH_BYTE
+     #define FETCH_BYTE          \
+-    (*(u8*)PC)
++    (FETCH_WAIT(1), (*(u8*)PC))
+ 
+     #undef FETCH_WORD
+     #define FETCH_WORD          \
+-    ((((u16)(*(u8*)PC)) << 8) | ((u16)(*(u8*)(PC + 1))))
++    (FETCH_WAIT(1), ((((u16)(*(u8*)PC)) << 8) | ((u16)(*(u8*)(PC + 1)))))
+ //    ((((u16)(*(u8*)(PC + 1))) | (((u16)(*(u8*)PC)) << 8)))
+ 
+     #undef FETCH_LONG
+     #define FETCH_LONG          \
+-    ((((u32)(*(u8*)PC)) << 24) | (((u32)(*(u8*)(PC + 1))) << 16) | (((u32)(*(u8*)(PC + 2))) << 8) | ((u32)(*(u8*)(PC + 3))))
++    (FETCH_WAIT(2), ((((u32)(*(u8*)PC)) << 24) | (((u32)(*(u8*)(PC + 1))) << 16) | (((u32)(*(u8*)(PC + 2))) << 8) | ((u32)(*(u8*)(PC + 3)))))
+ //    ((((u32)(*(u8*)(PC + 3))) | (((u32)(*(u8*)(PC + 2))) << 8) | (((u32)(*(u8*)(PC + 1))) << 16) | (((u32)(*(u8*)PC)) << 24)))
+ 
+     #undef DECODE_EXT_WORD

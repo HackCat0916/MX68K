@@ -224,6 +224,18 @@ void C68k_Set_Fetch(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, uintpt
     while (i <= j) cpu->Fetch[i++] = fetch_adr;
 }
 
+void C68k_Set_FetchWait(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, int32_t w)
+{
+    uint32_t i, j, cur;
+
+    i = (low_adr >> C68K_FETCH_SFT) & C68K_FETCH_MASK;
+    j = (high_adr >> C68K_FETCH_SFT) & C68K_FETCH_MASK;
+    while (i <= j) cpu->FetchWaitTbl[i++] = (uint8_t)w;
+
+    cur = (uint32_t)(cpu->PC - cpu->BasePC);
+    cpu->FetchWait = cpu->FetchWaitTbl[(cur >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
+}
+
 void C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func)
 {
     cpu->Read_Byte = Func;
@@ -293,6 +305,7 @@ void C68k_Set_AReg(c68k_struc *cpu, uint32_t num, uint32_t val)
 void C68k_Set_PC(c68k_struc *cpu, uint32_t val)
 {
     cpu->BasePC = cpu->Fetch[(val >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
+    cpu->FetchWait = cpu->FetchWaitTbl[(val >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
     cpu->PC = val + cpu->BasePC;
 }
 

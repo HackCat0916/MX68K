@@ -70,6 +70,7 @@ extern void TRACE(int,c68k_struc*,int,int);
 #define SET_PC(A)               \
     CPU->BasePC = CPU->Fetch[((A) >> C68K_FETCH_SFT) & C68K_FETCH_MASK];    \
     CPU->BasePC -= (A) & 0xFF000000;    \
+    CPU->FetchWait = CPU->FetchWaitTbl[((A) >> C68K_FETCH_SFT) & C68K_FETCH_MASK];    \
     PC = (A) + CPU->BasePC;
 
 #define PRE_IO                  \
@@ -179,20 +180,25 @@ extern void TRACE(int,c68k_struc*,int,int);
     CPU->A[7] += 4;
 #endif
 
+// P968: ROM/SRAM命令フェッチウェイト。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
+#define FETCH_WAIT(n)       \
+(CCnt -= CPU->FetchWait * (n), CPU->CycleIO -= CPU->FetchWait * (n))
+
 #define FETCH_BYTE          \
-((*(u16*)PC) & 0xFF)
+(FETCH_WAIT(1), ((*(u16*)PC) & 0xFF))
 
 #define FETCH_WORD          \
-(*(u16*)PC)
+(FETCH_WAIT(1), (*(u16*)PC))
 
 
 #define FETCH_LONG          \
-(*(u32*)PC)
+(FETCH_WAIT(2), (*(u32*)PC))
 
 #define DECODE_EXT_WORD     \
 {                           \
     u32 ext;                \
                             \
+    FETCH_WAIT(1);          \
     ext = (*(u16*)PC);      \
     PC += 2;                \
                             \
@@ -205,21 +211,21 @@ extern void TRACE(int,c68k_struc*,int,int);
 #ifdef C68K_BYTE_SWAP_OPT
     #undef FETCH_LONG
     #define FETCH_LONG          \
-    ((((u32)(*(u16*)PC)) << 16) | ((u32)(*(u16*)(PC + 2))))
+    (FETCH_WAIT(2), ((((u32)(*(u16*)PC)) << 16) | ((u32)(*(u16*)(PC + 2)))))
 //    ((((u32)(*(u8*)(PC + 2))) | (((u32)(*(u8*)(PC + 3))) << 8) | (((u32)(*(u8*)PC)) << 16) | (((u32)(*(u8*)(PC + 1))) << 24)))
 #else
     #undef FETCH_BYTE
     #define FETCH_BYTE          \
-    (*(u8*)PC)
+    (FETCH_WAIT(1), (*(u8*)PC))
 
     #undef FETCH_WORD
     #define FETCH_WORD          \
-    ((((u16)(*(u8*)PC)) << 8) | ((u16)(*(u8*)(PC + 1))))
+    (FETCH_WAIT(1), ((((u16)(*(u8*)PC)) << 8) | ((u16)(*(u8*)(PC + 1)))))
 //    ((((u16)(*(u8*)(PC + 1))) | (((u16)(*(u8*)PC)) << 8)))
 
     #undef FETCH_LONG
     #define FETCH_LONG          \
-    ((((u32)(*(u8*)PC)) << 24) | (((u32)(*(u8*)(PC + 1))) << 16) | (((u32)(*(u8*)(PC + 2))) << 8) | ((u32)(*(u8*)(PC + 3))))
+    (FETCH_WAIT(2), ((((u32)(*(u8*)PC)) << 24) | (((u32)(*(u8*)(PC + 1))) << 16) | (((u32)(*(u8*)(PC + 2))) << 8) | ((u32)(*(u8*)(PC + 3)))))
 //    ((((u32)(*(u8*)(PC + 3))) | (((u32)(*(u8*)(PC + 2))) << 8) | (((u32)(*(u8*)(PC + 1))) << 16) | (((u32)(*(u8*)PC)) << 24)))
 
     #undef DECODE_EXT_WORD

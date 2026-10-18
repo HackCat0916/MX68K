@@ -157,6 +157,9 @@ typedef struct {
     C68K_RESET_CALLBACK *Reset_CallBack;
 
 	uintptr_t Fetch[C68K_FETCH_BANK];             // 32 bytes aligned
+
+    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(clk)
+    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(0=なし)
 } c68k_struc;
 
 
@@ -186,6 +189,7 @@ void    FASTCALL C68k_Release_Cycle(c68k_struc *cpu);
 void    FASTCALL C68k_Add_Cycle(c68k_struc *cpu, int32_t cycle);
 
 void    C68k_Set_Fetch(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, uintptr_t fetch_adr);
+void    C68k_Set_FetchWait(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, int32_t w);
 
 void    C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func);
 void    C68k_Set_ReadW(c68k_struc *cpu, C68K_READ *Func);

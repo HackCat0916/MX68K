@@ -268,6 +268,16 @@ static inline int p424_gvram_run_track(int region) {
 }
 #endif
 
+/* P946 (D-94診断): プリンタストローブ書込み時、直前の1アクセス(B/W読み出し)が
+ * IOC($E9C001、ワード読みなら$E9C000)のBUSY確認だったかを分離計測する。
+ * 更新は trace_Memory_ReadB/ReadW/WriteB/WriteW の p806_io_wait() 直後(無条件領域)で
+ * 行うため、宣言も無効化されうる #if の外に置く。出力は p492_io_histogram_dump() 内。
+ * ★簡略化: Core ioc.c の実際のストローブ判定(val bit0 の L→H エッジ、prnt_strb1 依存)は
+ *   再現せず、$E8C003(Byte)/$E8C002(Word)への書込み事象そのものを数える(上振れ近似)。 */
+static uint8_t  s_p946_last_read_was_ioc = 0;
+static uint32_t p946_prn_strobe_with_ioc_check = 0;
+static uint32_t p946_prn_strobe_without_ioc_check = 0;
+
 #if P492_ENABLE
 /* P492 (D-43診断): PCM8PP常駐時のフリーズ中に、ゲスト側ソフトがどの I/O
  * ウィンドウを読み続けているかを特定するため、既知のデバイス窓ごとの read
@@ -291,6 +301,9 @@ static uint32_t p492_hist_sasi    = 0;  /* $E96000-E97FFF */
 static uint32_t p492_hist_scc     = 0;  /* $E98000-E99FFF */
 static uint32_t p492_hist_ppi     = 0;  /* $E9A000-E9BFFF */
 static uint32_t p492_hist_ioc     = 0;  /* $E9C000-E9DFFF */
+/* P946 (D-92診断): ioc の内訳。正規番地 $E9C001 とそれ以外(ミラー帯候補)。 */
+static uint32_t p492_hist_ioc_exact  = 0;
+static uint32_t p492_hist_ioc_mirror = 0;
 static uint32_t p492_hist_scsi    = 0;  /* $EA0000-EA1FFF */
 static uint32_t p492_hist_midi    = 0;  /* $EAE000-EAFFFF */
 static uint32_t p492_hist_mercury = 0;  /* $ECC000-ECDFFF */
@@ -383,7 +396,11 @@ static void p492_io_histogram_note(uint32_t addr, int is_word) {
     else if (a >= 0xE96000u && a <= 0xE97FFFu) p492_hist_sasi++;
     else if (a >= 0xE98000u && a <= 0xE99FFFu) p492_hist_scc++;
     else if (a >= 0xE9A000u && a <= 0xE9BFFFu) p492_hist_ppi++;
-    else if (a >= 0xE9C000u && a <= 0xE9DFFFu) p492_hist_ioc++;
+    else if (a >= 0xE9C000u && a <= 0xE9DFFFu) {
+        p492_hist_ioc++;
+        if (a == 0xE9C001u) p492_hist_ioc_exact++;
+        else                p492_hist_ioc_mirror++;
+    }
     else if (a >= 0xEA0000u && a <= 0xEA1FFFu) p492_hist_scsi++;
     else if (a >= 0xEAE000u && a <= 0xEAFFFFu) p492_hist_midi++;
     else if (a >= 0xECC000u && a <= 0xECDFFFu) p492_hist_mercury++;
@@ -400,7 +417,7 @@ void p492_io_histogram_dump(void) {
     debug_log("[P492-IOHIST] f=%u total_reads=%u non_io=%u | "
               "crtc=%u vc=%u dmac=%u mfp=%u rtc=%u sysport=%u opm=%u adpcm=%u "
               "fdc=%u sasi=%u scc=%u ppi=%u ioc=%u scsi=%u midi=%u mercury=%u io_other=%u "
-              "gvram=%u tvram=%u\n",
+              "gvram=%u tvram=%u ioc_exact=%u ioc_mirror=%u\n",
               frame_no, p492_total_reads, p492_hist_non_io,
               p492_hist_crtc, p492_hist_vc, p492_hist_dmac, p492_hist_mfp, p492_hist_rtc,
               p492_hist_sysport, p492_hist_opm, p492_hist_adpcm,
@@ -408,7 +425,12 @@ void p492_io_histogram_dump(void) {
               p492_hist_scsi, p492_hist_midi, p492_hist_mercury, p492_hist_io_other,
               /* P805: 既存フィールドの並び・書式は不変、末尾へ追加のみ。
                * gvram/tvram は non_io の内訳(部分集合)。 */
-              p492_hist_gvram, p492_hist_tvram);
+              p492_hist_gvram, p492_hist_tvram,
+              /* P946: ioc の内訳(部分集合)、末尾へ追加のみ。 */
+              p492_hist_ioc_exact, p492_hist_ioc_mirror);
+    /* P946 (D-94): with+without の合計がストローブ書込み総数(分母)を兼ねる。 */
+    debug_log("[P946-PRNSTRB] f=%u with_ioc_check=%u without_ioc_check=%u\n",
+              frame_no, p946_prn_strobe_with_ioc_check, p946_prn_strobe_without_ioc_check);
     p492b_dmac_dump(frame_no);
 }
 #endif /* P492_ENABLE */
@@ -16935,7 +16957,8 @@ static void p82xe_record_fdc_read(uint32_t addr, uint16_t value, uint8_t width) 
     uint8_t kind;
     if      (addr == 0xE94001u) kind = 0u;   /* STATUS-READ  (メインステータス) */
     else if (addr == 0xE94003u) kind = 1u;   /* DATA-READ    (結果／データバイト) */
-    else if (addr == 0xE94007u) kind = 2u;   /* DRVSTAT-READ (ドライブステータス) */
+    else if (addr == 0xE94005u) kind = 2u;   /* DRVSTAT-READ (ドライブステータス、修正:
+                                               * 旧コードは書込専用の$E94007を誤って割当てていた) */
     else                        kind = 1u;   /* その他 odd addr は DATA 扱い */
     p82xe_fdc_ent *e = &s_p82xe_r_ring[s_p82xe_r_head];
     e->seq   = s_p82xe_seq++;
@@ -24376,6 +24399,8 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
 #endif
     /* P806: I/O ウェイト注入(Byte)。addr は未マスクだが関数内で 24bit マスクする。 */
     p806_io_wait(addr, 0);
+    /* P946 (D-94): 直前読み出しがIOC BUSY確認か。無効化されうる #if の内側に置かないこと。 */
+    s_p946_last_read_was_ioc = ((addr & 0x00FFFFFFu) == 0xE9C001u) ? 1u : 0u;
 #if P602_ENABLE
     /* P602 (D-57) プローブ4 + プローブ3(a)。観測のみ、返却値は不変。 */
     p602_io_read_note(addr, 1);
@@ -25185,6 +25210,8 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
 #endif
     /* P806: I/O ウェイト注入(Word)。addr は関数冒頭で 24bit マスク済み。 */
     p806_io_wait(addr, 1);
+    /* P946 (D-94): ワード読み $E9C000 の下位バイトが $E9C001 相当。無効化されうる #if の内側に置かないこと。 */
+    s_p946_last_read_was_ioc = (addr == 0xE9C000u) ? 1u : 0u;
 #if P602_ENABLE
     /* P602 (D-57) プローブ4 + プローブ3(a) + プローブ2。いずれも観測のみで
      * 返却値・制御フローは不変。プローブ2 のゲートは既存 CP-R-1/P91 と同一条件
@@ -26980,6 +27007,12 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
 #endif
     /* P806: I/O ウェイト注入(Byte)。addr は未マスクだが関数内で 24bit マスクする。 */
     p806_io_wait(addr, 0);
+    /* P946 (D-94): $E8C003 へのストローブ書込み。無効化されうる #if の内側に置かないこと。 */
+    if ((addr & 0x00FFFFFFu) == 0x00E8C003u) {
+        if (s_p946_last_read_was_ioc) p946_prn_strobe_with_ioc_check++;
+        else                          p946_prn_strobe_without_ioc_check++;
+        s_p946_last_read_was_ioc = 0;
+    }
 #if P602_ENABLE
     /* P602 (D-57) プローブ1 + プローブ3(a)。実書込みの前に呼ぶので旧値が読める。
      * 観測のみ —— val も addr も改変せず、書込み自体には一切干渉しない。 */
@@ -27785,6 +27818,13 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
 #endif
     /* P806: I/O ウェイト注入(Word)。addr は関数冒頭で 24bit マスク済み。 */
     p806_io_wait(addr, 1);
+    /* P946 (D-94): $E8C002 ワード書込み(下位バイトがストローブ相当)。WriteB を経由しない
+     * (mem_wrap.c wm16_main が PRN_Write を直接呼ぶ)ため個別に数える。無効化されうる #if の内側に置かないこと。 */
+    if (addr == 0x00E8C002u) {
+        if (s_p946_last_read_was_ioc) p946_prn_strobe_with_ioc_check++;
+        else                          p946_prn_strobe_without_ioc_check++;
+        s_p946_last_read_was_ioc = 0;
+    }
 #if P602_ENABLE
     /* P602 (D-57) プローブ1 + プローブ3(a)。実書込みの前に呼ぶので旧値が読める。
      * word 書込みは $0CBF を跨いで $0CBC-$0CBF に触れる場合も拾う。観測のみ。 */
@@ -27804,6 +27844,35 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
                   g_mx68k_frame_num);
     }
 #endif
+    /* P965 (D-15): IPLROM クロック較正ワーク $0CB8/$0CBA/$0D20-$0D27 への word 書込みを、
+     * 書込み元 PC 付きで記録する。環境変数 MX68K_DEBUG_P965_CLOCKWRITE 設定時のみ有効
+     * (getenv() は初回のみ評価してキャッシュ)。long 書込みは 2 回の WriteW に分解されて
+     * ここを通る想定。アドレスごとに最大 8 行。観測専用で val/制御フローは変更しない。 */
+    if (addr >= 0x00000CB8u && addr <= 0x00000D26u) {
+        static int s_p965_enabled = -1;
+        if (s_p965_enabled < 0) {
+            s_p965_enabled = (getenv("MX68K_DEBUG_P965_CLOCKWRITE") != NULL) ? 1 : 0;
+        }
+        if (s_p965_enabled) {
+            static const uint32_t s_p965_addrs[6] = {
+                0x00000CB8u, 0x00000CBAu, 0x00000D20u,
+                0x00000D22u, 0x00000D24u, 0x00000D26u
+            };
+            static int s_p965_counts[6] = {0, 0, 0, 0, 0, 0};
+            for (int i = 0; i < 6; i++) {
+                if (addr == s_p965_addrs[i]) {
+                    if (s_p965_counts[i] < 8) {
+                        s_p965_counts[i]++;
+                        int per_addr_count = s_p965_counts[i];
+                        debug_log("[P965-CLOCKWRITE] addr=0x%06x val=0x%04x PC=0x%06x frame=%d (n=%d/8)\n",
+                                  addr, (unsigned)(val & 0xFFFFu), (unsigned)MX68KQ_GUEST_PC(),
+                                  g_mx68k_frame_num, per_addr_count);
+                    }
+                    break;
+                }
+            }
+        }
+    }
 #if P670_PROBE_ENABLE
     /* P670 (D-69): ラスタコピー src/dst 対($E8002C = CRTC R22)への word 書込みを、
      * 動作ポート bit3(ラスタコピー有効)が立っているときだけ数える。これが
@@ -30116,6 +30185,19 @@ static void c68k_init(void)
 
     /* P253: 三重ゲート成立時のみ $FC0000-$FC1FFF を SCSI IPL ROM へ overlay */
     scsi_in_fetch_overlay_apply();
+
+    /* P968: ROM/SRAM 命令フェッチウェイト 1clk/ワード(D-15、Class B Core patch)。
+     * 段階③: 既定 ON。MX68K_DEBUG_ROMSRAM_WAIT=0 を明示設定したときだけ無効化する(オプトアウト用)。
+     * 無効時は C68k_Init の memset によりテーブルが全 0 のままで、挙動は修正前と同一。 */
+    {
+        const char *ev = getenv("MX68K_DEBUG_ROMSRAM_WAIT");
+        if (ev == NULL || strcmp(ev, "0") != 0) {
+            C68k_Set_FetchWait(&C68K, 0xed0000, 0xedffff, 1);
+            C68k_Set_FetchWait(&C68K, 0xfc0000, 0xffffff, 1);
+            debug_log("[P968-FETCHWAIT] enabled: sram=$ED w=1 ipl=$FC-$FF w=1 tbl[0xED]=%u tbl[0xFE]=%u\n",
+                      (unsigned)C68K.FetchWaitTbl[0xED], (unsigned)C68K.FetchWaitTbl[0xFE]);
+        }
+    }
 
     debug_log("[MEM-PTR] m68000_bridge MEM=%p s_zero_page=%p (c68k_init P18)\n",
               (void*)MEM, (void*)s_zero_page);
@@ -34602,6 +34684,8 @@ static inline int32_t mx_cpu_c68k_cycles_done(void)       { return C68k_Get_Cycl
 static inline void mx_cpu_c68k_jump_raw32(uint32_t vec2) {
     C68K.BasePC  = C68K.Fetch[(vec2 >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
     C68K.BasePC -= (uintptr_t)(vec2 & 0xFF000000u);
+    /* P968: SET_PC と同じく飛び先バンクの命令フェッチウェイトへ追従させる */
+    C68K.FetchWait = C68K.FetchWaitTbl[(vec2 >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
     C68K.PC      = (uintptr_t)vec2 + C68K.BasePC;
 }
 
