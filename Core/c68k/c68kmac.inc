@@ -180,9 +180,11 @@ extern void TRACE(int,c68k_struc*,int,int);
     CPU->A[7] += 4;
 #endif
 
-// P968: ROM/SRAM命令フェッチウェイト。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
+// P968/P970: 命令フェッチウェイト(単位1/8clk)。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
 #define FETCH_WAIT(n)       \
-(CCnt -= CPU->FetchWait * (n), CPU->CycleIO -= CPU->FetchWait * (n))
+(CPU->FetchFrac += CPU->FetchWait * (n), \
+ CCnt -= (CPU->FetchFrac >> 3), CPU->CycleIO -= (CPU->FetchFrac >> 3), \
+ CPU->FetchFrac &= 7)
 
 #define FETCH_BYTE          \
 (FETCH_WAIT(1), ((*(u16*)PC) & 0xFF))

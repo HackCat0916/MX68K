@@ -465,11 +465,39 @@ static uint32_t s_p806_mfp_acc = 0,  s_p806_mfp_wait = 0;
 static uint32_t s_p806_fdc_acc = 0,  s_p806_fdc_wait = 0;
 static unsigned long long s_p806_total_wait = 0;
 
+/* P970: [P970-SIWIN] 診断プローブ(D-15、既定OFF、環境変数 MX68K_DEBUG_P970_SIWIN=1 で有効)。
+ * 関数本体は mx68k_diag_irqh_callback の直前。主記憶データアクセス数だけは
+ * p806_io_wait の主記憶分岐で数えるため、状態をここで宣言する。
+ * s_p970_siwin_count_ram は窓が開いている間だけ 1(既定経路では常に 0)。 */
+static int      s_p970_siwin_on        = 0;
+static int      s_p970_siwin_count_ram = 0;
+static uint32_t s_p970_siwin_ramdata   = 0;
+
+/* P970: 主記憶DRAMリフレッシュウェイト(D-15、Class B Core patch、環境変数 MX68K_DEBUG_DRAM_WAIT)。
+ * s_p970_dram_wait_active は「有効 かつ c68kバックエンド」のキャッシュで、
+ * p970_dram_wait_update_active() が初期化時とバックエンド切替時に更新する。
+ * データ側の端数は命令フェッチ側と同じ C68K.FetchFrac(単位1/8clk)に積む。 */
+static int      s_p970_dram_wait_on     = 0;
+static int      s_p970_dram_wait_active = 0;
+static uint32_t s_p970_data_acc         = 0;   /* 60フレーム窓内の主記憶データアクセス数(有効時のみ計数) */
+static uint32_t s_p970_data_charged     = 0;   /* 同、1clk課金した回数 */
+
 static inline void p806_io_wait(uint32_t addr, int is_word) {
     uint32_t a = addr & 0x00FFFFFFu;
     uint32_t w;
     /* 主記憶・ROM 等の高頻度経路は比較 1 回で早期脱出する。 */
-    if (a < 0xC00000u) return;
+    if (a < 0xC00000u) {
+        if (s_p970_siwin_count_ram) s_p970_siwin_ramdata++;
+        if (s_p970_dram_wait_on) {
+            s_p970_data_acc++;
+            if (s_p970_dram_wait_active && ++C68K.FetchFrac >= 8) {
+                C68K.FetchFrac -= 8;
+                s_p970_data_charged++;
+                mx_cpu_add_cycles(1);
+            }
+        }
+        return;
+    }
     if (a >= 0xE96000u) return;
     if (a <= 0xDFFFFFu) {
         /* S-6 GVRAM: w = gvcount; gvcount ^= 1 */
@@ -1869,6 +1897,10 @@ unsigned long long g_p670_r22_writes_cum = 0;
 #define MX_CPU_BE_MUSASHI 1
 static int s_mx_cpu_backend = MX_CPU_BE_C68K;
 static inline int mx_cpu_be_musashi(void) { return s_mx_cpu_backend == MX_CPU_BE_MUSASHI; }
+/* P970: s_mx_cpu_backend を書き換えた直後に必ず呼ぶ(主記憶ウェイトは c68k 経路のみ) */
+static inline void p970_dram_wait_update_active(void) {
+    s_p970_dram_wait_active = (s_p970_dram_wait_on && !mx_cpu_be_musashi()) ? 1 : 0;
+}
 int m68000_cpu_env_override(void);   /* P872: 定義はファイル末尾の mx_cpu_* 節 */
 
 #ifndef MX68KQ_USE_SAFE_PC
@@ -29455,6 +29487,268 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
     }
 }
 
+/* ====================================================================
+ * P970: [P970-SIWIN] 診断プローブ(D-15、Bridgeのみ、読取り専用、c68kバックエンド時のみ)
+ *
+ * 窓 = ベクタ $000114(Timer-C、$45×4)の生値が主記憶(< $C00000)を指している区間
+ *     = si が count_processor_speed で Timer-C をフックしている区間。
+ * Timer-C ベクタ番号 $45: Core:px68k/x68k/mfp.c:46-48(IPRB bit5→vect=5)| VR上位4bit($40)。
+ * 判定には vec_hist(窓内の全ベクタのヒストグラム)を併記し、定数誤りを標本自身で検出できるようにする。
+ *
+ * cyc = c68k 累積実行サイクル(mx_cpu_execute の戻り値の総和) + 現チャンク内消化分。
+ * 現チャンク内消化分: 非デバッグビルドの CHECK_INT(Core:c68k/c68kmac.inc:270-313)は
+ * コールバックを PRE_IO より前に呼ぶため、CycleIO だけでは正しく読めない。
+ *  - C68K_RUNNING が立っていない = C68k_Exec 入口の CHECK_INT(Core:c68k/c68kexec.c:232)。
+ *    消化分は厳密に 0、C68K.PC も直前チャンク終端で同期済み → pcok=1。
+ *  - 立っている = C68k_Exec_End の CHECK_INT(c68kexec.c:348)。消化分は
+ *    C68k_Get_CycleDone 相当の CycleToDo-(CycleIO+CycleSup)(±1命令、RTE経由なら RTE の20clk分の誤差)。
+ *    PC はローカルレジスタにしか無いので pcok=0(pc は参考値)。
+ * ==================================================================== */
+#define P970_TIMERC_VEC      0x45
+#define P970_VEC114_ADDR     0x000114u
+#define P970_LOOP_CLK        26          /* si.s:4258-4274 addq.l(8)+tst.b(8)+bne(10) */
+#define P970_TICK_CAP        200
+#define P970_WIN_MAX         16          /* プロセス内で開く窓の上限(ログ量の安全装置) */
+#define P970_PC_HALF         16u         /* ループ範囲 = 2tick目の pc ± 16 バイト */
+
+typedef struct {
+    uint32_t loop, ram_other, rom, sram, other, total;
+} p970_pc_hist_t;
+
+static unsigned long long s_p970_cyc_base   = 0;
+static int      s_p970_open        = 0;
+static int      s_p970_capped      = 0;   /* cap で閉じた後、vec114 が主記憶を離れるまで再オープンしない */
+static uint32_t s_p970_windows     = 0;
+static uint32_t s_p970_vec114_open = 0;
+static uint32_t s_p970_seq         = 0;   /* 窓内の Timer-C 受付回数 */
+static unsigned long long s_p970_prev_cyc = 0;
+static uint32_t s_p970_prev_d0     = 0;
+static uint32_t s_p970_prev_ram    = 0;
+static uint32_t s_p970_oth         = 0;   /* 前回 Timer-C 以降の他ベクタ受付回数 */
+static uint32_t s_p970_othv[256];
+static uint32_t s_p970_vec_hist[256];
+/* ループ範囲(2tick目以降、最初の pcok=1 の tick で決定) */
+static int      s_p970_range_set   = 0;
+static uint32_t s_p970_range_lo    = 0, s_p970_range_hi = 0;
+static uint32_t s_p970_range_seq   = 0;
+static p970_pc_hist_t s_p970_pc, s_p970_pc_snap;
+/* 要約の基準点(ループ範囲決定 tick)と最終 tick */
+static unsigned long long s_p970_base_cyc = 0, s_p970_last_cyc = 0;
+static uint32_t s_p970_base_d0 = 0, s_p970_last_d0 = 0;
+static uint32_t s_p970_base_ram = 0, s_p970_last_ram = 0;
+/* H 統計(基準 tick より後の区間のみ。all = 全区間、z = oth=0 の区間のみ) */
+static uint32_t s_p970_h_n = 0, s_p970_hz_n = 0;
+static double   s_p970_h_sum = 0.0, s_p970_hz_sum = 0.0;
+static long long s_p970_h_min = 0, s_p970_h_max = 0, s_p970_hz_min = 0, s_p970_hz_max = 0;
+static uint32_t s_p970_pcok_ticks = 0;
+
+static void p970_siwin_init(void) {
+    const char *ev = getenv("MX68K_DEBUG_P970_SIWIN");
+    s_p970_siwin_on = (ev != NULL && strcmp(ev, "1") == 0) ? 1 : 0;
+    s_p970_siwin_count_ram = 0;
+    s_p970_siwin_ramdata = 0;
+    s_p970_cyc_base = 0;
+    s_p970_open = 0;
+    s_p970_capped = 0;
+    if (s_p970_siwin_on) {
+        debug_log("[P970-SIWIN-CFG] enabled=1 timerc_vec=0x%02x cap=%d win_max=%d\n",
+                  P970_TIMERC_VEC, P970_TICK_CAP, P970_WIN_MAX);
+    }
+}
+
+static inline uint32_t p970_read_vec114(void) {
+    return p47_read_long_le(P970_VEC114_ADDR);
+}
+
+static void p970_siwin_open(uint32_t vec114) {
+    s_p970_open = 1;
+    s_p970_windows++;
+    s_p970_vec114_open = vec114;
+    s_p970_seq = 0;
+    s_p970_oth = 0;
+    memset(s_p970_othv, 0, sizeof s_p970_othv);
+    memset(s_p970_vec_hist, 0, sizeof s_p970_vec_hist);
+    s_p970_range_set = 0;
+    s_p970_range_lo = s_p970_range_hi = 0;
+    s_p970_range_seq = 0;
+    memset(&s_p970_pc, 0, sizeof s_p970_pc);
+    memset(&s_p970_pc_snap, 0, sizeof s_p970_pc_snap);
+    s_p970_base_cyc = s_p970_last_cyc = 0;
+    s_p970_base_d0 = s_p970_last_d0 = 0;
+    s_p970_base_ram = s_p970_last_ram = 0;
+    s_p970_h_n = s_p970_hz_n = 0;
+    s_p970_h_sum = s_p970_hz_sum = 0.0;
+    s_p970_h_min = s_p970_h_max = s_p970_hz_min = s_p970_hz_max = 0;
+    s_p970_pcok_ticks = 0;
+    s_p970_siwin_ramdata = 0;
+    s_p970_siwin_count_ram = 1;
+    debug_log("[P970-SIWIN] window open win=%u f=%d vec114=%08x cyc=%llu\n",
+              s_p970_windows, g_mx68k_frame_num, (unsigned)vec114, s_p970_cyc_base);
+}
+
+static void p970_siwin_close(const char *by, uint32_t vec114_now) {
+    char hist[1024];
+    size_t pos = 0;
+    hist[0] = '\0';
+    for (int v = 0; v < 256 && pos < sizeof hist - 16; v++) {
+        if (s_p970_vec_hist[v] == 0) continue;
+        int n = snprintf(hist + pos, sizeof hist - pos, "%s%02x:%u",
+                         pos ? "," : "", v, (unsigned)s_p970_vec_hist[v]);
+        if (n < 0) break;
+        pos += (size_t)n;
+    }
+    /* 要約の区間 = ループ範囲決定 tick → 最終 tick */
+    uint32_t ticks = (s_p970_range_set && s_p970_seq > s_p970_range_seq)
+                     ? (s_p970_seq - s_p970_range_seq) : 0;
+    uint32_t dd0   = s_p970_last_d0 - s_p970_base_d0;
+    unsigned long long dcyc = s_p970_last_cyc - s_p970_base_cyc;
+    uint32_t ramd  = s_p970_last_ram - s_p970_base_ram;
+    debug_log("[P970-SIWIN] window close win=%u f=%d vec114_open=%08x vec114_now=%08x seq=%u closed_by=%s\n",
+              s_p970_windows, g_mx68k_frame_num, (unsigned)s_p970_vec114_open,
+              (unsigned)vec114_now, (unsigned)s_p970_seq, by);
+    debug_log("[P970-SIWIN-SUM] win=%u closed_by=%s ticks_total=%u base_seq=%u ticks=%u dD0=%u dcyc=%llu "
+              "H_mean=%.1f H_min=%lld H_max=%lld H_n=%u "
+              "Hz_mean=%.1f Hz_min=%lld Hz_max=%lld Hz_n=%u "
+              "loop_range=%06x-%06x pc_loop=%u pc_ram_other=%u pc_rom=%u pc_sram=%u pc_other=%u pc_total=%u "
+              "ramdata=%u ram_per_d0=%.4f pcok_ticks=%u vec_hist=[%s]\n",
+              s_p970_windows, by, (unsigned)s_p970_seq, (unsigned)s_p970_range_seq, (unsigned)ticks,
+              (unsigned)dd0, dcyc,
+              s_p970_h_n ? s_p970_h_sum / s_p970_h_n : 0.0, s_p970_h_min, s_p970_h_max, (unsigned)s_p970_h_n,
+              s_p970_hz_n ? s_p970_hz_sum / s_p970_hz_n : 0.0, s_p970_hz_min, s_p970_hz_max, (unsigned)s_p970_hz_n,
+              (unsigned)s_p970_range_lo, (unsigned)s_p970_range_hi,
+              (unsigned)s_p970_pc_snap.loop, (unsigned)s_p970_pc_snap.ram_other,
+              (unsigned)s_p970_pc_snap.rom, (unsigned)s_p970_pc_snap.sram,
+              (unsigned)s_p970_pc_snap.other, (unsigned)s_p970_pc_snap.total,
+              (unsigned)ramd, dd0 ? (double)ramd / (double)dd0 : 0.0,
+              (unsigned)s_p970_pcok_ticks, hist);
+    s_p970_open = 0;
+    s_p970_siwin_count_ram = 0;
+}
+
+/* vec114 を見て窓を開閉する(チャンク終端と Timer-C 受付時に呼ぶ)。 */
+static void p970_siwin_poll_vec(void) {
+    uint32_t v = p970_read_vec114();
+    int in_ram = (v < 0x00C00000u);
+    if (!in_ram) {
+        s_p970_capped = 0;
+        if (s_p970_open) p970_siwin_close("vec", v);
+        return;
+    }
+    if (!s_p970_open && !s_p970_capped && s_p970_windows < P970_WIN_MAX) {
+        p970_siwin_open(v);
+    }
+}
+
+/* mx_cpu_execute 直後(c68k/Musashi 共通の呼出し点)。 */
+static void p970_siwin_chunk_end(int32_t executed) {
+    if (mx_cpu_be_musashi()) {
+        if (s_p970_open) p970_siwin_close("backend", p970_read_vec114());
+        return;
+    }
+    s_p970_cyc_base += (unsigned long long)(executed > 0 ? executed : 0);
+    if (s_p970_open && s_p970_range_set) {
+        uint32_t pc = (uint32_t)MX68KQ_GUEST_PC_RAW() & 0x00FFFFFFu;
+        if (pc >= s_p970_range_lo && pc <= s_p970_range_hi) s_p970_pc.loop++;
+        else if (pc < 0xC00000u)                            s_p970_pc.ram_other++;
+        else if (pc >= 0xED0000u && pc <= 0xEDFFFFu)        s_p970_pc.sram++;
+        else if (pc >= 0xF00000u)                           s_p970_pc.rom++;
+        else                                                s_p970_pc.other++;
+        s_p970_pc.total++;
+    }
+    p970_siwin_poll_vec();
+}
+
+/* IACK コールバック内(ベクタ解決後)。 */
+static void p970_siwin_on_ack(int32_t level, int32_t vect) {
+    if (mx_cpu_be_musashi()) return;
+    int32_t v = vect;
+    if (v == C68K_INT_ACK_AUTOVECTOR) v = C68K_INTERRUPT_AUTOVECTOR_EX + (level & 7);
+    if (!s_p970_open && v == P970_TIMERC_VEC) p970_siwin_poll_vec();
+    if (!s_p970_open) return;
+    if (v >= 0 && v < 256) s_p970_vec_hist[v]++;
+    if (v != P970_TIMERC_VEC) {
+        s_p970_oth++;
+        if (v >= 0 && v < 256) s_p970_othv[v]++;
+        return;
+    }
+
+    int running = (C68K.Status & C68K_RUNNING) ? 1 : 0;
+    int32_t within = running ? (C68K.CycleToDo - (C68K.CycleIO + C68K.CycleSup)) : 0;
+    unsigned long long cyc = s_p970_cyc_base + (unsigned long long)(within > 0 ? within : 0);
+    uint32_t pc  = (uint32_t)MX68KQ_GUEST_PC_RAW() & 0x00FFFFFFu;
+    int pcok     = running ? 0 : 1;
+    uint32_t d0  = (uint32_t)C68K.D[0];
+    uint32_t ram = s_p970_siwin_ramdata;
+    uint32_t vec114 = p970_read_vec114();
+
+    s_p970_seq++;
+    long long dcyc = 0, h = 0;
+    int32_t  dd0  = 0;
+    uint32_t dram = 0;
+    if (s_p970_seq >= 2) {
+        dcyc = (long long)(cyc - s_p970_prev_cyc);
+        dd0  = (int32_t)(d0 - s_p970_prev_d0);
+        dram = ram - s_p970_prev_ram;
+        h    = dcyc - (long long)dd0 * P970_LOOP_CLK;
+    }
+
+    char othv[512];
+    size_t pos = 0;
+    othv[0] = '\0';
+    for (int i = 0; i < 256 && pos < sizeof othv - 16; i++) {
+        if (s_p970_othv[i] == 0) continue;
+        int n = snprintf(othv + pos, sizeof othv - pos, "%s%02x:%u",
+                         pos ? "," : "", i, (unsigned)s_p970_othv[i]);
+        if (n < 0) break;
+        pos += (size_t)n;
+    }
+
+    debug_log("[P970-SIWIN] seq=%u cyc=%llu d0=%08x pc=%06x vec114=%08x "
+              "pcok=%d ex=%d within=%d dcyc=%lld dd0=%d h=%lld ram=%u oth=%u othv=[%s]\n",
+              (unsigned)s_p970_seq, cyc, (unsigned)d0, (unsigned)pc, (unsigned)vec114,
+              pcok, running, (int)within, dcyc, (int)dd0, h, (unsigned)dram,
+              (unsigned)s_p970_oth, othv);
+    if (pcok) s_p970_pcok_ticks++;
+
+    /* 統計は基準 tick(ループ範囲決定 tick)より後の区間のみ */
+    if (s_p970_range_set) {
+        if (s_p970_h_n == 0 || h < s_p970_h_min) s_p970_h_min = h;
+        if (s_p970_h_n == 0 || h > s_p970_h_max) s_p970_h_max = h;
+        s_p970_h_n++;  s_p970_h_sum += (double)h;
+        if (s_p970_oth == 0) {
+            if (s_p970_hz_n == 0 || h < s_p970_hz_min) s_p970_hz_min = h;
+            if (s_p970_hz_n == 0 || h > s_p970_hz_max) s_p970_hz_max = h;
+            s_p970_hz_n++;  s_p970_hz_sum += (double)h;
+        }
+        s_p970_last_cyc = cyc;
+        s_p970_last_d0  = d0;
+        s_p970_last_ram = ram;
+        s_p970_pc_snap  = s_p970_pc;
+    } else if (s_p970_seq >= 2 && pcok) {
+        /* 1tick目は同期待ちループ中の可能性があるので避け、2tick目以降で最初の pcok=1 の tick を基準にする */
+        s_p970_range_set = 1;
+        s_p970_range_seq = s_p970_seq;
+        s_p970_range_lo  = (pc >= P970_PC_HALF) ? pc - P970_PC_HALF : 0;
+        s_p970_range_hi  = pc + P970_PC_HALF;
+        s_p970_base_cyc = s_p970_last_cyc = cyc;
+        s_p970_base_d0  = s_p970_last_d0  = d0;
+        s_p970_base_ram = s_p970_last_ram = ram;
+        debug_log("[P970-SIWIN] loop_range=%06x-%06x set_at_seq=%u\n",
+                  (unsigned)s_p970_range_lo, (unsigned)s_p970_range_hi, (unsigned)s_p970_seq);
+    }
+
+    s_p970_prev_cyc = cyc;
+    s_p970_prev_d0  = d0;
+    s_p970_prev_ram = ram;
+    s_p970_oth = 0;
+    memset(s_p970_othv, 0, sizeof s_p970_othv);
+
+    if (s_p970_seq >= P970_TICK_CAP) {
+        p970_siwin_close("cap", vec114);
+        s_p970_capped = 1;
+    }
+}
+
 /*--------------------------------------------------------
 	P47-D-DIAG-F: 割込み ACK フック。
 	my_irqh_callback() をラップし、CPU が IRQ を受け付けるたびに、実際に
@@ -29769,6 +30063,7 @@ static int32_t mx68k_diag_irqh_callback(int32_t level)
 #if P864_MUSASHI_IRQPROBE_ENABLE
     s_p864_in_iack = 0;
 #endif
+    if (s_p970_siwin_on) p970_siwin_on_ack(level, vect);
     return vect;
 }
 
@@ -29914,6 +30209,15 @@ void p806_io_wait_frame_end(int frame_num, int clk_total, int total_executed) {
         s_p806_mfp_acc = s_p806_mfp_wait = 0;
         s_p806_fdc_acc = s_p806_fdc_wait = 0;
         s_p806_total_wait = 0;
+        /* P970: data_acc を分母として併記し「アクセス無しの0」と「ゲートで課金0」を区別する */
+        if (s_p970_dram_wait_on) {
+            debug_log("[P970-DRAMWAIT-WIN] f=%d backend=%s on=%d active=%d data_acc=%u charged=%u fetchfrac=%d\n",
+                      frame_num, mx_cpu_be_musashi() ? "musashi" : "c68k",
+                      s_p970_dram_wait_on, s_p970_dram_wait_active,
+                      s_p970_data_acc, s_p970_data_charged, (int)C68K.FetchFrac);
+        }
+        s_p970_data_acc = 0;
+        s_p970_data_charged = 0;
     }
 #else
     (void)frame_num; (void)clk_total; (void)total_executed;
@@ -29972,6 +30276,7 @@ static void mx_cpu_backend_select(void)
     const char *env = getenv("MX68K_CPU_CORE");
     int musashi = (env != NULL && strcmp(env, "musashi") == 0);
     s_mx_cpu_backend = musashi ? MX_CPU_BE_MUSASHI : MX_CPU_BE_C68K;
+    p970_dram_wait_update_active();
     debug_log("[P868-CPUCORE] backend=%s env=%.32s%s\n",
               mx_cpu_be_musashi() ? "musashi" : "c68k",
               env ? env : "(unset)",
@@ -30007,6 +30312,7 @@ static void c68k_init(void)
     /* P806: I/O ウェイト倍率の読込とトグル/カウンタのリセット。
      * P861: CPU 構造体に触れないため、読み書き関数の登録より後へ移しても挙動は同じ。 */
     p806_io_wait_init();
+    p970_siwin_init();
 
 #if P82XC_ENABLE
     /* P82-X-C Probe E: ビルド由来トークンを init 時 1 回出力する。
@@ -30188,15 +30494,31 @@ static void c68k_init(void)
 
     /* P968: ROM/SRAM 命令フェッチウェイト 1clk/ワード(D-15、Class B Core patch)。
      * 段階③: 既定 ON。MX68K_DEBUG_ROMSRAM_WAIT=0 を明示設定したときだけ無効化する(オプトアウト用)。
-     * 無効時は C68k_Init の memset によりテーブルが全 0 のままで、挙動は修正前と同一。 */
+     * 無効時は C68k_Init の memset によりテーブルが全 0 のままで、挙動は修正前と同一。
+     * P970: テーブルの単位が 1/8clk になったため 8(=1clk)を設定する(P970 Core patch と同一コミット必須)。 */
     {
         const char *ev = getenv("MX68K_DEBUG_ROMSRAM_WAIT");
         if (ev == NULL || strcmp(ev, "0") != 0) {
-            C68k_Set_FetchWait(&C68K, 0xed0000, 0xedffff, 1);
-            C68k_Set_FetchWait(&C68K, 0xfc0000, 0xffffff, 1);
-            debug_log("[P968-FETCHWAIT] enabled: sram=$ED w=1 ipl=$FC-$FF w=1 tbl[0xED]=%u tbl[0xFE]=%u\n",
+            C68k_Set_FetchWait(&C68K, 0xed0000, 0xedffff, 8);
+            C68k_Set_FetchWait(&C68K, 0xfc0000, 0xffffff, 8);
+            debug_log("[P968-FETCHWAIT] enabled: sram=$ED w=8/8 ipl=$FC-$FF w=8/8 tbl[0xED]=%u tbl[0xFE]=%u\n",
                       (unsigned)C68K.FetchWaitTbl[0xED], (unsigned)C68K.FetchWaitTbl[0xFE]);
         }
+    }
+
+    /* P970: 主記憶DRAMリフレッシュウェイト 1/8clk/ワード(D-15、Class B Core patch)。
+     * 段階③: 既定 ON。MX68K_DEBUG_DRAM_WAIT=0 を明示設定したときだけ無効化する(オプトアウト用)。
+     * 命令フェッチは FetchWaitTbl(主記憶バンク $00-$BF に 1)、データ側は p806_io_wait の主記憶分岐で課金する。 */
+    {
+        const char *ev2 = getenv("MX68K_DEBUG_DRAM_WAIT");
+        s_p970_dram_wait_on = (ev2 == NULL || strcmp(ev2, "0") != 0) ? 1 : 0;
+        if (s_p970_dram_wait_on) {
+            C68k_Set_FetchWait(&C68K, 0x000000, 0xbfffff, 1);
+            debug_log("[P970-DRAMWAIT] enabled: ram=$00-$BF w=1/8 tbl[0x00]=%u tbl[0xBF]=%u backend=%s\n",
+                      (unsigned)C68K.FetchWaitTbl[0x00], (unsigned)C68K.FetchWaitTbl[0xBF],
+                      mx_cpu_be_musashi() ? "musashi" : "c68k");
+        }
+        p970_dram_wait_update_active();
     }
 
     debug_log("[MEM-PTR] m68000_bridge MEM=%p s_zero_page=%p (c68k_init P18)\n",
@@ -32076,6 +32398,7 @@ int32_t m68000_execute(int32_t cycles)
             if (executed <= 0)      s_p868_mc.nonpos++;
             if (mx_cpu_is_halted()) s_p868_mc.halted++;
         }
+        if (s_p970_siwin_on) p970_siwin_chunk_end(executed);
 #if P113_ENABLE
         /* P113-FB: chunk 境界 S sample (C68k_Exec return 直後)。S 1->0 を検出した
          * chunk の post-PC (=RTE landing 先、C68k_Get_PC は Really_End で sync 済、MINOR-2)・
@@ -34745,6 +35068,7 @@ void m68000_set_cpu_backend_model(int model)
     } else {
         s_mx_cpu_backend = MX_CPU_BE_C68K;
     }
+    p970_dram_wait_update_active();
 }
 
 /* 環境変数 MX68K_CPU_CORE が設定(非NULL・非空)されていれば1。設定値より優先する。

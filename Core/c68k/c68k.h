@@ -158,8 +158,9 @@ typedef struct {
 
 	uintptr_t Fetch[C68K_FETCH_BANK];             // 32 bytes aligned
 
-    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(clk)
-    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(0=なし)
+    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(単位1/8clk、P970)
+    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(単位1/8clk、0=なし)
+    int32_t  FetchFrac;                      // P970: ウェイトの1/8clk端数アキュムレータ(0〜7)
 } c68k_struc;
 
 

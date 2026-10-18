@@ -1,0 +1,74 @@
+# P970: 主記憶DRAMリフレッシュウェイト(c68k、Class B: 参照実装に逐語移植可能な既存修正なし)
+#
+# 分類: B(ハードウェア仕様準拠修正——参照実装に既存修正なし)
+# 一次資料: Outside X68000 書籍p.53(PDF p.57)⑯INH2「リフレッシュサイクルは約14μSおきに発生」/
+#   書籍p.66-67(PDF p.70-71)図11+付表「1A 100N+40〜100N+120ns N:ウェイト数」「7 INH2パルス幅390〜410ns」
+#   (P970で画像として閲覧確認。Nの値は記載なし)
+#   数値根拠: XEiJ 0.26.10.08 収録の第三者実機実測表 XEiJ.java:6779-6812「main memory | tst.w $00000000.l」
+#   XVI 1.650μs(理論1.600μs)=0.125clk/ワード。測定対象はフェッチ3+データ1の主記憶ワードアクセス(確認済み)。
+#   16.67MHz時の値は資料・実測とも無し(同一clk/ワード比率を仮定)。
+#   条件(b)の扱い: Step 4 Q2でユーザーが選択肢(A)を承認(2026-10-18、今回限り・恒久方針化はしない)——
+#   一次資料(機構の存在)+XEiJ収録実測表(測定対象確認済みの数値根拠)の組合せで条件(b)充足とみなす。
+#   Q2(B-1: STD_PROC_SPEED版si実機実測)・Q3(実機専用プログラム)は条件(b)充足の代替としては不実施。
+# 実測根拠: [P970-SIWIN](段階①、MX68K_DEBUG_P970_SIWIN=1 MX68K_DEBUG_OVERSHOOT_FIX=1、si計測窓31tick、P968既定ON)
+#   10MHz: dD0=116813 dcyc=3099930 H_mean=2025.5 → ループ1周=(dcyc−ΣH)/dD0=26.000clk(理論26)、pc_loop/pc_total=31691/32234(98.3%)、ram_per_d0=1.0509
+#   16MHz: dD0=196401 dcyc=5166672 H_mean=1943.4 → ループ1周=26.000clk、pc_loop/pc_total=51575/52084(99.0%)、ram_per_d0=1.0291
+#   10MHz再測定: dD0=116911 dcyc=3099932 H_mean=1943.4 → ループ1周=26.000clk、pc_loop/pc_total=31736/32268
+#   H分解(seq=6除外): Timer-C連鎖分c0=666.1(10MHz)/674.5(16MHz)clk、SCC1回c54=851.5/845.5clk、残差range約45clk。
+#   seq=6の1tick(約+1,290clk、3測定で決定論的に再現、テキストVRAM書込み32回と時刻一致=割込み処理内の事象と推定)は
+#   ユーザー判断で除外しT-1合格(.mx68k_cycles/P970_T1_result.md)。MXは主記憶ウェイト0で26.000clk/周=実機より速い機構を確認。
+# 上流欠陥同定: c68k(Stephane Dallongeville)FETCH_*がFetch[]直読み+px68k mem_wrap.c rm_mainが主記憶を直読み(共通祖先)
+# 同系先例: P968 FETCH_WAIT(本パッチで1/8clk単位へ拡張)、Bridge p806_io_wait()
+# 参照実装調査: px68k本家 74ddbb37 x68k/mem_wrap.c:413-428, m68000/c68kmacro.h:41,141 /
+#   px68k-libretro 617574fc x68k/mem_wrap.c:416-430, m68000/c68k/c68kmac.inc:185-190 /
+#   MPX68K 42fc3401 X68000 Shared/px68k/x68k/mem_wrap.c:799-805, .../m68000/c68k/c68kmac.inc:185-190 — いずれも欠落。
+#   XEiJ 0.26.10.08 実装あり(XEiJ.java:6842, MemoryMappedDevice.java:82-99, MC68000.java:34)、Java方式で逐語移植不可。
+#   sha256: XEiJ.java b7a6cad9…947181 / MemoryMappedDevice.java 817b2b90…cb0a3e / MC68000.java 40b55529…3d4a17
+# Bridge代替検討: D1(データのみBridge課金)は効果の約1/4のみで却下。D2(チャンク終端PCで時間伸長)は命令ミックスを見ず
+#   内部演算主体コードで過剰課金・P968のフェッチ単位課金と粒度混在・P808 carryと干渉で却下(フォールバックとしては成立)
+# 対象ファイル:行範囲: Core/c68k/c68k.h:158-164 / Core/c68k/c68kmac.inc:180-190
+# 由来サイクル: P970
+#
+# 適用方法: git apply Patches/Core/p970_c68k_dram_refresh_wait.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#
+# 併用が必須の Bridge 側変更: あり。Bridge/m68000_bridge.c の ROM/SRAM FetchWait値を1→8へ(同一コミット)、
+#   C68K.FetchFrac を参照(データ側)。★本パッチを適用しない状態ではBridgeのビルドが失敗する。
+#
+# 挙動の同一性: MX68K_DEBUG_DRAM_WAIT未設定時はRAMバンクのFetchWaitTblが0、FetchFracは常に0で、
+#   ROM/SRAM=8は1clkと等価 → P968適用後とビット単位で同一。
+#
+diff --git a/Core/c68k/c68k.h b/Core/c68k/c68k.h
+index c38b94c..64050b0 100644
+--- a/Core/c68k/c68k.h
++++ b/Core/c68k/c68k.h
+@@ -158,8 +158,9 @@ typedef struct {
+ 
+ 	uintptr_t Fetch[C68K_FETCH_BANK];             // 32 bytes aligned
+ 
+-    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(clk)
+-    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(0=なし)
++    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(単位1/8clk、P970)
++    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(単位1/8clk、0=なし)
++    int32_t  FetchFrac;                      // P970: ウェイトの1/8clk端数アキュムレータ(0〜7)
+ } c68k_struc;
+ 
+ 
+diff --git a/Core/c68k/c68kmac.inc b/Core/c68k/c68kmac.inc
+index 2e546e8..7a8ed93 100644
+--- a/Core/c68k/c68kmac.inc
++++ b/Core/c68k/c68kmac.inc
+@@ -180,9 +180,11 @@ extern void TRACE(int,c68k_struc*,int,int);
+     CPU->A[7] += 4;
+ #endif
+ 
+-// P968: ROM/SRAM命令フェッチウェイト。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
++// P968/P970: 命令フェッチウェイト(単位1/8clk)。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
+ #define FETCH_WAIT(n)       \
+-(CCnt -= CPU->FetchWait * (n), CPU->CycleIO -= CPU->FetchWait * (n))
++(CPU->FetchFrac += CPU->FetchWait * (n), \
++ CCnt -= (CPU->FetchFrac >> 3), CPU->CycleIO -= (CPU->FetchFrac >> 3), \
++ CPU->FetchFrac &= 7)
+ 
+ #define FETCH_BYTE          \
+ (FETCH_WAIT(1), ((*(u16*)PC) & 0xFF))
