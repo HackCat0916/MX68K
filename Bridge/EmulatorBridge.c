@@ -1546,35 +1546,31 @@ static void p805_load_clock_slice_override(void) {
     }
 }
 
-/* P808 (D-15): 命令境界オーバーシュート補正の有効フラグ(既定 0 = 無効)と、
- * 前フレーム末の予算超過(負債、≤0)。書込みは mx68k_init() / mx68k_reset_hard() /
- * mx68k_run_frame() のみ(いずれもエミュレーションを駆動するスレッド上で直列)。
- * OFF 時は s_p808_carry が常に 0 のままなので、フレームループは従来と同値になる。 */
-static int32_t s_p808_overshoot_fix = 0;
+/* P808 (D-15): 命令境界オーバーシュート補正の有効フラグ(P974 以降既定 1 = 有効、
+ * MX68K_DEBUG_OVERSHOOT_FIX=0 でオプトアウト)と、前フレーム末の予算超過(負債、≤0)。
+ * 書込みは mx68k_init() / mx68k_reset_hard() / mx68k_run_frame() のみ(いずれも
+ * エミュレーションを駆動するスレッド上で直列)。オプトアウト時は s_p808_carry が常に
+ * 0 のままなので、フレームループは旧挙動(px68k-libretro/MPX68K 同型)と同値になる。 */
+static int32_t s_p808_overshoot_fix = 1;
 static int32_t s_p808_carry = 0;
 
-/* P808: 環境変数 MX68K_DEBUG_OVERSHOOT_FIX を読み、10進整数として完全にパースでき
- * 値がちょうど 1 のときだけ補正を有効にする。未設定・空文字・非数値・末尾ゴミ付き・
- * 1 以外はすべて 0。毎回 mx68k_init() で再評価し、carry も 0 に戻す(前回値を
- * 持ち越さない)。「未到達」と区別できるよう、未設定時も 1 行出す。 */
+/* P808/P974: 環境変数 MX68K_DEBUG_OVERSHOOT_FIX を読む。既定 ON で、文字列 "0" と
+ * 完全一致したときだけ補正を無効にする(オプトアウト。P968/P970 と同じ判定)。
+ * 未設定・空文字・"1" を含むそれ以外の値はすべて 1。毎回 mx68k_init() で再評価し、
+ * carry も 0 に戻す(前回値を持ち越さない)。「未到達」と区別できるよう、未設定時も 1 行出す。 */
 static void p808_load_overshoot_fix(void) {
     const char *env = getenv("MX68K_DEBUG_OVERSHOOT_FIX");
-    s_p808_overshoot_fix = 0;
     s_p808_carry = 0;
     if (env == NULL || env[0] == '\0') {
-        debug_log("[P808-CFG] overshoot_fix=%d env=(unset)\n", (int)s_p808_overshoot_fix);
-        return;
-    }
-
-    char *end = NULL;
-    errno = 0;
-    long v = strtol(env, &end, 10);
-    if (errno == 0 && end != env && *end == '\0' && v == 1) {
         s_p808_overshoot_fix = 1;
-        debug_log("[P808-CFG] overshoot_fix=%d env=\"%s\" accepted\n",
+        debug_log("[P808-CFG] overshoot_fix=%d env=(unset) default=on\n", (int)s_p808_overshoot_fix);
+    } else if (strcmp(env, "0") == 0) {
+        s_p808_overshoot_fix = 0;
+        debug_log("[P808-CFG] overshoot_fix=%d env=\"%s\" opt-out\n",
                   (int)s_p808_overshoot_fix, env);
     } else {
-        debug_log("[P808-CFG] overshoot_fix=%d env=\"%s\" rejected\n",
+        s_p808_overshoot_fix = 1;
+        debug_log("[P808-CFG] overshoot_fix=%d env=\"%s\" default=on\n",
                   (int)s_p808_overshoot_fix, env);
     }
 }
@@ -1589,7 +1585,7 @@ int mx68k_init(void) {
     /* P805: CLOCK_SLICE の診断用上書き(環境変数未設定なら既定値 200 のまま)。 */
     p805_load_clock_slice_override();
 
-    /* P808: 命令境界オーバーシュート補正の診断用有効化(環境変数未設定なら無効=従来挙動)。 */
+    /* P808: 命令境界オーバーシュート補正(P974 以降既定 ON、MX68K_DEBUG_OVERSHOOT_FIX=0 でオプトアウト)。 */
     p808_load_overshoot_fix();
 
     /* P633: ここにあった P490 の packetList 付け替え(欠陥 A 対策)は、CoreMIDI
@@ -4178,13 +4174,13 @@ void mx68k_run_frame(void) {
      * frame_icount はフレームローカルな予算(MX はフレームをまたぐ ICount を持ち越さず、
      * 旧 clk_per_line*VLINE+remainder と同じく各フレームちょうど clk_total 分走る)。
      * ループ全体を通じた不変条件: clk_count + frame_icount == clk_total。
-     * P808: 補正 ON(MX68K_DEBUG_OVERSHOOT_FIX=1)時のみ、前フレーム末の予算超過
-     * p808_carry(≤0)を持ち越す(px68k本家 x11/winx68k.cpp:350/361 方式)。
-     * OFF 時は s_p808_carry==0 が不変なので p808_carry==0 となり従来と同値。 */
+     * P808: 補正(既定 ON)では、前フレーム末の予算超過 p808_carry(≤0)を持ち越す
+     * (px68k本家 x11/winx68k.cpp:350/361 方式)。オプトアウト時(MX68K_DEBUG_OVERSHOOT_FIX=0)は
+     * s_p808_carry==0 が不変なので p808_carry==0 となり旧挙動(px68k-libretro/MPX68K 同型)と同値。 */
     int32_t p808_carry = s_p808_overshoot_fix ? s_p808_carry : 0;
     int32_t frame_icount = clk_total + p808_carry;   /* MPX: ICount += clk_total(毎フレーム新規)/px68k本家 :361 */
     ICount = frame_icount;                  /* P158: Core のグローバル ICount をミラー(mfp.c H-SYNC hpos = ICount % HSYNC_CLK)。不変条件を保つ */
-    int32_t clk_count = -p808_carry;        /* MPX: clk_count = -ICount_old -> OFF 時は 0(px68k本家 :350) */
+    int32_t clk_count = -p808_carry;        /* MPX: clk_count = -ICount_old -> オプトアウト時は 0(px68k本家 :350) */
     int32_t clk_next  = clk_total / vline_total_val;   /* 最初の走査線境界(vl==0) */
     int32_t clk_line_start = 0;   /* P657: 現在走査線の開始位置(スケール済)。line_len の算出に使う */
     int     hsync     = 1;
@@ -4450,11 +4446,11 @@ void mx68k_run_frame(void) {
          * MFP/RTC にはチャンクごとに clkdiv 正規化済みクロックを渡す。これにより
          * IRQ/タイマーの粒度が MPX と同等になる(c68k は execute 呼出しの境界でのみ
          * IRQ を確認するため)。 */
-        int32_t ex = m68000_execute(n);     /* 実行サイクル数(OFF 時は記録用のみ) */
+        int32_t ex = m68000_execute(n);     /* 実行サイクル数(オプトアウト時は記録用のみ) */
         total_executed += ex;
-        /* P808: ゲスト時間を進める量。ON 時は実績 ex で進める(px68k本家 :430 の m)。
+        /* P808: ゲスト時間を進める量。既定 ON では実績 ex で進める(px68k本家 :430 の m)。
          * ex<n(異常状態/デバッガ停止)では要求値 n を下限とし、時間の停止・逆走を防ぐ。
-         * OFF 時は常に adv==n で従来と同値。 */
+         * オプトアウト時は常に adv==n で旧挙動(px68k-libretro/MPX68K 同型)と同値。 */
         int32_t adv = (s_p808_overshoot_fix && ex > n) ? ex : n;
 #if P805_ENABLE
         p805_chunks++;   /* P805: 呼出回数の計数のみ(ex・n には触れない) */
@@ -4474,8 +4470,8 @@ void mx68k_run_frame(void) {
         /* P657: 水平フロントポーチ到達 → ラスタコピーの唯一の実行契機。
          * PR#2 は m(= n - m68000_ICountBk)で判定するが、MX は m ≡ n
          * (m68000_ICountBk は常に0、下記 P152 コメント)。
-         * P808: 判定は adv で行う(OFF 時は adv==n で従来と同値。ON 時は PR#2 原文の
-         * m と同じく実績で判定し、超過で表示終了境界をまたいだ場合も取りこぼさない)。
+         * P808: 判定は adv で行う(既定 ON では PR#2 原文の m と同じく実績で判定し、超過で
+         * 表示終了境界をまたいだ場合も取りこぼさない。オプトアウト時は adv==n で旧挙動と同値)。
          * MFP_Timer() より前に置くのは PR#2 と同じ順序。 */
 #if P657_FRONTPORCH_ENABLE
         if (until_display_end > 0 && adv >= until_display_end) {
@@ -4510,9 +4506,9 @@ void mx68k_run_frame(void) {
          * (ex < n)ため、ex を加算すると Timer-C が約3.3%不足し、FF0B48 の
          * キャリブレーションが遅れて発火していた(icount 308493 vs MPX 308239)。n を加算し、
          * frame_icount も n で減らして MPX と完全一致させる(winx68k.cpp:484-490)。
-         * P808: OFF 時(既定)は MPX68K との一致のため要求値 n で進める。ON 時
-         * (MX68K_DEBUG_OVERSHOOT_FIX=1)は px68k本家 x11/winx68k.cpp:428-437 方式で
-         * 実績値(下限 n)の adv で進め、フレーム間で超過を持ち越す。 */
+         * P808: 既定 ON では px68k本家 x11/winx68k.cpp:428-437 方式で実績値(下限 n)の
+         * adv で進め、フレーム間で超過を持ち越す。オプトアウト時(MX68K_DEBUG_OVERSHOOT_FIX=0)は
+         * 旧挙動(px68k-libretro/MPX68K 同型)の要求値 n で進める。 */
         /* P822 (D-77): usedclk = adv*10/(clk_num/clk_den)。den=1 なら従来式と同一。
          * adv*10*clk_den は CLOCK_SLICE 上書き上限 1,000,000 × 10 × 5 = 5e7 で int32 に収まる。 */
         ClkUsed += adv * 10 * clk_den;
@@ -4563,7 +4559,7 @@ void mx68k_run_frame(void) {
         }
 #endif
         RTC_Timer(usedclk);   /* RP5C15 1Hz/16Hz アラーム、MFP の直後(winx68k.cpp:493-494) */
-        frame_icount -= adv;  /* MPX: ICount -= m, m == n(P808: OFF 時 adv==n) */
+        frame_icount -= adv;  /* MPX: ICount -= m, m == n(P808: オプトアウト時 adv==n) */
         ICount -= adv;        /* P158: mfp.c の H-SYNC ビット掃引のため Core グローバル ICount にも反映(MPX winx68k.cpp:488) */
         clk_count    += adv;
 
@@ -4861,7 +4857,8 @@ void mx68k_run_frame(void) {
         }
     } while (vl < (int)vline_total_val);        /* MPX: while(vline<VLINE_TOTAL) */
 
-    /* P808: フレーム末の予算超過(frame_icount ≤ 0)を次フレームへ持ち越す(ON 時のみ)。
+    /* P808: フレーム末の予算超過(frame_icount ≤ 0)を次フレームへ持ち越す(既定 ON、
+     * オプトアウト時は持ち越さず旧挙動=px68k-libretro/MPX68K 同型)。
      * 不変条件 clk_count + frame_icount == clk_total と、ループ終了条件(最終ライン末
      * clk_next==clk_total)から正常時は frame_icount ≤ 0。c>0 のクランプは到達しない
      * 想定の防御(予算未消化は持ち越さない。px68k本家と異なる点)。下限クランプは
