@@ -136,7 +136,11 @@ int32_t FASTCALL C68k_Get_CycleDone(c68k_struc *cpu)
 
 void FASTCALL C68k_Release_Cycle(c68k_struc *cpu)
 {
-    if (cpu->Status & C68K_RUNNING) cpu->CycleIO = cpu->CycleSup = 0;
+    if (cpu->Status & C68K_RUNNING)
+    {
+        cpu->CycleIO = cpu->CycleSup = 0;
+        cpu->RefreshJump = 1;   // P976: 時間片の残りを飛ばす(次の Exec_End でリフレッシュ期限を課金せず再同期)
+    }
 }
 
 void FASTCALL C68k_Add_Cycle(c68k_struc *cpu, int32_t cycle)
@@ -234,6 +238,30 @@ void C68k_Set_FetchWait(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, in
 
     cur = (uint32_t)(cpu->PC - cpu->BasePC);
     cpu->FetchWait = cpu->FetchWaitTbl[(cur >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
+}
+
+// P976: 主記憶DRAMリフレッシュの周期(1/256clk)。0で無効。実行関数の外から呼ぶ。
+// 周期を変えたときは、次の期限までの残りを新しい周期以内へ収める。
+void C68k_Set_RefreshPeriod(c68k_struc *cpu, int32_t period_q8)
+{
+    int64_t rem;
+
+    if (period_q8 < 0) period_q8 = 0;
+    if (period_q8 == cpu->RefreshPeriodQ8) return;
+    cpu->RefreshCarry = 0;
+    if (period_q8 == 0)
+    {
+        cpu->RefreshPeriodQ8 = 0;
+        cpu->RefreshRemain = 0;
+        cpu->RefreshFrac = 0;
+        return;
+    }
+    rem = cpu->RefreshPeriodQ8 ? (int64_t)cpu->RefreshRemain * 256 - cpu->RefreshFrac : period_q8;
+    while (rem > period_q8) rem -= period_q8;
+    if (rem < 0) rem = 0;
+    cpu->RefreshPeriodQ8 = period_q8;
+    cpu->RefreshRemain = (int32_t)((rem + 255) / 256);
+    cpu->RefreshFrac = (int32_t)((int64_t)cpu->RefreshRemain * 256 - rem);
 }
 
 void C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func)

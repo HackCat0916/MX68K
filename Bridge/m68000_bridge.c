@@ -473,29 +473,24 @@ static int      s_p970_siwin_on        = 0;
 static int      s_p970_siwin_count_ram = 0;
 static uint32_t s_p970_siwin_ramdata   = 0;
 
-/* P970: 主記憶DRAMリフレッシュウェイト(D-15、Class B Core patch、環境変数 MX68K_DEBUG_DRAM_WAIT)。
- * s_p970_dram_wait_active は「有効 かつ c68kバックエンド」のキャッシュで、
- * p970_dram_wait_update_active() が初期化時とバックエンド切替時に更新する。
- * データ側の端数は命令フェッチ側と同じ C68K.FetchFrac(単位1/8clk)に積む。 */
-static int      s_p970_dram_wait_on     = 0;
-static int      s_p970_dram_wait_active = 0;
-static uint32_t s_p970_data_acc         = 0;   /* 60フレーム窓内の主記憶データアクセス数(有効時のみ計数) */
-static uint32_t s_p970_data_charged     = 0;   /* 同、1clk課金した回数 */
+/* P976: 主記憶DRAMリフレッシュの周期スチール(D-15、Class B Core patch、P970 の平均ウェイト方式を置き換え)。
+ * 周期・調停・占有の計算は Core 側(c68k_refresh.h)。Bridge は有効判定と周期の設定(m68000_set_refresh_clock)、
+ * データアクセスのバス回数(p806_io_wait 先頭の C68K.BusCnt++)、診断ログだけを持つ。
+ * s_p976_refresh_active は「有効 かつ c68kバックエンド」のキャッシュで、
+ * p976_refresh_update_active() が初期化時とバックエンド切替時に更新する(Musashi 経路は周期 0 固定)。 */
+static int      s_p976_refresh_on     = 0;   /* 環境変数 MX68K_DEBUG_DRAM_REFRESH */
+static int      s_p976_refresh_active = 0;
+static int32_t  s_p976_clk_num = 0, s_p976_clk_den = 1;   /* mx68k_run_frame() の p822_clock_ratio と同じ値 */
+static int      s_p976_log_on  = 0;          /* 環境変数 MX68K_DEBUG_P976_REFRESH_LOG=1 */
+static unsigned long long s_p976_elapsed = 0;   /* [P976-REFRESH-WIN] 窓内の mx_cpu_execute 戻り値の和 */
 
 static inline void p806_io_wait(uint32_t addr, int is_word) {
     uint32_t a = addr & 0x00FFFFFFu;
     uint32_t w;
+    C68K.BusCnt++;   /* P976: データアクセス1回 = バス1回(全領域)。Musashi 経路では未使用 */
     /* 主記憶・ROM 等の高頻度経路は比較 1 回で早期脱出する。 */
     if (a < 0xC00000u) {
         if (s_p970_siwin_count_ram) s_p970_siwin_ramdata++;
-        if (s_p970_dram_wait_on) {
-            s_p970_data_acc++;
-            if (s_p970_dram_wait_active && ++C68K.FetchFrac >= 8) {
-                C68K.FetchFrac -= 8;
-                s_p970_data_charged++;
-                mx_cpu_add_cycles(1);
-            }
-        }
         return;
     }
     if (a >= 0xE96000u) return;
@@ -1897,9 +1892,21 @@ unsigned long long g_p670_r22_writes_cum = 0;
 #define MX_CPU_BE_MUSASHI 1
 static int s_mx_cpu_backend = MX_CPU_BE_C68K;
 static inline int mx_cpu_be_musashi(void) { return s_mx_cpu_backend == MX_CPU_BE_MUSASHI; }
-/* P970: s_mx_cpu_backend を書き換えた直後に必ず呼ぶ(主記憶ウェイトは c68k 経路のみ) */
-static inline void p970_dram_wait_update_active(void) {
-    s_p970_dram_wait_active = (s_p970_dram_wait_on && !mx_cpu_be_musashi()) ? 1 : 0;
+/* P976: リフレッシュ周期 = round(14.70us × クロック[MHz] × 256)(1/256clk)。
+ * 10MHz=37632(147.0clk)、50/3MHz=62720(245.0clk)。無効・Musashi 経路・クロック未設定は 0。 */
+static void p976_refresh_apply(void) {
+    int32_t want = 0;
+    if (s_p976_refresh_active && s_p976_clk_num > 0 && s_p976_clk_den > 0) {
+        want = (int32_t)(((int64_t)1470 * s_p976_clk_num * 256 + 50 * (int64_t)s_p976_clk_den)
+                         / (100 * (int64_t)s_p976_clk_den));
+    }
+    /* C68k_Init の memset 後も追従できるよう、キャッシュではなく C68K の現在値と比べる */
+    if (C68K.RefreshPeriodQ8 != want) C68k_Set_RefreshPeriod(&C68K, want);
+}
+/* P976: s_mx_cpu_backend を書き換えた直後に必ず呼ぶ(リフレッシュは c68k 経路のみ) */
+static inline void p976_refresh_update_active(void) {
+    s_p976_refresh_active = (s_p976_refresh_on && !mx_cpu_be_musashi()) ? 1 : 0;
+    p976_refresh_apply();
 }
 int m68000_cpu_env_override(void);   /* P872: 定義はファイル末尾の mx_cpu_* 節 */
 
@@ -30337,6 +30344,34 @@ static void scsi_in_fetch_overlay_apply(void)
  * 512KB)、宣言は Core/px68k/x68k/gvram.h:6。Core は一切改変しない。 */
 extern uint8_t GVRAM[];
 
+/* P976: [P976-REFRESH-WIN] 診断ログ(既定OFF、MX68K_DEBUG_P976_REFRESH_LOG=1 のときだけ 60 フレームごと)。
+ * Core 側の不変量カウンタを読んで 0 へ戻す。0件の解釈を区別するため period_q8・backend・hits_nondram・
+ * elapsed を同じ行に出し、派生値 expected(= elapsed×256/period_q8)は生値と並べる。 */
+static void p976_refresh_frame_end(int frame_num) {
+    if (!s_p976_log_on || (frame_num % 60) != 0) return;
+    {
+        int32_t p = C68K.RefreshPeriodQ8;
+        unsigned long long expected = (p > 0) ? (s_p976_elapsed * 256ULL) / (unsigned long long)p : 0ULL;
+        debug_log("[P976-REFRESH-WIN] f=%d backend=%s on=%d period_q8=%d elapsed=%llu expected=%llu "
+                  "hits_dram=%u hits_nondram=%u resync=%u stall=%u stall_max=%u carry=%u neg_o=%u\n",
+                  frame_num, mx_cpu_be_musashi() ? "musashi" : "c68k", s_p976_refresh_on, (int)p,
+                  s_p976_elapsed, expected,
+                  C68K.RefreshHitsDram, C68K.RefreshHitsOther, C68K.RefreshResync,
+                  C68K.RefreshStall, C68K.RefreshStallMax, C68K.RefreshCarryN, C68K.RefreshNegO);
+    }
+    s_p976_elapsed = 0;
+    C68K.RefreshHitsDram = C68K.RefreshHitsOther = C68K.RefreshResync = 0;
+    C68K.RefreshStall = C68K.RefreshStallMax = C68K.RefreshCarryN = C68K.RefreshNegO = 0;
+}
+
+/* P976: mx68k_run_frame() のクロック反映箇所(p822_clock_ratio の直後)から毎フレーム呼ぶ。
+ * 周期が変わったときだけ Core へ反映する(p976_refresh_apply 内で比較)。 */
+void m68000_set_refresh_clock(int32_t num, int32_t den) {
+    s_p976_clk_num = num;
+    s_p976_clk_den = den;
+    p976_refresh_apply();
+}
+
 /* P806: mx68k_run_frame() の P805 集計ブロック直後から毎フレーム呼ばれる。
  * clk_total / total_executed を 60 フレーム窓で累積し、frame_num % 60 == 0 で
  * [P806-IOWAIT] を 1 行出力して窓カウンタをリセットする(比は出さず生値のみ)。
@@ -30368,19 +30403,11 @@ void p806_io_wait_frame_end(int frame_num, int clk_total, int total_executed) {
         s_p806_mfp_acc = s_p806_mfp_wait = 0;
         s_p806_fdc_acc = s_p806_fdc_wait = 0;
         s_p806_total_wait = 0;
-        /* P970: data_acc を分母として併記し「アクセス無しの0」と「ゲートで課金0」を区別する */
-        if (s_p970_dram_wait_on) {
-            debug_log("[P970-DRAMWAIT-WIN] f=%d backend=%s on=%d active=%d data_acc=%u charged=%u fetchfrac=%d\n",
-                      frame_num, mx_cpu_be_musashi() ? "musashi" : "c68k",
-                      s_p970_dram_wait_on, s_p970_dram_wait_active,
-                      s_p970_data_acc, s_p970_data_charged, (int)C68K.FetchFrac);
-        }
-        s_p970_data_acc = 0;
-        s_p970_data_charged = 0;
     }
 #else
-    (void)frame_num; (void)clk_total; (void)total_executed;
+    (void)clk_total; (void)total_executed;
 #endif
+    p976_refresh_frame_end(frame_num);
 }
 
 /* P808: [P808-CHUNKHIST] の pc= 用。[P806-IOWAIT] と同じ取得法にそろえるため、
@@ -30435,7 +30462,7 @@ static void mx_cpu_backend_select(void)
     const char *env = getenv("MX68K_CPU_CORE");
     int musashi = (env != NULL && strcmp(env, "musashi") == 0);
     s_mx_cpu_backend = musashi ? MX_CPU_BE_MUSASHI : MX_CPU_BE_C68K;
-    p970_dram_wait_update_active();
+    p976_refresh_update_active();
     debug_log("[P868-CPUCORE] backend=%s env=%.32s%s\n",
               mx_cpu_be_musashi() ? "musashi" : "c68k",
               env ? env : "(unset)",
@@ -30655,30 +30682,30 @@ static void c68k_init(void)
     /* P968: ROM/SRAM 命令フェッチウェイト 1clk/ワード(D-15、Class B Core patch)。
      * 段階③: 既定 ON。MX68K_DEBUG_ROMSRAM_WAIT=0 を明示設定したときだけ無効化する(オプトアウト用)。
      * 無効時は C68k_Init の memset によりテーブルが全 0 のままで、挙動は修正前と同一。
-     * P970: テーブルの単位が 1/8clk になったため 8(=1clk)を設定する(P970 Core patch と同一コミット必須)。 */
+     * P976: P970(単位1/8clk)を撤去したのでテーブルの単位は clk に戻った(P976 Core patch と同一コミット必須)。 */
     {
         const char *ev = getenv("MX68K_DEBUG_ROMSRAM_WAIT");
         if (ev == NULL || strcmp(ev, "0") != 0) {
-            C68k_Set_FetchWait(&C68K, 0xed0000, 0xedffff, 8);
-            C68k_Set_FetchWait(&C68K, 0xfc0000, 0xffffff, 8);
-            debug_log("[P968-FETCHWAIT] enabled: sram=$ED w=8/8 ipl=$FC-$FF w=8/8 tbl[0xED]=%u tbl[0xFE]=%u\n",
+            C68k_Set_FetchWait(&C68K, 0xed0000, 0xedffff, 1);
+            C68k_Set_FetchWait(&C68K, 0xfc0000, 0xffffff, 1);
+            debug_log("[P968-FETCHWAIT] enabled: sram=$ED w=1 ipl=$FC-$FF w=1 tbl[0xED]=%u tbl[0xFE]=%u\n",
                       (unsigned)C68K.FetchWaitTbl[0xED], (unsigned)C68K.FetchWaitTbl[0xFE]);
         }
     }
 
-    /* P970: 主記憶DRAMリフレッシュウェイト 1/8clk/ワード(D-15、Class B Core patch)。
-     * 段階③: 既定 ON。MX68K_DEBUG_DRAM_WAIT=0 を明示設定したときだけ無効化する(オプトアウト用)。
-     * 命令フェッチは FetchWaitTbl(主記憶バンク $00-$BF に 1)、データ側は p806_io_wait の主記憶分岐で課金する。 */
+    /* P976: 主記憶DRAMリフレッシュの周期スチール(D-15、Class B Core patch、P970 を置き換え)。
+     * 段階③: 既定 ON。MX68K_DEBUG_DRAM_REFRESH=0 を明示設定したときだけ無効化する(オプトアウト用、P968/P970/P974と同じ判定)。
+     * 周期は mx68k_run_frame() が毎フレーム m68000_set_refresh_clock() で設定する(ここでは有効判定のみ)。
+     * 「行が0件」を「未到達」と区別できるよう、無効時も必ず1行出す(環境変数の生値を併記)。 */
     {
-        const char *ev2 = getenv("MX68K_DEBUG_DRAM_WAIT");
-        s_p970_dram_wait_on = (ev2 == NULL || strcmp(ev2, "0") != 0) ? 1 : 0;
-        if (s_p970_dram_wait_on) {
-            C68k_Set_FetchWait(&C68K, 0x000000, 0xbfffff, 1);
-            debug_log("[P970-DRAMWAIT] enabled: ram=$00-$BF w=1/8 tbl[0x00]=%u tbl[0xBF]=%u backend=%s\n",
-                      (unsigned)C68K.FetchWaitTbl[0x00], (unsigned)C68K.FetchWaitTbl[0xBF],
-                      mx_cpu_be_musashi() ? "musashi" : "c68k");
-        }
-        p970_dram_wait_update_active();
+        const char *ev2 = getenv("MX68K_DEBUG_DRAM_REFRESH");
+        const char *ev3 = getenv("MX68K_DEBUG_P976_REFRESH_LOG");
+        s_p976_refresh_on = (ev2 == NULL || strcmp(ev2, "0") != 0) ? 1 : 0;
+        s_p976_log_on = (ev3 != NULL && strcmp(ev3, "1") == 0) ? 1 : 0;
+        p976_refresh_update_active();
+        debug_log("[P976-REFRESH-CFG] on=%d env=%.16s log=%d backend=%s\n",
+                  s_p976_refresh_on, ev2 ? ev2 : "(unset)", s_p976_log_on,
+                  mx_cpu_be_musashi() ? "musashi" : "c68k");
     }
 
     debug_log("[MEM-PTR] m68000_bridge MEM=%p s_zero_page=%p (c68k_init P18)\n",
@@ -32559,6 +32586,7 @@ int32_t m68000_execute(int32_t cycles)
             if (mx_cpu_is_halted()) s_p868_mc.halted++;
         }
         if (s_p970_siwin_on) p970_siwin_chunk_end(executed);
+        if (s_p976_log_on) s_p976_elapsed += (unsigned long long)(executed > 0 ? executed : 0);
         if (s_p972_on && !mx_cpu_be_musashi()) s_p972_cyc_base += (unsigned long long)(executed > 0 ? executed : 0);
 #if P113_ENABLE
         /* P113-FB: chunk 境界 S sample (C68k_Exec return 直後)。S 1->0 を検出した
@@ -35229,7 +35257,7 @@ void m68000_set_cpu_backend_model(int model)
     } else {
         s_mx_cpu_backend = MX_CPU_BE_C68K;
     }
-    p970_dram_wait_update_active();
+    p976_refresh_update_active();
 }
 
 /* 環境変数 MX68K_CPU_CORE が設定(非NULL・非空)されていれば1。設定値より優先する。

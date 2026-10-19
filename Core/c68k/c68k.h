@@ -158,9 +158,26 @@ typedef struct {
 
 	uintptr_t Fetch[C68K_FETCH_BANK];             // 32 bytes aligned
 
-    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(単位1/8clk、P970)
-    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(単位1/8clk、0=なし)
-    int32_t  FetchFrac;                      // P970: ウェイトの1/8clk端数アキュムレータ(0〜7)
+    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(clk)
+    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(0=なし)
+
+    // P976: 主記憶DRAMリフレッシュの周期スチール(c68k_refresh.h)。C68k_Init の memset で 0=無効。
+    // C68k_Reset の memset 範囲(D[0]〜dirty1)の外に置く。
+    int32_t  RefreshPeriodQ8;                // 周期(1/256clk、0=無効)
+    int32_t  RefreshRemain;                  // 実行関数の外で次の期限までのclk(実時間 = Remain − Frac/256)
+    int32_t  RefreshFrac;                    // 期限の端数(1/256clk、0〜255)
+    int32_t  RefreshDL;                      // 実行中の次の期限(CCnt座標、端数切捨て)
+    int32_t  RefreshCarry;                   // 命令をまたいだ占有の残り(1/256clk、0=なし)
+    uint32_t RefreshJump;                    // C68k_Release_Cycle による時間ジャンプ(次の Exec_End で課金せず再同期)
+    uint32_t BusCnt;                         // 現命令のバス回数(フェッチ語数 + データアクセス回数)
+    // 不変量カウンタ(読み出し側が 0 へ戻す)
+    uint32_t RefreshHitsDram;                // 主記憶上の命令で処理した期限数
+    uint32_t RefreshHitsOther;               // 主記憶以外の命令で課金せず進めた期限数
+    uint32_t RefreshResync;                  // 時間ジャンプ・停止中に課金せず進めた期限数
+    uint32_t RefreshStall;                   // 課金したストールclkの合計
+    uint32_t RefreshStallMax;                // 1回の衝突の最大ストールclk
+    uint32_t RefreshCarryN;                  // 占有が命令をまたいだ回数
+    uint32_t RefreshNegO;                    // 期限を命令先頭へ丸めた回数(割込み受付中の期限)
 } c68k_struc;
 
 
@@ -191,6 +208,7 @@ void    FASTCALL C68k_Add_Cycle(c68k_struc *cpu, int32_t cycle);
 
 void    C68k_Set_Fetch(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, uintptr_t fetch_adr);
 void    C68k_Set_FetchWait(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, int32_t w);
+void    C68k_Set_RefreshPeriod(c68k_struc *cpu, int32_t period_q8);   // P976: 0で無効
 
 void    C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func);
 void    C68k_Set_ReadW(c68k_struc *cpu, C68K_READ *Func);

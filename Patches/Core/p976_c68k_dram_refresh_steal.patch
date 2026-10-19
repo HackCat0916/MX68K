@@ -1,0 +1,523 @@
+# P976: 主記憶DRAMリフレッシュの周期スチール(c68k、Class B: 参照実装に逐語移植可能な既存修正なし)
+# ★SUPERSEDES P970(p970_c68k_dram_refresh_wait.patch の平均ウェイト方式[FetchFrac、1/8clk/ワード]を置き換える)
+#
+# 分類: B(ハードウェア仕様準拠修正——参照実装に既存修正なし)
+# 一次資料: 機構の存在 = Outside X68000 書籍p.53(PDF p.57)⑯INH2「リフレッシュサイクルは約14μSおきに発生」
+#   (P970で画像として閲覧確認、p970パッチヘッダ記載)。
+#   数値(周期 Tr=14.70µs・調停 M2・占有 4CPUclk)= 実機直接計測代替(P975、実機X68000 XVI本体、FD起動、
+#   10.00MHz/16.67MHz、S1/S2/S3 の3セッション、[user hands-on confirmation])。
+#   `.mx68k_cycles/P975_blind_result.md` §0-1・`.mx68k_cycles/P975_target_values.md` §6。
+#   盲検: 事前登録予測 `P975_blind_predictions.md`(md5 2cbf3181ae817a35673b68a4a41fde9d、照合前後で一致)に対し
+#   新しい16点を rms 0.010/0.021% で再現。38点(各クロック19点)を候補(e)で rms 0.026% 再現(P976_code_inv.md §3)。
+#   ★「当該サイクル内の計測」要件について: P975のS3データ(直前サイクル・同一D-15投資調査内)を当該サイクル内計測の
+#   代替として採用することは、ユーザーの個別承認(2026-10-19 Step 4、U-4)による本件限定の例外である。
+#   CLAUDE.md Class B(b)の文言の厳格な解釈からの逸脱であり、将来の同種判断の前例とはしない。
+#   参照実装の実測表は援用しない(XEiJの表は平均ウェイトの測定で、周期スチールの根拠にはならない)。
+#   命令内のバス並び(バス先頭、分岐成立のみ「内部2clk→np→np」)= [training knowledge](Yacht表記)を
+#   addq/tst/bne/nop/lsl の5命令について38点の実機データが支持。−(An)・d8(An,Xn)・DBcc・BSR等は未検証(R3)。
+# 実測根拠: (MX側)T-1 [P976-REFRESH-WIN] の生値・T-4(MX上loopsweep)の照合結果は段階②で取得し追記する
+#   (段階①の本パッチ作成時点では未取得)。単体照合 T-1a: `.mx68k_cycles/p976_refresh_unit/`(harness.c ↔ ref.py、
+#   両クロック×20変種×8位相の総clkと命令ごと所要clk列のハッシュが一致することを作成時に確認)。
+#   置き換え対象(P970)の挙動: siループ1周26.5clk(P970/P973/P974 T-3のsi値が予測一致)。
+# 上流欠陥同定: c68k(Stephane Dallongeville)の FETCH_* が Fetch[] 直読み + px68k mem_wrap.c rm_main が主記憶を直読み
+#   (共通祖先、リフレッシュの概念なし)。
+# 同系先例: P968 FETCH_WAIT(本パッチで整数clk形へ戻し、バス回数の加算を足す)、P970(本パッチで撤去)、
+#   Bridge p806_io_wait()(データアクセスのバス回数をここで数える)。
+# 参照実装調査(修正不在の証明、本パッチ作成時に再実行した生出力):
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k" log --oneline -1
+#   error: non-monotonic index .git/objects/pack/._pack-bb0a00cd9d1c221c53cea4c0ca25a1378c731938.idx
+#   error: non-monotonic index .git/objects/pack/._pack-bb0a00cd9d1c221c53cea4c0ca25a1378c731938.idx
+#   74ddbb3 fix the tool that makes .deb file (iOS)
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k-libretro" log --oneline -1
+#   error: non-monotonic index .git/objects/pack/._pack-0011600ad28f767eb7bfaa93d0639249efdb7d77.idx
+#   error: non-monotonic index .git/objects/pack/._pack-0011600ad28f767eb7bfaa93d0639249efdb7d77.idx
+#   617574f regen c68k with -DC68K_NO_JUMP_TABLE
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K" log --oneline -1
+#   error: non-monotonic index .git/objects/pack/._pack-90d67708e9b8de5e976db79a8d5f63e5a281aa2f.idx
+#   error: non-monotonic index .git/objects/pack/._pack-90d67708e9b8de5e976db79a8d5f63e5a281aa2f.idx
+#   42fc340 Reduce release runtime overhead
+#   $ gh api "repos/YosAwed/MPX68K/commits?per_page=1" --jq ".[0].sha"
+#   0498eaecc2060a617a0aaa7c4cd205e403027f95
+#   (`error: non-monotonic index ... ._pack-*.idx` は外付けボリューム上の macOS AppleDouble ファイル `._*` の警告で、
+#   HEAD の表示には影響しない。)
+#   ローカル3派生は P970 記録のハッシュ(74ddbb37/617574fc/42fc3401)と一致 → P970 の欠落確認がそのまま有効:
+#   px68k本家 74ddbb37 x68k/mem_wrap.c:413-428, m68000/c68kmacro.h:41,141 /
+#   px68k-libretro 617574fc x68k/mem_wrap.c:416-430, m68000/c68k/c68kmac.inc:185-190 /
+#   MPX68K 42fc3401 X68000 Shared/px68k/x68k/mem_wrap.c:799-805, .../m68000/c68k/c68kmac.inc:185-190 — いずれも欠落。
+#   MPX68K GitHub最新 0498eae でも欠落(P976 Fix Planで再確認: c68kmac.inc の FETCH_* は直読み・"refresh"/"wait" 0件、
+#   mem_wrap.c は "wait" 0件、"refresh" 1件は Memory_RefreshSCSIRomOverlay で無関係)。
+#   px68k-libretro・MPX68K は px68k本家の派生で、3者の欠落は共通祖先由来の同一欠陥。
+#   独立参照実装: XEiJ 0.26.10.08 は平均ウェイト方式(XEiJ.java:6842 mpuWaitTime.ram = mpuCycleUnit >> 3、
+#   MemoryMappedDevice.java:82-99、MC68000.java:34)で周期スチール型ではない(本パッチの移植元にならない、
+#   P970の数値の出所)。XM6 2.06 は vm/memory.cpp:1084-1135 で命令フェッチにウェイト無し(P968調査の記録、
+#   周期スチールの対応物なし)。本パッチはどの参照実装とも一致しない(実機計測へ寄せる)ことを意図的に選ぶ(U-2)。
+# Bridge代替検討: D3(チャンク終端で経過時間内の回数×期待損失を課金)は位相を持たず38点rms 0.44〜0.53%で却下 /
+#   D4(1命令ずつ C68k_Exec)は性能低下とP137の割込み粒度回帰の前例で却下 /
+#   D5(データアクセスのコールバックだけで課金)は命令フェッチがコールバックを通らず衝突を表せないため却下 /
+#   D2'(チャンク終端PCで時間伸長)はP970と同じ理由(命令ミックスを見ない)で却下。
+# 対象ファイル:行範囲(適用前の行番号): Core/c68k/c68k.h:158-164,191-193 / Core/c68k/c68kmac.inc:46-68,180-190 /
+#   Core/c68k/c68kexec.c:23-25,150-155,181-184,228-230,276-282,345-363 / Core/c68k/c68k.c:136-145,236-241 /
+#   Core/c68k/c68k_refresh.h(新規)
+# 由来サイクル: P976
+#
+# 適用方法: git apply Patches/Core/p976_c68k_dram_refresh_steal.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#           現在の Core(P968+P970適用後)からの前方差分。撤回は git apply -R で P970 状態へ戻る。
+#
+# 併用が必須の Bridge 側変更: あり(同一コミット)。Bridge/m68000_bridge.c の ROM/SRAM FetchWait 値を 8→1 へ戻し、
+#   主記憶バンクの FetchWait と p806_io_wait の FetchFrac 課金を撤去、C68K.BusCnt++ と C68k_Set_RefreshPeriod() を参照。
+#   ★本パッチを適用しない状態では Bridge のビルドが失敗する(C68K.BusCnt・C68K.Refresh*・C68k_Set_RefreshPeriod を参照)。
+#
+# 挙動の同一性: RefreshPeriodQ8=0(Bridge で MX68K_DEBUG_DRAM_REFRESH=0 を明示[段階③で既定ON化、段階①②では未設定=無効]、
+#   または Musashi 経路)のとき、
+#   RefDL=C68K_REFRESH_NEVER で RET・Exec_End の期限比較は成立せず、FETCH_WAIT は P968 の整数形、
+#   主記憶バンクの FetchWait は 0 → P968 適用後(P970 適用前)とサイクル計上がビット単位で同一。
+#
+diff --git a/Core/c68k/c68k.c b/Core/c68k/c68k.c
+index 7f34d41..2d9c445 100644
+--- a/Core/c68k/c68k.c
++++ b/Core/c68k/c68k.c
+@@ -136,7 +136,11 @@ int32_t FASTCALL C68k_Get_CycleDone(c68k_struc *cpu)
+ 
+ void FASTCALL C68k_Release_Cycle(c68k_struc *cpu)
+ {
+-    if (cpu->Status & C68K_RUNNING) cpu->CycleIO = cpu->CycleSup = 0;
++    if (cpu->Status & C68K_RUNNING)
++    {
++        cpu->CycleIO = cpu->CycleSup = 0;
++        cpu->RefreshJump = 1;   // P976: 時間片の残りを飛ばす(次の Exec_End でリフレッシュ期限を課金せず再同期)
++    }
+ }
+ 
+ void FASTCALL C68k_Add_Cycle(c68k_struc *cpu, int32_t cycle)
+@@ -236,6 +240,30 @@ void C68k_Set_FetchWait(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, in
+     cpu->FetchWait = cpu->FetchWaitTbl[(cur >> C68K_FETCH_SFT) & C68K_FETCH_MASK];
+ }
+ 
++// P976: 主記憶DRAMリフレッシュの周期(1/256clk)。0で無効。実行関数の外から呼ぶ。
++// 周期を変えたときは、次の期限までの残りを新しい周期以内へ収める。
++void C68k_Set_RefreshPeriod(c68k_struc *cpu, int32_t period_q8)
++{
++    int64_t rem;
++
++    if (period_q8 < 0) period_q8 = 0;
++    if (period_q8 == cpu->RefreshPeriodQ8) return;
++    cpu->RefreshCarry = 0;
++    if (period_q8 == 0)
++    {
++        cpu->RefreshPeriodQ8 = 0;
++        cpu->RefreshRemain = 0;
++        cpu->RefreshFrac = 0;
++        return;
++    }
++    rem = cpu->RefreshPeriodQ8 ? (int64_t)cpu->RefreshRemain * 256 - cpu->RefreshFrac : period_q8;
++    while (rem > period_q8) rem -= period_q8;
++    if (rem < 0) rem = 0;
++    cpu->RefreshPeriodQ8 = period_q8;
++    cpu->RefreshRemain = (int32_t)((rem + 255) / 256);
++    cpu->RefreshFrac = (int32_t)((int64_t)cpu->RefreshRemain * 256 - rem);
++}
++
+ void C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func)
+ {
+     cpu->Read_Byte = Func;
+diff --git a/Core/c68k/c68k.h b/Core/c68k/c68k.h
+index 64050b0..a243ebf 100644
+--- a/Core/c68k/c68k.h
++++ b/Core/c68k/c68k.h
+@@ -158,9 +158,26 @@ typedef struct {
+ 
+ 	uintptr_t Fetch[C68K_FETCH_BANK];             // 32 bytes aligned
+ 
+-    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(単位1/8clk、P970)
+-    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(単位1/8clk、0=なし)
+-    int32_t  FetchFrac;                      // P970: ウェイトの1/8clk端数アキュムレータ(0〜7)
++    int32_t  FetchWait;                      // 現在PCバンクの1ワードあたりフェッチウェイト(clk)
++    uint8_t  FetchWaitTbl[C68K_FETCH_BANK];  // 64KBバンクごとのフェッチウェイト(0=なし)
++
++    // P976: 主記憶DRAMリフレッシュの周期スチール(c68k_refresh.h)。C68k_Init の memset で 0=無効。
++    // C68k_Reset の memset 範囲(D[0]〜dirty1)の外に置く。
++    int32_t  RefreshPeriodQ8;                // 周期(1/256clk、0=無効)
++    int32_t  RefreshRemain;                  // 実行関数の外で次の期限までのclk(実時間 = Remain − Frac/256)
++    int32_t  RefreshFrac;                    // 期限の端数(1/256clk、0〜255)
++    int32_t  RefreshDL;                      // 実行中の次の期限(CCnt座標、端数切捨て)
++    int32_t  RefreshCarry;                   // 命令をまたいだ占有の残り(1/256clk、0=なし)
++    uint32_t RefreshJump;                    // C68k_Release_Cycle による時間ジャンプ(次の Exec_End で課金せず再同期)
++    uint32_t BusCnt;                         // 現命令のバス回数(フェッチ語数 + データアクセス回数)
++    // 不変量カウンタ(読み出し側が 0 へ戻す)
++    uint32_t RefreshHitsDram;                // 主記憶上の命令で処理した期限数
++    uint32_t RefreshHitsOther;               // 主記憶以外の命令で課金せず進めた期限数
++    uint32_t RefreshResync;                  // 時間ジャンプ・停止中に課金せず進めた期限数
++    uint32_t RefreshStall;                   // 課金したストールclkの合計
++    uint32_t RefreshStallMax;                // 1回の衝突の最大ストールclk
++    uint32_t RefreshCarryN;                  // 占有が命令をまたいだ回数
++    uint32_t RefreshNegO;                    // 期限を命令先頭へ丸めた回数(割込み受付中の期限)
+ } c68k_struc;
+ 
+ 
+@@ -191,6 +208,7 @@ void    FASTCALL C68k_Add_Cycle(c68k_struc *cpu, int32_t cycle);
+ 
+ void    C68k_Set_Fetch(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, uintptr_t fetch_adr);
+ void    C68k_Set_FetchWait(c68k_struc *cpu, uint32_t low_adr, uint32_t high_adr, int32_t w);
++void    C68k_Set_RefreshPeriod(c68k_struc *cpu, int32_t period_q8);   // P976: 0で無効
+ 
+ void    C68k_Set_ReadB(c68k_struc *cpu, C68K_READ *Func);
+ void    C68k_Set_ReadW(c68k_struc *cpu, C68K_READ *Func);
+diff --git a/Core/c68k/c68k_refresh.h b/Core/c68k/c68k_refresh.h
+new file mode 100644
+index 0000000..c2a170a
+--- /dev/null
++++ b/Core/c68k/c68k_refresh.h
+@@ -0,0 +1,130 @@
++/* P976 (D-15): 主記憶DRAMリフレッシュの周期スチール(c68k)——計算部分のみ。
++ *
++ * 実機計測(P975、X68000 XVI): 周期 Tr=14.70us、調停 M2(期限が進行中のバスサイクルの中なら
++ * そのバスの終わりから、内部動作中なら期限の時刻から占有)、占有 4 CPUclk。占有と重なった
++ * バスサイクルは占有の終わりまで遅れる。
++ *
++ * c68k には命令内のバス位置の情報が無いので、命令の終わり(RET)で「既定の並び」を当てはめて
++ * 衝突を計算する: バス(4clk)を命令の先頭に BusCnt 回並べ、残りを内部動作とする。
++ * 例外は分岐成立(Bcc/BRA、BSR除外、所要10clk)だけで「内部2clk→バス→バス」とする。
++ * 判定規則は .mx68k_cycles/p976_impl_sim.py の候補(e)(seg_sim の M2 規則)と同一。
++ *
++ * 時間は命令の先頭を 0 とする前向きの 1/256clk 単位(Q8)。
++ * このヘッダは c68k_struc に依存しない(単体照合ハーネスから Core を編集せずに include できる)。 */
++
++#ifndef C68K_REFRESH_H
++#define C68K_REFRESH_H
++
++#include <stdint.h>
++
++#define C68K_REFRESH_BUS_Q8   (4 * 256)        /* バスサイクル 1 回 = 4clk */
++#define C68K_REFRESH_OCC_Q8   (4 * 256)        /* リフレッシュ 1 回の占有 = 4clk */
++#define C68K_REFRESH_MAXBUS   64               /* 並べるバスの上限(超えた分は内部動作扱い) */
++#define C68K_REFRESH_MAXLEN   (1 << 20)        /* 命令長の上限(Q8 換算の桁あふれ防止) */
++#define C68K_REFRESH_NEVER    (INT32_MIN / 2)  /* 無効時の期限(CCnt がここまで下がることは無い) */
++#define C68K_REFRESH_ALWAYS   INT32_MAX        /* キャリー保留中の期限(次の RET で必ず成立) */
++
++typedef struct {
++    int32_t stall;      /* この命令で課金するストール clk(前命令からのキャリー分を含む) */
++    int32_t hits;       /* 処理した期限の数 */
++    int32_t nego;       /* 期限が命令の先頭より前だったため 0 へ丸めた回数 */
++    int32_t dmax;       /* 1 回の衝突で生じた最大ストール clk */
++    int32_t carry_q8;   /* 出力: 命令の終わりをはみ出した占有の残り(次の命令の先頭から数えた
++                         * 占有の終わり、Q8、0=なし) */
++} c68k_refresh_res;
++
++/* 分岐成立(Bcc/BRA、BSR除外)で所要 10clk の命令か */
++static inline int c68k_refresh_is_branch10(uint32_t opcode, int32_t L)
++{
++    return ((opcode & 0xF000u) == 0x6000u) && (((opcode >> 8) & 0xFu) != 1u) && (L == 10);
++}
++
++/* 期限を 1 周期進める。期限は CCnt 座標(減っていく向き)の dl + frac/256。 */
++static inline void c68k_refresh_advance(int32_t *dl, int32_t *frac, int32_t period_q8)
++{
++    int32_t f = *frac - (period_q8 & 255);
++    *dl -= period_q8 >> 8;
++    if (f < 0) { f += 256; *dl -= 1; }
++    *frac = f;
++}
++
++/* Q8 値の 256 による切捨て除算(負の値でも床関数) */
++static inline int32_t c68k_refresh_floor256(int64_t x)
++{
++    return (int32_t)(x >= 0 ? x / 256 : -((-x + 255) / 256));
++}
++
++/* 1 命令ぶんの衝突計算(主記憶上の命令のみ呼ぶ)。
++ *   L          ストール前の所要 clk(RET 直後の CCnt と命令先頭の差)
++ *   nb         この命令のバス回数(フェッチ語数 + データアクセス回数)
++ *   branch10   分岐成立の並び(内部2clk→バス[2,6)→バス[6,10))を使うか
++ *   carry_in   直前の命令からの占有の持ち越し(この命令の先頭から数えた占有の終わり、Q8、0=なし)
++ *   *o_q8      入力: 最初の未処理期限の、命令先頭からの位置(Q8)
++ *              出力: 次の未処理期限の位置(命令の終わり[L+stall]より後)
++ *   period_q8  周期(Q8、> 0) */
++static inline void c68k_refresh_calc(int32_t L, int32_t nb, int branch10, int32_t carry_in,
++                                     int32_t *o_q8, int32_t period_q8, c68k_refresh_res *r)
++{
++    int32_t bs[C68K_REFRESH_MAXBUS], be[C68K_REFRESH_MAXBUS];
++    int32_t n = 0, k, j, d, st, occ, lim, stall = 0;
++
++    r->stall = r->hits = r->nego = r->dmax = 0;
++    r->carry_q8 = 0;
++
++    if (L < 0) L = 0;
++    if (L > C68K_REFRESH_MAXLEN) L = C68K_REFRESH_MAXLEN;
++    lim = L * 256;
++
++    if (branch10) {
++        bs[0] = 2 * 256; be[0] = 6 * 256;
++        bs[1] = 6 * 256; be[1] = 10 * 256;
++        n = 2;
++    } else {
++        if (nb > C68K_REFRESH_MAXBUS) nb = C68K_REFRESH_MAXBUS;
++        for (k = 0; k < nb; k++) {
++            int32_t s = k * C68K_REFRESH_BUS_Q8;
++            if (s >= lim) break;
++            bs[k] = s;
++            be[k] = (s + C68K_REFRESH_BUS_Q8 < lim) ? s + C68K_REFRESH_BUS_Q8 : lim;
++        }
++        n = k;
++    }
++
++    /* 直前の命令からはみ出した占有: この命令の最初のバスと重なる分だけ遅らせる */
++    if (carry_in > 0) {
++        if (n > 0) {
++            if (bs[0] < carry_in) {
++                d = (carry_in - bs[0] + 255) >> 8;
++                for (j = 0; j < n; j++) { bs[j] += d * 256; be[j] += d * 256; }
++                stall += d;
++                if (d > r->dmax) r->dmax = d;
++            }
++        } else if (carry_in > lim) {
++            r->carry_q8 = carry_in - lim;   /* バスの無い命令は素通りして次の命令へ */
++        }
++    }
++
++    while (*o_q8 <= (L + stall) * 256) {
++        int32_t o = *o_q8;
++        if (o < 0) { o = 0; r->nego++; }
++        r->hits++;
++        for (k = 0; k < n && bs[k] < o; k++) ;   /* o 以降で最初に始まるバス */
++        st = (k > 0 && o < be[k - 1]) ? be[k - 1] : o;   /* M2 */
++        occ = st + C68K_REFRESH_OCC_Q8;
++        if (k < n) {
++            if (bs[k] < occ) {
++                d = (occ - bs[k] + 255) >> 8;
++                for (j = k; j < n; j++) { bs[j] += d * 256; be[j] += d * 256; }
++                stall += d;
++                if (d > r->dmax) r->dmax = d;
++            }
++        } else {
++            int32_t rem = occ - (L + stall) * 256;
++            if (rem > r->carry_q8) r->carry_q8 = rem;
++        }
++        *o_q8 += period_q8;
++    }
++    r->stall = stall;
++}
++
++#endif  /* C68K_REFRESH_H */
+diff --git a/Core/c68k/c68kexec.c b/Core/c68k/c68kexec.c
+index 132adeb..8827631 100644
+--- a/Core/c68k/c68kexec.c
++++ b/Core/c68k/c68kexec.c
+@@ -23,6 +23,7 @@
+ 
+ #include "core.h"
+ #include "c68k.h"
++#include "c68k_refresh.h"
+ 
+ // #define TRACE_WITH_Q68  // Define to use Q68 tracing code to trace insns
+                            // (requires Q68 built in, of course)
+@@ -150,6 +151,73 @@ void TRACE(int PC,c68k_struc *CPU,int Opcode,int CCnt) {
+ # endif  // TRACE_WITH_Q68
+ #endif  // !C68K_GEN
+ 
++// P976: 主記憶DRAMリフレッシュの周期スチール(期限が来た命令だけ呼ぶ、通常経路の外)
++///////////////////////////////////////////////////////////////////////////////////
++
++#ifndef C68K_GEN
++#if defined(__GNUC__) || defined(__clang__)
++#define C68K_REFRESH_NOINLINE __attribute__((noinline))
++#else
++#define C68K_REFRESH_NOINLINE
++#endif
++
++// 命令の終わり(ccnt_end、正しい座標の CCnt)までに来た期限を処理し、課金するストールclkを返す。
++// CPU->RefreshDL/RefreshFrac(次の期限)と CPU->RefreshCarry を更新する。
++static C68K_REFRESH_NOINLINE int32_t c68k_refresh_hit(c68k_struc *CPU, int32_t ins_start,
++                                                      int32_t ccnt_end, uint32_t opcode, uintptr_t pc)
++{
++    int32_t L = ins_start - ccnt_end;
++    int32_t period = CPU->RefreshPeriodQ8;
++    int32_t carry_in = CPU->RefreshCarry;
++    int32_t o, stall = 0;
++    int64_t x;
++
++    o = (int32_t)(((int64_t)ins_start - CPU->RefreshDL) * 256 - CPU->RefreshFrac);
++    CPU->RefreshCarry = 0;
++
++    // 判定に使うPCは RET 時点(命令の直後)のゲストPC。主記憶 $000000〜$BFFFFF 以外は課金しない
++    if ((((uint32_t)(pc - CPU->BasePC)) & 0x00FFFFFFu) < 0x00C00000u) {
++        c68k_refresh_res r;
++        c68k_refresh_calc(L, (int32_t)CPU->BusCnt, c68k_refresh_is_branch10(opcode, L),
++                          carry_in, &o, period, &r);
++        stall = r.stall;
++        CPU->RefreshHitsDram += (uint32_t)r.hits;
++        CPU->RefreshNegO += (uint32_t)r.nego;
++        CPU->RefreshStall += (uint32_t)stall;
++        if ((uint32_t)r.dmax > CPU->RefreshStallMax) CPU->RefreshStallMax = (uint32_t)r.dmax;
++        if (r.carry_q8 > 0) { CPU->RefreshCarry = r.carry_q8; CPU->RefreshCarryN++; }
++    } else {
++        int32_t lim = (L > 0 ? (L < C68K_REFRESH_MAXLEN ? L : C68K_REFRESH_MAXLEN) : 0) * 256;
++        while (o <= lim) { CPU->RefreshHitsOther++; o += period; }
++    }
++
++    x = (int64_t)ins_start * 256 - o;
++    CPU->RefreshDL = c68k_refresh_floor256(x);
++    CPU->RefreshFrac = (int32_t)(x - (int64_t)CPU->RefreshDL * 256);
++    return stall;
++}
++
++// 時間ジャンプ(C68k_Release_Cycle)・停止中: t(正しい座標の CCnt)までに来た期限を課金せず進める
++static C68K_REFRESH_NOINLINE void c68k_refresh_resync(c68k_struc *CPU, int32_t t)
++{
++    CPU->RefreshCarry = 0;
++    while (t <= CPU->RefreshDL) {
++        c68k_refresh_advance(&CPU->RefreshDL, &CPU->RefreshFrac, CPU->RefreshPeriodQ8);
++        CPU->RefreshResync++;
++    }
++}
++
++// 実行関数を出るとき: 期限を「現在(ccnt_now)から次の期限までの残り」に戻す(真の座標)
++static void c68k_refresh_store(c68k_struc *CPU, int32_t ccnt_now)
++{
++    while ((int64_t)ccnt_now * 256 < (int64_t)CPU->RefreshDL * 256 + CPU->RefreshFrac) {
++        c68k_refresh_advance(&CPU->RefreshDL, &CPU->RefreshFrac, CPU->RefreshPeriodQ8);
++        CPU->RefreshResync++;
++    }
++    CPU->RefreshRemain = ccnt_now - CPU->RefreshDL;
++}
++#endif  // !C68K_GEN
++
+ // main exec function
+ //////////////////////
+ 
+@@ -181,6 +249,8 @@ int32_t FASTCALL C68k_Exec(c68k_struc *cpu, int32_t cycle)
+     int32_t CCnt;
+     uint32_t Opcode;
+ #endif
++    int32_t InsStart;   // P976: 現命令の先頭の CCnt
++    int32_t RefDL;      // P976: 次のリフレッシュ期限(CCnt座標)。無効時 C68K_REFRESH_NEVER、キャリー保留中 C68K_REFRESH_ALWAYS
+ #endif
+ 
+ #ifndef C68K_GEN
+@@ -228,6 +298,11 @@ int32_t FASTCALL C68k_Exec(c68k_struc *cpu, int32_t cycle)
+     mx68k_log(buf);
+ #endif
+ 
++    // P976: 入口の割込み受付は最初の命令の一部(既定の並び)として扱う
++    InsStart = CCnt;
++    CPU->BusCnt = 0;
++    if (CPU->RefreshPeriodQ8) CPU->RefreshDL = CCnt - CPU->RefreshRemain;
++
+ #ifndef C68K_DEBUG
+     CHECK_INT
+ #else
+@@ -276,7 +351,19 @@ int32_t FASTCALL C68k_Exec(c68k_struc *cpu, int32_t cycle)
+     }
+ #endif
+ 
+-    if (CPU->Status & (C68K_HALTED | C68K_WAITING)) return CPU->CycleToDo;
++    if (CPU->Status & (C68K_HALTED | C68K_WAITING))
++    {
++        // P976: 停止中も時間は進む(課金なし)
++        if (CPU->RefreshPeriodQ8)
++        {
++            CPU->RefreshCarry = 0;
++            c68k_refresh_store(CPU, 0);
++        }
++        return CPU->CycleToDo;
++    }
++
++    RefDL = CPU->RefreshPeriodQ8 ? (CPU->RefreshCarry ? C68K_REFRESH_ALWAYS : CPU->RefreshDL)
++                                 : C68K_REFRESH_NEVER;
+ 
+     CPU->CycleSup = 0;
+     CPU->Status |= C68K_RUNNING;
+@@ -345,6 +432,21 @@ C68k_Exec_End:
+     snprintf(buf, sizeof(buf), "[c68k] Exec_End CCnt=%d", (int)CCnt);
+     mx68k_log(buf);
+ #endif
++    // P976: 真の時刻 t = CCnt + CycleSup(C68k_Set_IRQ による座標のずれを戻した値)で期限を判定する
++    {
++        int32_t t = CCnt + CPU->CycleSup;
++        if (t <= RefDL)
++        {
++            if (CPU->RefreshJump || (CPU->Status & C68K_HALTED))
++                c68k_refresh_resync(CPU, t);
++            else
++                CCnt -= c68k_refresh_hit(CPU, InsStart, t, Opcode, PC);
++            RefDL = CPU->RefreshCarry ? C68K_REFRESH_ALWAYS : CPU->RefreshDL;
++        }
++        CPU->RefreshJump = 0;
++    }
++
++C68k_Exec_End_Int:
+     CHECK_INT
+     if ((CCnt += CPU->CycleSup) > 0)
+     {
+@@ -359,9 +461,18 @@ C68k_Exec_Really_End:
+ #endif
+     CPU->Status &= ~C68K_RUNNING;
+     CPU->PC = PC;
++    // P976: 次の期限を「ここからの残り」に戻して次の呼出しへ引き継ぐ(キャリーは CPU->RefreshCarry に残る)
++    if (CPU->RefreshPeriodQ8) c68k_refresh_store(CPU, CCnt);
+ 
+     return (CPU->CycleToDo - CCnt);
+ 
++    // P976: RET で期限の成立を検出したとき(CCnt > 0 のときだけ goto で来る。素通りでは到達しない)
++C68k_Refresh_Hit:
++    CCnt -= c68k_refresh_hit(CPU, InsStart, CCnt, Opcode, PC);
++    RefDL = CPU->RefreshCarry ? C68K_REFRESH_ALWAYS : CPU->RefreshDL;
++    if (CCnt <= 0) goto C68k_Exec_End_Int;
++    NEXT
++
+ #ifndef C68K_CONST_JUMP_TABLE
+ #ifndef C68K_NO_JUMP_TABLE
+ C68k_Init:
+diff --git a/Core/c68k/c68kmac.inc b/Core/c68k/c68kmac.inc
+index 7a8ed93..7a4cb48 100644
+--- a/Core/c68k/c68kmac.inc
++++ b/Core/c68k/c68kmac.inc
+@@ -46,8 +46,11 @@ extern void TRACE(int,c68k_struc*,int,int);
+ #else
+ # define TRACE(a,b,c,d) /*nothing*/
+ #endif
++// P976: NEXT は命令の先頭時刻とバス回数を記録する(DRAMリフレッシュの周期スチール、c68k_refresh.h)
+ #ifndef C68K_NO_JUMP_TABLE
+ #define NEXT                    \
++    InsStart = CCnt;            \
++    CPU->BusCnt = 0;            \
+     PRE_IO                      \
+     Opcode = FETCH_WORD;        \
+     PC += 2;                    \
+@@ -55,6 +58,8 @@ extern void TRACE(int,c68k_struc*,int,int);
+     goto *JumpTable[Opcode];
+ #else
+ #define NEXT                    \
++    InsStart = CCnt;            \
++    CPU->BusCnt = 0;            \
+     PRE_IO                      \
+     Opcode = FETCH_WORD;        \
+     PC += 2;                    \
+@@ -62,9 +67,12 @@ extern void TRACE(int,c68k_struc*,int,int);
+     goto SwitchTable;
+ #endif
+ 
++// P976: 時間片の終わりの判定を先に行う(C68k_Set_IRQ で CCnt の座標がずれている区間は必ず CCnt<=0 になり
++// Exec_End へ行くため、ここでの期限比較は常に正しい座標で行われる)。期限の処理は共通の C68k_Refresh_Hit。
+ #define RET(A)                  \
+     CCnt -= (A);                \
+     if (CCnt <= 0) goto C68k_Exec_End; \
++    if (CCnt <= RefDL) goto C68k_Refresh_Hit; \
+     NEXT
+ 
+ #define SET_PC(A)               \
+@@ -180,11 +188,10 @@ extern void TRACE(int,c68k_struc*,int,int);
+     CPU->A[7] += 4;
+ #endif
+ 
+-// P968/P970: 命令フェッチウェイト(単位1/8clk)。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
++// P968: ROM/SRAM命令フェッチウェイト。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
++// P976: フェッチ語数をバス回数(BusCnt)に加える
+ #define FETCH_WAIT(n)       \
+-(CPU->FetchFrac += CPU->FetchWait * (n), \
+- CCnt -= (CPU->FetchFrac >> 3), CPU->CycleIO -= (CPU->FetchFrac >> 3), \
+- CPU->FetchFrac &= 7)
++(CCnt -= CPU->FetchWait * (n), CPU->CycleIO -= CPU->FetchWait * (n), CPU->BusCnt += (n))
+ 
+ #define FETCH_BYTE          \
+ (FETCH_WAIT(1), ((*(u16*)PC) & 0xFF))

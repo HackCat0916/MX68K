@@ -23,6 +23,7 @@
 
 #include "core.h"
 #include "c68k.h"
+#include "c68k_refresh.h"
 
 // #define TRACE_WITH_Q68  // Define to use Q68 tracing code to trace insns
                            // (requires Q68 built in, of course)
@@ -150,6 +151,73 @@ void TRACE(int PC,c68k_struc *CPU,int Opcode,int CCnt) {
 # endif  // TRACE_WITH_Q68
 #endif  // !C68K_GEN
 
+// P976: 主記憶DRAMリフレッシュの周期スチール(期限が来た命令だけ呼ぶ、通常経路の外)
+///////////////////////////////////////////////////////////////////////////////////
+
+#ifndef C68K_GEN
+#if defined(__GNUC__) || defined(__clang__)
+#define C68K_REFRESH_NOINLINE __attribute__((noinline))
+#else
+#define C68K_REFRESH_NOINLINE
+#endif
+
+// 命令の終わり(ccnt_end、正しい座標の CCnt)までに来た期限を処理し、課金するストールclkを返す。
+// CPU->RefreshDL/RefreshFrac(次の期限)と CPU->RefreshCarry を更新する。
+static C68K_REFRESH_NOINLINE int32_t c68k_refresh_hit(c68k_struc *CPU, int32_t ins_start,
+                                                      int32_t ccnt_end, uint32_t opcode, uintptr_t pc)
+{
+    int32_t L = ins_start - ccnt_end;
+    int32_t period = CPU->RefreshPeriodQ8;
+    int32_t carry_in = CPU->RefreshCarry;
+    int32_t o, stall = 0;
+    int64_t x;
+
+    o = (int32_t)(((int64_t)ins_start - CPU->RefreshDL) * 256 - CPU->RefreshFrac);
+    CPU->RefreshCarry = 0;
+
+    // 判定に使うPCは RET 時点(命令の直後)のゲストPC。主記憶 $000000〜$BFFFFF 以外は課金しない
+    if ((((uint32_t)(pc - CPU->BasePC)) & 0x00FFFFFFu) < 0x00C00000u) {
+        c68k_refresh_res r;
+        c68k_refresh_calc(L, (int32_t)CPU->BusCnt, c68k_refresh_is_branch10(opcode, L),
+                          carry_in, &o, period, &r);
+        stall = r.stall;
+        CPU->RefreshHitsDram += (uint32_t)r.hits;
+        CPU->RefreshNegO += (uint32_t)r.nego;
+        CPU->RefreshStall += (uint32_t)stall;
+        if ((uint32_t)r.dmax > CPU->RefreshStallMax) CPU->RefreshStallMax = (uint32_t)r.dmax;
+        if (r.carry_q8 > 0) { CPU->RefreshCarry = r.carry_q8; CPU->RefreshCarryN++; }
+    } else {
+        int32_t lim = (L > 0 ? (L < C68K_REFRESH_MAXLEN ? L : C68K_REFRESH_MAXLEN) : 0) * 256;
+        while (o <= lim) { CPU->RefreshHitsOther++; o += period; }
+    }
+
+    x = (int64_t)ins_start * 256 - o;
+    CPU->RefreshDL = c68k_refresh_floor256(x);
+    CPU->RefreshFrac = (int32_t)(x - (int64_t)CPU->RefreshDL * 256);
+    return stall;
+}
+
+// 時間ジャンプ(C68k_Release_Cycle)・停止中: t(正しい座標の CCnt)までに来た期限を課金せず進める
+static C68K_REFRESH_NOINLINE void c68k_refresh_resync(c68k_struc *CPU, int32_t t)
+{
+    CPU->RefreshCarry = 0;
+    while (t <= CPU->RefreshDL) {
+        c68k_refresh_advance(&CPU->RefreshDL, &CPU->RefreshFrac, CPU->RefreshPeriodQ8);
+        CPU->RefreshResync++;
+    }
+}
+
+// 実行関数を出るとき: 期限を「現在(ccnt_now)から次の期限までの残り」に戻す(真の座標)
+static void c68k_refresh_store(c68k_struc *CPU, int32_t ccnt_now)
+{
+    while ((int64_t)ccnt_now * 256 < (int64_t)CPU->RefreshDL * 256 + CPU->RefreshFrac) {
+        c68k_refresh_advance(&CPU->RefreshDL, &CPU->RefreshFrac, CPU->RefreshPeriodQ8);
+        CPU->RefreshResync++;
+    }
+    CPU->RefreshRemain = ccnt_now - CPU->RefreshDL;
+}
+#endif  // !C68K_GEN
+
 // main exec function
 //////////////////////
 
@@ -181,6 +249,8 @@ int32_t FASTCALL C68k_Exec(c68k_struc *cpu, int32_t cycle)
     int32_t CCnt;
     uint32_t Opcode;
 #endif
+    int32_t InsStart;   // P976: 現命令の先頭の CCnt
+    int32_t RefDL;      // P976: 次のリフレッシュ期限(CCnt座標)。無効時 C68K_REFRESH_NEVER、キャリー保留中 C68K_REFRESH_ALWAYS
 #endif
 
 #ifndef C68K_GEN
@@ -227,6 +297,11 @@ int32_t FASTCALL C68k_Exec(c68k_struc *cpu, int32_t cycle)
     snprintf(buf, sizeof(buf), "[c68k] CycleToDo=%d", (int)CCnt);
     mx68k_log(buf);
 #endif
+
+    // P976: 入口の割込み受付は最初の命令の一部(既定の並び)として扱う
+    InsStart = CCnt;
+    CPU->BusCnt = 0;
+    if (CPU->RefreshPeriodQ8) CPU->RefreshDL = CCnt - CPU->RefreshRemain;
 
 #ifndef C68K_DEBUG
     CHECK_INT
@@ -276,7 +351,19 @@ int32_t FASTCALL C68k_Exec(c68k_struc *cpu, int32_t cycle)
     }
 #endif
 
-    if (CPU->Status & (C68K_HALTED | C68K_WAITING)) return CPU->CycleToDo;
+    if (CPU->Status & (C68K_HALTED | C68K_WAITING))
+    {
+        // P976: 停止中も時間は進む(課金なし)
+        if (CPU->RefreshPeriodQ8)
+        {
+            CPU->RefreshCarry = 0;
+            c68k_refresh_store(CPU, 0);
+        }
+        return CPU->CycleToDo;
+    }
+
+    RefDL = CPU->RefreshPeriodQ8 ? (CPU->RefreshCarry ? C68K_REFRESH_ALWAYS : CPU->RefreshDL)
+                                 : C68K_REFRESH_NEVER;
 
     CPU->CycleSup = 0;
     CPU->Status |= C68K_RUNNING;
@@ -345,6 +432,21 @@ C68k_Exec_End:
     snprintf(buf, sizeof(buf), "[c68k] Exec_End CCnt=%d", (int)CCnt);
     mx68k_log(buf);
 #endif
+    // P976: 真の時刻 t = CCnt + CycleSup(C68k_Set_IRQ による座標のずれを戻した値)で期限を判定する
+    {
+        int32_t t = CCnt + CPU->CycleSup;
+        if (t <= RefDL)
+        {
+            if (CPU->RefreshJump || (CPU->Status & C68K_HALTED))
+                c68k_refresh_resync(CPU, t);
+            else
+                CCnt -= c68k_refresh_hit(CPU, InsStart, t, Opcode, PC);
+            RefDL = CPU->RefreshCarry ? C68K_REFRESH_ALWAYS : CPU->RefreshDL;
+        }
+        CPU->RefreshJump = 0;
+    }
+
+C68k_Exec_End_Int:
     CHECK_INT
     if ((CCnt += CPU->CycleSup) > 0)
     {
@@ -359,8 +461,17 @@ C68k_Exec_Really_End:
 #endif
     CPU->Status &= ~C68K_RUNNING;
     CPU->PC = PC;
+    // P976: 次の期限を「ここからの残り」に戻して次の呼出しへ引き継ぐ(キャリーは CPU->RefreshCarry に残る)
+    if (CPU->RefreshPeriodQ8) c68k_refresh_store(CPU, CCnt);
 
     return (CPU->CycleToDo - CCnt);
+
+    // P976: RET で期限の成立を検出したとき(CCnt > 0 のときだけ goto で来る。素通りでは到達しない)
+C68k_Refresh_Hit:
+    CCnt -= c68k_refresh_hit(CPU, InsStart, CCnt, Opcode, PC);
+    RefDL = CPU->RefreshCarry ? C68K_REFRESH_ALWAYS : CPU->RefreshDL;
+    if (CCnt <= 0) goto C68k_Exec_End_Int;
+    NEXT
 
 #ifndef C68K_CONST_JUMP_TABLE
 #ifndef C68K_NO_JUMP_TABLE

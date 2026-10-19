@@ -46,8 +46,11 @@ extern void TRACE(int,c68k_struc*,int,int);
 #else
 # define TRACE(a,b,c,d) /*nothing*/
 #endif
+// P976: NEXT は命令の先頭時刻とバス回数を記録する(DRAMリフレッシュの周期スチール、c68k_refresh.h)
 #ifndef C68K_NO_JUMP_TABLE
 #define NEXT                    \
+    InsStart = CCnt;            \
+    CPU->BusCnt = 0;            \
     PRE_IO                      \
     Opcode = FETCH_WORD;        \
     PC += 2;                    \
@@ -55,6 +58,8 @@ extern void TRACE(int,c68k_struc*,int,int);
     goto *JumpTable[Opcode];
 #else
 #define NEXT                    \
+    InsStart = CCnt;            \
+    CPU->BusCnt = 0;            \
     PRE_IO                      \
     Opcode = FETCH_WORD;        \
     PC += 2;                    \
@@ -62,9 +67,12 @@ extern void TRACE(int,c68k_struc*,int,int);
     goto SwitchTable;
 #endif
 
+// P976: 時間片の終わりの判定を先に行う(C68k_Set_IRQ で CCnt の座標がずれている区間は必ず CCnt<=0 になり
+// Exec_End へ行くため、ここでの期限比較は常に正しい座標で行われる)。期限の処理は共通の C68k_Refresh_Hit。
 #define RET(A)                  \
     CCnt -= (A);                \
     if (CCnt <= 0) goto C68k_Exec_End; \
+    if (CCnt <= RefDL) goto C68k_Refresh_Hit; \
     NEXT
 
 #define SET_PC(A)               \
@@ -180,11 +188,10 @@ extern void TRACE(int,c68k_struc*,int,int);
     CPU->A[7] += 4;
 #endif
 
-// P968/P970: 命令フェッチウェイト(単位1/8clk)。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
+// P968: ROM/SRAM命令フェッチウェイト。PRE_IO/POST_IO窓内のフェッチでも消えないようCycleIOからも引く
+// P976: フェッチ語数をバス回数(BusCnt)に加える
 #define FETCH_WAIT(n)       \
-(CPU->FetchFrac += CPU->FetchWait * (n), \
- CCnt -= (CPU->FetchFrac >> 3), CPU->CycleIO -= (CPU->FetchFrac >> 3), \
- CPU->FetchFrac &= 7)
+(CCnt -= CPU->FetchWait * (n), CPU->CycleIO -= CPU->FetchWait * (n), CPU->BusCnt += (n))
 
 #define FETCH_BYTE          \
 (FETCH_WAIT(1), ((*(u16*)PC) & 0xFF))

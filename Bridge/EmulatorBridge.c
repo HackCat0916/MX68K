@@ -385,6 +385,8 @@ extern void p82xq_emit_verdict(void);              /* P82-X-Q プローブの ve
 extern void p82xr_emit_verdict(uint32_t frame);    /* P82-X-R プローブの verdict one-shot */
 extern void p82xr_tick(void);                      /* P82-X-R 毎フレームの CP-R-4/CP-R-5 ドライバ */
 extern void p82xt_tick(void);                      /* P82-X-T 毎フレームの CP-T-2/T-3/T-5/T-6 ドライバ */
+/* P976: DRAMリフレッシュ周期の設定(m68000_bridge.c、クロック num/den [MHz]) */
+extern void     m68000_set_refresh_clock(int32_t num, int32_t den);
 extern void p82xu_tick(void);                      /* P82-X-U 毎フレームの CP-U-1/U-3/U-5 ドライバ */
 extern void mx68k_diag_mfp_int(int32_t irq, const char* src); /* P47-D-DIAG-G ラッパ */
 extern uint32_t m68000_get_reg(int32_t regnum);   // P28-FIX
@@ -4089,6 +4091,9 @@ void mx68k_run_frame(void) {
      * 実機準拠の 50/3・87/5、他は従来通り (n,1) で式はビット一致。clk_den は常に >= 1。 */
     int32_t clk_num, clk_den;
     p822_clock_ratio(g_clock_mhz, &clk_num, &clk_den);
+    /* P976: 主記憶DRAMリフレッシュ周期(14.70us)を同じ num/den のクロックで CPUclk に換算して設定する
+     * (値が変わったときだけ Core へ反映。16MHz 設定は 50/3MHz=245clk) */
+    m68000_set_refresh_clock(clk_num, clk_den);
     int32_t clkdiv = clk_num;   /* 表示・診断ログ専用の分子エイリアス */
     clk_total = (int32_t)(((int64_t)clk_total * clk_num) / (10 * (int64_t)clk_den));  /* CPU 予算 = base*(clock/10) */
 
