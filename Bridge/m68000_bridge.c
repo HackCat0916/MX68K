@@ -2213,6 +2213,157 @@ void p82xq_emit_verdict(void) { /* アクセサを差し戻した場合は何も
 #endif /* MX68KQ_USE_SAFE_PC */
 
 /* ====================================================================
+ * P972: [P972-CH30TIMER] 診断プローブ(D-98、既定OFF、環境変数 MX68K_DEBUG_P972_CH30TIMER=1 で有効、
+ * c68kバックエンド時のみ、観測のみ)。
+ *
+ * 1試行 = ゲスト PC が $ED0000-$EDFFFF(CH30)/$FF0000-$FFFFFF(IPLROM)にあるときの
+ * TCDCR($E8801D)始動書込み(停止状態から C/D いずれかのビットを立てる)→ 停止書込み(C/D とも0)。
+ * 停止後の TCDR($E88023)/TDDR($E88025)読出しが揃った時点で1行出す。読まれないまま次の始動・終了に
+ * 至った場合は、停止書込み時点の MFP[] スナップショット(停止中は MFP_Timer が数えないので同値)で出す。
+ * 記号: TCDCR=Reg14、TCDR=Reg17、TDDR=Reg18(Core:px68k/x68k/mfp.c:274,284,287)。
+ *       C=÷200=50µs/count、D=÷4=1µs/count(Core:px68k/x68k/mfp.c:22 の 500/10、0.1µs 単位)。
+ * 合成式は CH30 clocksub と同一(Docs/CH30X31718/src/ch30_omake.has:553-570):
+ *   C=(0-TCDR)&ff, D=(0-TDDR)&ff, x=C*50; lowbyte(x)>D なら x+=256; x の下位バイトを D に置換; x-=1。
+ * cyc は [P970-SIWIN] と同じ取得元(mx_cpu_execute の戻り値の総和 + 現チャンク内消化分
+ * CycleToDo-(CycleIO+CycleSup)、メモリフック内は PRE_IO で CycleIO 同期済み)。
+ * w0/w1 = 始動/停止時のチャンク内消化サイクル(MFP_Timer はチャンク終端でしか進まないため、
+ * C/D の生値と t_true の差にはチャンク粒度の誤差が乗る。その補正用の生値)。
+ * ok = C カウンタが1周未満(t_true < 256*50µs)。jumps/c_lead は ok=1 の試行だけ数える。
+ * ==================================================================== */
+#define P972_C_US_PER_COUNT  50
+#define P972_C_WRAP_US       (256.0 * P972_C_US_PER_COUNT)
+
+static int s_p972_on = 0;
+static unsigned long long s_p972_cyc_base = 0;
+static int      s_p972_active = 0;        /* 始動済み・未停止 */
+static int      s_p972_pending = 0;       /* 停止済み・行未出力 */
+static uint8_t  s_p972_tcdcr_start = 0, s_p972_tcdcr_stop = 0;
+static unsigned long long s_p972_cyc_start = 0, s_p972_cyc_stop = 0;
+static int32_t  s_p972_w0 = 0, s_p972_w1 = 0;
+static uint32_t s_p972_pc = 0, s_p972_d2 = 0;
+static uint8_t  s_p972_snap_c = 0, s_p972_snap_d = 0;
+static uint8_t  s_p972_rd_c = 0, s_p972_rd_d = 0;
+static unsigned s_p972_rd = 0;            /* bit0=TCDR 読出し済み、bit1=TDDR 読出し済み */
+static uint32_t s_p972_writes = 0, s_p972_trials = 0, s_p972_trials_ok = 0;
+static uint32_t s_p972_jumps = 0, s_p972_c_lead = 0;
+static uint32_t s_p972_noise = 0;          /* rd!=3(読出し未揃いでスナップショット代用)の試行数 */
+static int      s_p972_sum_done = 0;
+
+double mx68k_p972_clock_mhz(void);   /* EmulatorBridge.c(p822_clock_ratio の num/den) */
+
+static void p972_init(void) {
+    const char *ev = getenv("MX68K_DEBUG_P972_CH30TIMER");
+    s_p972_on = (ev != NULL && strcmp(ev, "1") == 0) ? 1 : 0;
+    if (s_p972_on) debug_log("[P972-CH30TIMER-CFG] enabled=1\n");
+}
+
+static inline int p972_pc_src(uint32_t pc) {
+    if (pc >= 0xED0000u && pc <= 0xEDFFFFu) return 'E';
+    if (pc >= 0xFF0000u && pc <= 0xFFFFFFu) return 'F';
+    return 0;
+}
+
+static inline unsigned long long p972_now_cyc(int32_t *within_out) {
+    int32_t within = (C68K.Status & C68K_RUNNING)
+                     ? (C68K.CycleToDo - (C68K.CycleIO + C68K.CycleSup)) : 0;
+    if (within < 0) within = 0;
+    *within_out = within;
+    return s_p972_cyc_base + (unsigned long long)within;
+}
+
+static void p972_emit(void) {
+    uint8_t c_raw = (s_p972_rd & 1u) ? s_p972_rd_c : s_p972_snap_c;
+    uint8_t d_raw = (s_p972_rd & 2u) ? s_p972_rd_d : s_p972_snap_d;
+    double clk = mx68k_p972_clock_mhz();
+    double t_true = (double)(s_p972_cyc_stop - s_p972_cyc_start) / clk;
+    /* MFP_Timer はチャンク終端でまとめて進むため、タイマーが実際に受け取る時間は t_true に (w0-w1)/clk を足したもの */
+    double t_cred = t_true + (double)(s_p972_w0 - s_p972_w1) / clk;
+    unsigned c_cnt = (unsigned)((0u - c_raw) & 0xFFu);
+    unsigned d_cnt = (unsigned)((0u - d_raw) & 0xFFu);
+    double c_el = (double)(c_cnt * P972_C_US_PER_COUNT);
+    double d_el = (double)d_cnt;
+    uint32_t x = c_cnt * P972_C_US_PER_COUNT;
+    if ((x & 0xFFu) > d_cnt) x += 256u;
+    x = ((x & 0xFF00u) | d_cnt) - 1u;
+    x &= 0xFFFFu;
+    double recon = (double)x;
+    double err = recon - t_true;
+    int jump = (err > 128.0) ? 1 : 0;
+    int ok = (t_true < P972_C_WRAP_US) ? 1 : 0;
+    s_p972_trials++;
+    /* rd!=3 は CH30 の正規計測ではない(TCDR/TDDR を読まずに停止した別処理)ため集計から除外 */
+    if (s_p972_rd != 3u) s_p972_noise++;
+    if (ok && s_p972_rd == 3u) {
+        s_p972_trials_ok++;
+        if (jump) s_p972_jumps++;
+        if (c_el > t_cred + 1.0) s_p972_c_lead++;
+    }
+    debug_log("[P972-CH30TIMER] src=%s pc=0x%08x d2=0x%08x tcdcr_start=0x%02x tcdcr_stop=0x%02x "
+              "cyc_start=%lld cyc_stop=%lld clk=%.3f t_true_us=%.3f t_cred_us=%.3f C_raw=%d D_raw=%d "
+              "C_el=%.3f D_el=%.3f recon_us=%.3f err_us=%.3f jump=%d w0=%d w1=%d rd=%u ok=%d\n",
+              (p972_pc_src(s_p972_pc) == 'E') ? "ED" : "FF",
+              (unsigned)s_p972_pc, (unsigned)s_p972_d2,
+              (unsigned)s_p972_tcdcr_start, (unsigned)s_p972_tcdcr_stop,
+              (long long)s_p972_cyc_start, (long long)s_p972_cyc_stop, clk, t_true, t_cred,
+              (int)c_raw, (int)d_raw, c_el, d_el, recon, err, jump,
+              (int)s_p972_w0, (int)s_p972_w1, s_p972_rd, ok);
+    s_p972_pending = 0;
+}
+
+/* TCDCR 書込み(実書込みの前に呼ばれるので MFP[MFP_TCDCR] は旧値)。 */
+static void p972_note_tcdcr_write(uint8_t val) {
+    if (mx_cpu_be_musashi()) return;
+    uint32_t pc = MX68KQ_GUEST_PC();
+    if (!p972_pc_src(pc)) return;
+    s_p972_writes++;
+    uint8_t prev = (uint8_t)MFP[MFP_TCDCR];
+    int32_t w;
+    unsigned long long now = p972_now_cyc(&w);
+    if (!(prev & 0x77u) && (val & 0x77u)) {
+        if (s_p972_pending) p972_emit();
+        s_p972_active = 1;
+        s_p972_tcdcr_start = val;
+        s_p972_cyc_start = now;
+        s_p972_w0 = w;
+    } else if (s_p972_active && !(val & 0x77u)) {
+        s_p972_active = 0;
+        s_p972_pending = 1;
+        s_p972_tcdcr_stop = val;
+        s_p972_cyc_stop = now;
+        s_p972_w1 = w;
+        s_p972_pc = pc;
+        s_p972_d2 = (uint32_t)C68K.D[2];
+        s_p972_snap_c = (uint8_t)MFP[MFP_TCDR];
+        s_p972_snap_d = (uint8_t)MFP[MFP_TDDR];
+        s_p972_rd = 0;
+    }
+}
+
+/* TCDR/TDDR 読出し(reg: 0=TCDR、1=TDDR)。値は MFP_Read と同じ MFP[reg]。 */
+static void p972_note_counter_read(int reg) {
+    if (!s_p972_pending || mx_cpu_be_musashi()) return;
+    if (!p972_pc_src(MX68KQ_GUEST_PC())) return;
+    if (reg == 0) { s_p972_rd_c = (uint8_t)MFP[MFP_TCDR]; s_p972_rd |= 1u; }
+    else          { s_p972_rd_d = (uint8_t)MFP[MFP_TDDR]; s_p972_rd |= 2u; }
+    if (s_p972_rd == 3u) p972_emit();
+}
+
+static inline void p972_note_read_addr(uint32_t a) {
+    if (a == 0xE88023u) p972_note_counter_read(0);
+    else if (a == 0xE88025u) p972_note_counter_read(1);
+}
+
+/* mx68k_shutdown / mx68k_atexit_summary から呼ばれる(冪等)。 */
+void m68000_p972_dump_summary(void) {
+    if (!s_p972_on || s_p972_sum_done) return;
+    s_p972_sum_done = 1;
+    if (s_p972_pending) p972_emit();
+    debug_log("[P972-CH30TIMER-SUM] tcdcr_writes=%d trials=%d jumps=%d c_lead=%d trials_ok=%d open=%d noise=%d\n",
+              (int)s_p972_writes, (int)s_p972_trials, (int)s_p972_jumps, (int)s_p972_c_lead,
+              (int)s_p972_trials_ok, s_p972_active, (int)s_p972_noise);
+}
+
+/* ====================================================================
  *  P637 (D-67): PCM8PP が DMA を起動しない件の切り分けプローブ。
  *
  *  背景: P636 検証で PCM8PP + 実データ再生 108 秒間、DMAC ch2 が一度も
@@ -24433,6 +24584,8 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
     p806_io_wait(addr, 0);
     /* P946 (D-94): 直前読み出しがIOC BUSY確認か。無効化されうる #if の内側に置かないこと。 */
     s_p946_last_read_was_ioc = ((addr & 0x00FFFFFFu) == 0xE9C001u) ? 1u : 0u;
+    /* P972: TCDR/TDDR 読出しの観測(既定OFF)。 */
+    if (s_p972_on) p972_note_read_addr(addr & 0x00FFFFFFu);
 #if P602_ENABLE
     /* P602 (D-57) プローブ4 + プローブ3(a)。観測のみ、返却値は不変。 */
     p602_io_read_note(addr, 1);
@@ -25244,6 +25397,8 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
     p806_io_wait(addr, 1);
     /* P946 (D-94): ワード読み $E9C000 の下位バイトが $E9C001 相当。無効化されうる #if の内側に置かないこと。 */
     s_p946_last_read_was_ioc = (addr == 0xE9C000u) ? 1u : 0u;
+    /* P972: ワード読みの下位バイト(奇数番地)が TCDR/TDDR(既定OFF)。 */
+    if (s_p972_on) p972_note_read_addr(addr | 1u);
 #if P602_ENABLE
     /* P602 (D-57) プローブ4 + プローブ3(a) + プローブ2。いずれも観測のみで
      * 返却値・制御フローは不変。プローブ2 のゲートは既存 CP-R-1/P91 と同一条件
@@ -27039,6 +27194,8 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
 #endif
     /* P806: I/O ウェイト注入(Byte)。addr は未マスクだが関数内で 24bit マスクする。 */
     p806_io_wait(addr, 0);
+    /* P972: TCDCR 書込みの観測(既定OFF、実書込みの前)。 */
+    if (s_p972_on && (addr & 0x00FFFFFFu) == 0xE8801Du) p972_note_tcdcr_write((uint8_t)(val & 0xFFu));
     /* P946 (D-94): $E8C003 へのストローブ書込み。無効化されうる #if の内側に置かないこと。 */
     if ((addr & 0x00FFFFFFu) == 0x00E8C003u) {
         if (s_p946_last_read_was_ioc) p946_prn_strobe_with_ioc_check++;
@@ -27850,6 +28007,8 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
 #endif
     /* P806: I/O ウェイト注入(Word)。addr は関数冒頭で 24bit マスク済み。 */
     p806_io_wait(addr, 1);
+    /* P972: ワード書込み $E8801C の下位バイトが TCDCR(既定OFF、実書込みの前)。 */
+    if (s_p972_on && addr == 0xE8801Cu) p972_note_tcdcr_write((uint8_t)(val & 0xFFu));
     /* P946 (D-94): $E8C002 ワード書込み(下位バイトがストローブ相当)。WriteB を経由しない
      * (mem_wrap.c wm16_main が PRN_Write を直接呼ぶ)ため個別に数える。無効化されうる #if の内側に置かないこと。 */
     if (addr == 0x00E8C002u) {
@@ -30313,6 +30472,7 @@ static void c68k_init(void)
      * P861: CPU 構造体に触れないため、読み書き関数の登録より後へ移しても挙動は同じ。 */
     p806_io_wait_init();
     p970_siwin_init();
+    p972_init();
 
 #if P82XC_ENABLE
     /* P82-X-C Probe E: ビルド由来トークンを init 時 1 回出力する。
@@ -32399,6 +32559,7 @@ int32_t m68000_execute(int32_t cycles)
             if (mx_cpu_is_halted()) s_p868_mc.halted++;
         }
         if (s_p970_siwin_on) p970_siwin_chunk_end(executed);
+        if (s_p972_on && !mx_cpu_be_musashi()) s_p972_cyc_base += (unsigned long long)(executed > 0 ? executed : 0);
 #if P113_ENABLE
         /* P113-FB: chunk 境界 S sample (C68k_Exec return 直後)。S 1->0 を検出した
          * chunk の post-PC (=RTE landing 先、C68k_Get_PC は Really_End で sync 済、MINOR-2)・

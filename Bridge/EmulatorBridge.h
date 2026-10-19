@@ -3092,6 +3092,9 @@ void p136_poll(unsigned char step_id, int line);
  * P52 非依存 — Code Major-4 反映)。[P57A-SUMMARY] + [P57A-SUMMARY-DECISION] を出力する。 */
 void m68000_p57a_dump_summary(void);
 
+/* P972: [P972-CH30TIMER-SUM] を出力する(有効時のみ、冪等)。mx68k_shutdown と mx68k_atexit_summary から呼ばれる。 */
+void m68000_p972_dump_summary(void);
+
 /* P56 補助関数 — スナップショット取得(mx68k_run_frame から毎フレーム呼ばれる。冪等)。
  * スナップショットテーブルをファイルスコープの static に保つため m68000_bridge.c に実装。
  * /tmp/mx68k_P56_plan.md Edit F。 */

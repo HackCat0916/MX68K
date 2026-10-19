@@ -264,15 +264,21 @@ void FASTCALL MFP_Write(uint32_t adr, uint8_t data)
 		MFP_RecheckInt();
 		break;
 	case 0x17://Reg11
+		MFP[reg] = data;
+		break;
 	case 0x19://Reg12
 		MFP[reg] = data;
+		if ( !(data&0x0f) ) Timer_Tick[0] = 0;	// 停止でプリスケーラ端数を破棄(実機計測P972)
 		break;
 	case 0x1b://Reg13
 		MFP[reg] = data;
 		if ( MFP[reg]&0x10 ) Timer_TBO = 0;
+		if ( !(data&0x07) ) Timer_Tick[1] = 0;	// MFP_Timerの実行条件に合わせる
 		break;
 	case 0x1d://Reg14
 		MFP[reg] = data;
+		if ( !(data&0x70) ) Timer_Tick[2] = 0;
+		if ( !(data&0x07) ) Timer_Tick[3] = 0;
 		break;
 	case 0x1f://Reg15
 		Timer_Reload[0] = MFP[reg] = data;

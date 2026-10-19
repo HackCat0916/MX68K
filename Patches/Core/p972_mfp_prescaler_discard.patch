@@ -1,0 +1,64 @@
+# P972: MFPタイマー停止時のプリスケーラ端数破棄(px68k mfp.c、Class B: 参照実装に逐語移植可能な既存修正なし)
+#
+# 分類: B(ハードウェア仕様準拠修正——参照実装に既存修正なし)
+# 一次資料: 該当ページ無し(Inside X68000 書籍p.87-92に記述無し、MC68901データシートはDocs/に無い)
+#   → 条件(b)の実機実測代替(CLAUDE.md Class B (b) 2026-10-18追加): .mx68k_cycles/P972_realhw_result.md
+#   (2026-10-19、Timer D、ユーザーが実機X68000 XVI本体で本サイクル内に計測)
+#   H-RESET確定: 停止→再起動後の初回満了までの時間が45試行でT=53.38µs、残差σ=0.97µs(端数が持ち越されない)
+#   メインカウンタ保持も確定: v0==vstop 48/48(停止でTxDRは再ロードされない)
+#   ★Timer A/B/Cは実機未計測。同一チップ・同一構造であることからの推論で同じ扱いとする。
+# 実測根拠: [P972-CH30TIMER](本サイクル段階①、Bridge側診断プローブ、既定OFF)でMX側の機構
+#   (停止中も残るTimer_Tickにより再起動直後の初回満了が先行する=C先行)を直接観測(T-1陽性対照、
+#   .mx68k_cycles/P972_test_t1b.md)。CH30/IPLROMのクロック計測値に+256µsジャンプとして現れる(D-98)。
+# 上流欠陥同定: px68k系統共通の欠陥。Timer_Tick[]のクリアはMFP_Init(mfp.c:148)のみで、
+#   TACR/TBCR/TCDCRへの停止書込みでは破棄されない(共通祖先px68k本家から継承)
+# 同系先例: P970(FETCH_WAIT、c68k)。mfp.cへのClass Bパッチは本パッチが初例
+# 参照実装調査(修正不在の証明): 各リポジトリで LC_ALL=C grep -an Timer_Tick <mfp.c> を実行し、
+#   クリアが初期化関数内の1箇所のみ(他はMFP_Timer内の加算/減算)であることを再確認:
+#   px68k本家 74ddbb37 x68k/mfp.c:142(初期化のみ、281-322はMFP_Timer内) /
+#   px68k-libretro 617574fc x68k/mfp.c:142(同上) /
+#   MPX68K 42fc3401 X68000 Shared/px68k/x68k/mfp.c:142(同上) — いずれも停止時の破棄が欠落。
+#   XEiJ 0.26.10.08(MC68901.java:1559-1590,1580,1661)とXM6本家(vm/mfp.cpp:1353,1397-1402)は
+#   端数を捨てる修正を持つが、メインカウンタも再ロードする点が実機計測(カウンタ保持)と異なるため
+#   Class Aの移植元にはできない(カウンタ再ロードは不採用)。
+# Bridge代替検討: Timer_Tickはmfp.c内のstatic変数でBridgeから読み書き不可。停止検出でMFP_Timerへ
+#   余分なクロックを与える方式はメインカウンタも動かしてしまい実機計測(カウンタ保持)に反するため却下。
+# 対象ファイル:行範囲: Core/px68k/x68k/mfp.c:266-276
+# 由来サイクル: P972
+#
+# 適用方法: git apply Patches/Core/p972_mfp_prescaler_discard.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#
+# 併用が必須の Bridge 側変更: なし。段階①プローブはmfp.cの修正とは独立で、
+#   本パッチを適用しなくてもBridgeのビルドは失敗しない。
+#
+# 変更内容: case 0x17(VR)と0x19(TACR)のfall-throughを分離し、TACRだけに停止判定を追加
+#   (VRの挙動は不変)。MFP[TxDR](メインカウンタ)とTimer_Reload[]は変更しない。
+#   停止判定: Timer A=!(data&0x0f)、Timer B=!(data&0x07)、Timer C=!(data&0x70)、Timer D=!(data&0x07)。
+#
+diff --git a/Core/px68k/x68k/mfp.c b/Core/px68k/x68k/mfp.c
+index d09cc5d..3e80836 100644
+--- a/Core/px68k/x68k/mfp.c
++++ b/Core/px68k/x68k/mfp.c
+@@ -264,15 +264,21 @@ void FASTCALL MFP_Write(uint32_t adr, uint8_t data)
+ 		MFP_RecheckInt();
+ 		break;
+ 	case 0x17://Reg11
++		MFP[reg] = data;
++		break;
+ 	case 0x19://Reg12
+ 		MFP[reg] = data;
++		if ( !(data&0x0f) ) Timer_Tick[0] = 0;	// 停止でプリスケーラ端数を破棄(実機計測P972)
+ 		break;
+ 	case 0x1b://Reg13
+ 		MFP[reg] = data;
+ 		if ( MFP[reg]&0x10 ) Timer_TBO = 0;
++		if ( !(data&0x07) ) Timer_Tick[1] = 0;	// MFP_Timerの実行条件に合わせる
+ 		break;
+ 	case 0x1d://Reg14
+ 		MFP[reg] = data;
++		if ( !(data&0x70) ) Timer_Tick[2] = 0;
++		if ( !(data&0x07) ) Timer_Tick[3] = 0;
+ 		break;
+ 	case 0x1f://Reg15
+ 		Timer_Reload[0] = MFP[reg] = data;

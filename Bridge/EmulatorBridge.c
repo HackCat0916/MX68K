@@ -1920,6 +1920,7 @@ void mx68k_atexit_summary(void) {
   #if P57A_ENABLE
     m68000_p57a_dump_summary();
   #endif
+    m68000_p972_dump_summary();
     if (debug_log_file) {
         fflush(debug_log_file);
     }
@@ -1992,6 +1993,7 @@ void mx68k_shutdown(void) {
     /* P57-A のセッション終了時サマリ(Plan §7 Edit F-2, P52 非依存; Code Major-4)。 */
     m68000_p57a_dump_summary();
 #endif
+    m68000_p972_dump_summary();   /* P972: [P972-CH30TIMER-SUM](有効時のみ、冪等) */
     /* P483: Mercury 窓アクセスの分母(モニタ B のサマリ)をセッション終了時にも吐く。
      * 「pass が 0」だったときに blocked が非 0 か 0 かで解釈が一意に決まる。 */
     mx68k_p483_dump_mcry_counters("shutdown");
@@ -3739,6 +3741,13 @@ static inline void p822_clock_ratio(int mhz, int32_t *num, int32_t *den) {
         /* mhz<=0 の異常値は従来通り整数 16 扱い(保守的側)。正常系の 16 は上の case で処理される。 */
         default: *num = (mhz > 0 ? mhz : 16); *den = 1; break;
     }
+}
+
+/* P972: [P972-CH30TIMER] の t_true_us 換算用(予算計算と同じ num/den)。 */
+double mx68k_p972_clock_mhz(void) {
+    int32_t num, den;
+    p822_clock_ratio(g_clock_mhz, &num, &den);
+    return (double)num / (double)den;
 }
 
 /* P918: テスト用の自動リセットフック MX68K_TEST_RESET_AT_FRAME(前例: mt32_bridge.c の
