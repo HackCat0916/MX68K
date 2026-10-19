@@ -3095,6 +3095,9 @@ void m68000_p57a_dump_summary(void);
 /* P972: [P972-CH30TIMER-SUM] を出力する(有効時のみ、冪等)。mx68k_shutdown と mx68k_atexit_summary から呼ばれる。 */
 void m68000_p972_dump_summary(void);
 
+/* P981: [P981-SEEKCMP-SUM] を出力する(有効時のみ、冪等)。mx68k_shutdown と mx68k_atexit_summary から呼ばれる。 */
+void m68000_p981_dump_summary(void);
+
 /* P56 補助関数 — スナップショット取得(mx68k_run_frame から毎フレーム呼ばれる。冪等)。
  * スナップショットテーブルをファイルスコープの static に保つため m68000_bridge.c に実装。
  * /tmp/mx68k_P56_plan.md Edit F。 */

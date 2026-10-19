@@ -1919,6 +1919,7 @@ void mx68k_atexit_summary(void) {
     m68000_p57a_dump_summary();
   #endif
     m68000_p972_dump_summary();
+    m68000_p981_dump_summary();
     if (debug_log_file) {
         fflush(debug_log_file);
     }
@@ -1992,6 +1993,7 @@ void mx68k_shutdown(void) {
     m68000_p57a_dump_summary();
 #endif
     m68000_p972_dump_summary();   /* P972: [P972-CH30TIMER-SUM](有効時のみ、冪等) */
+    m68000_p981_dump_summary();   /* P981: [P981-SEEKCMP-SUM](有効時のみ、冪等) */
     /* P483: Mercury 窓アクセスの分母(モニタ B のサマリ)をセッション終了時にも吐く。
      * 「pass が 0」だったときに blocked が非 0 か 0 かで解釈が一意に決まる。 */
     mx68k_p483_dump_mcry_counters("shutdown");

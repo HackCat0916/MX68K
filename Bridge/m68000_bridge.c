@@ -738,6 +738,16 @@ void p636_mercury_pcm_poll_samples(void) {
     }
 }
 
+/* P981 (D-101): [P981-SEEKCMP] の状態変数。関数本体は m68000_p972_dump_summary の直後。
+ * ここに置くのは、下の p509_fdc_write_note(コマンド開始検出)から武装時刻を更新するため。 */
+#define P981_TARGET_PC      0x00FF8B1Eu   /* IPLROM $FF8B12 内の cmp.b d0,d2(P980逆アセンブル) */
+#define P981_WINDOW_FRAMES  16            /* 最後の FDC コマンド開始からこのフレーム数だけ単命令ステップ */
+#define P981_LINE_CAP       4000u         /* 個別行の出力上限(SUM の集計は上限なし) */
+static int       s_p981_on = 0;
+static int32_t   s_p981_last_cmd_frame = -1000000;   /* 直近の FDC コマンド開始フレーム(未観測は遠い過去) */
+static uint32_t  s_p981_fdc_cmds = 0;     /* 有効時に観測した FDC コマンド開始の総数(武装トリガの分母) */
+static uint32_t  s_p981_seek_cmds = 0;    /* うち SEEK(0x0F)の件数(cmp 母数の照合用) */
+
 /* ====================================================================
  *  P509 (D-48): 強制 READY 除去の効果を実測するプローブ。
  *  Core 側の fdc 構造体は fdc.c 内の static のため Bridge から直接読めない。
@@ -868,6 +878,11 @@ static void p509_fdc_write_note(uint32_t addr_raw, uint32_t val, int is_word) {
         p509_cmd_mirror = v & 0x1F;
         p509_wrnum = (int32_t)P509_CMD_TABLE[p509_cmd_mirror];
         p509_cmdhist[p509_cmd_mirror]++;
+        if (s_p981_on) {   /* P981: 単命令ステップの武装窓をこのフレームから開き直す */
+            s_p981_last_cmd_frame = (int32_t)g_mx68k_frame_num;
+            s_p981_fdc_cmds++;
+            if (p509_cmd_mirror == 0x0F) s_p981_seek_cmds++;
+        }
         /* P686: Recalibrate(fdc.c:266)開始 — 現在の drvsel で帰属を確定する。
          * SenseIntStatus(fdc.c:278)は結果 2 バイト(DAT_TABLE[8]=2、fdc.c:17-18)の
          * 1 バイト目が ST0(fdc.c:279)なので、次の $E94003 read を採取対象にする。 */
@@ -2368,6 +2383,72 @@ void m68000_p972_dump_summary(void) {
     debug_log("[P972-CH30TIMER-SUM] tcdcr_writes=%d trials=%d jumps=%d c_lead=%d trials_ok=%d open=%d noise=%d\n",
               (int)s_p972_writes, (int)s_p972_trials, (int)s_p972_jumps, (int)s_p972_c_lead,
               (int)s_p972_trials_ok, s_p972_active, (int)s_p972_noise);
+}
+
+/* ====================================================================
+ *  P981 (D-101): [P981-SEEKCMP] — IPLROM のシーク確認 cmp.b d0,d2($FF8B1E)
+ *  実行直前の d0.b(PCN、$C91+drv*8 から読んだ値)と d2.b(目標シリンダ)を記録する。
+ *
+ *  ★対話デバッガ(P748、g_mx68k_dbg_*)とは状態を一切共有しない。CPU は止めず記録のみ。
+ *  ★単命令ステップは「最後の FDC コマンド開始(p509_fdc_write_note)から
+ *    P981_WINDOW_FRAMES フレーム以内」だけ。$FF8B1E は SEEK 送出→完了割込み→
+ *    SENSE INT の直後に同期的に実行されるので、この窓で取りこぼさない。
+ *  自己反証可能性: SUM に母数(total)・内訳(match/mismatch/d0b_hist)に加え、
+ *  武装トリガの分母(fdc_cmds/seek_cmds)と単命令ステップ数(armed_steps)を併記する。
+ *  total=0 のとき「未配線」「窓が開かない」「本当に未実行」を区別するため。
+ * ==================================================================== */
+static uint32_t           s_p981_total = 0, s_p981_match = 0;
+static uint32_t           s_p981_d0b_hist[256];
+static unsigned long long s_p981_armed_steps = 0;
+static int                s_p981_prev_at_target = 0;   /* 直前ステップ開始時も $FF8B1E だった(二重計上防止) */
+static int                s_p981_sum_done = 0;
+
+static void p981_init(void) {
+    const char *ev = getenv("MX68K_DEBUG_SEEK_PCN");
+    s_p981_on = (ev != NULL && ev[0] != '\0' && strcmp(ev, "0") != 0) ? 1 : 0;
+    debug_log("[P981-SEEKCMP] wired env=%d target_pc=0x%06x window_frames=%d\n",
+              s_p981_on, (unsigned)P981_TARGET_PC, P981_WINDOW_FRAMES);
+}
+
+static inline int p981_armed(void) {
+    if (!s_p981_on) return 0;
+    int32_t d = (int32_t)g_mx68k_frame_num - s_p981_last_cmd_frame;
+    return d >= 0 && d <= P981_WINDOW_FRAMES;   /* d<0 はリセット等でフレーム番号が巻き戻った場合、武装しない */
+}
+
+/* 命令境界(mx_cpu_execute の外)でのみ呼ぶ。 */
+static void p981_check_pc(uint32_t pc) {
+    if (pc != P981_TARGET_PC) { s_p981_prev_at_target = 0; return; }
+    if (s_p981_prev_at_target) return;
+    s_p981_prev_at_target = 1;
+    uint8_t d0b = (uint8_t)(mx_cpu_get_dreg(0) & 0xFFu);
+    uint8_t d2b = (uint8_t)(mx_cpu_get_dreg(2) & 0xFFu);
+    int match = (d0b == d2b) ? 1 : 0;
+    s_p981_total++;
+    s_p981_match += (uint32_t)match;
+    s_p981_d0b_hist[d0b]++;
+    if (s_p981_total <= P981_LINE_CAP) {
+        debug_log("[P981-SEEKCMP] seq=%u frame=%d pc=0x%06x d0b=0x%02x d2b=0x%02x match=%d\n",
+                  s_p981_total, (int)g_mx68k_frame_num, (unsigned)pc, d0b, d2b, match);
+    }
+}
+
+/* mx68k_shutdown / mx68k_atexit_summary から呼ばれる(冪等)。 */
+void m68000_p981_dump_summary(void) {
+    if (!s_p981_on || s_p981_sum_done) return;
+    s_p981_sum_done = 1;
+    char hist[256 * 10];
+    int pos = 0;
+    hist[0] = '\0';
+    for (int i = 0; i < 256 && pos < (int)sizeof(hist) - 12; i++) {
+        if (s_p981_d0b_hist[i] == 0) continue;
+        pos += snprintf(hist + pos, sizeof(hist) - (size_t)pos, "%s0x%02x:%u",
+                        pos ? "," : "", i, s_p981_d0b_hist[i]);
+    }
+    debug_log("[P981-SEEKCMP-SUM] total=%u match=%u mismatch=%u d0b_hist=[%s] "
+              "fdc_cmds=%u seek_cmds=%u armed_steps=%llu frame=%d\n",
+              s_p981_total, s_p981_match, s_p981_total - s_p981_match, hist,
+              s_p981_fdc_cmds, s_p981_seek_cmds, s_p981_armed_steps, (int)g_mx68k_frame_num);
 }
 
 /* ====================================================================
@@ -30500,6 +30581,7 @@ static void c68k_init(void)
     p806_io_wait_init();
     p970_siwin_init();
     p972_init();
+    p981_init();
 
 #if P82XC_ENABLE
     /* P82-X-C Probe E: ビルド由来トークンを init 時 1 回出力する。
@@ -30986,6 +31068,14 @@ int32_t m68000_execute(int32_t cycles)
             }
         }
         /* ===== P748 ここまで ================================================= */
+        /* P981 (D-101): FDC コマンド開始から P981_WINDOW_FRAMES 以内だけ単命令ステップにし、
+         * 各命令境界で PC==$FF8B1E を判定する。既定(env 未設定)では s_p981_on==0 の
+         * 1回の分岐だけで抜け、c にも chunk にも触れない。HALT/STOP 中は縮めない。 */
+        if (s_p981_on && p981_armed() && !mx_cpu_is_halted()) {
+            p981_check_pc(MX68KQ_GUEST_PC() & 0x00FFFFFFu);
+            c = 1;
+            s_p981_armed_steps++;
+        }
 #if P106_ENABLE
         /* P106-SINGLESTEP-ANCHOR: gate。実 flip 捕捉 (s_p106_done) までは、live A7==$1FF8 を
          * 検出した chunk だけ 1 命令に縮め (gated single-step)、各 step 境界で entry_pc を exact 取得。
