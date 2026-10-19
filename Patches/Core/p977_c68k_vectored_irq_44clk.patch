@@ -1,0 +1,85 @@
+# P977: c68kのベクタ割込み(ベクタ64〜255)受付サイクルを4→44clkへ(D-100、D-15論点(B)の部分修正)
+#
+# 分類: A(参照実装の実証済みの「値」の移植。逐語移植ではない)
+# 出典リポジトリ: px68k本家(/Volumes/WD 8TB HDD/Develop/px68k)・XM6 2.06(mainline)・XEiJ 0.26.10.08 の独立3者一致
+# 参照コミットハッシュ: px68k本家 74ddbb3。XM6/XEiJはgit管理外のためsha256で版を固定。生出力(本パッチ作成時に実行):
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k" log --oneline -1 74ddbb37
+#   74ddbb3 fix the tool that makes .deb file (iOS)
+#   $ LC_ALL=C grep -a -n "USE_CYCLES(44)" "/Volumes/WD 8TB HDD/Develop/px68k/m68000/c68kmacro.h"
+#   205:		USE_CYCLES(44)
+#     (px68k本家:m68000/c68kmacro.h:191-206 CHECK_INT。ベクタ割込み・オートベクタとも44固定。EXCEPTIONマクロ:183-188はclkを足さない)
+#   $ sed -n 1346p "/Volumes/WD 8TB HDD/Develop/xm6/cpu/Star.c"
+#   	int cycles = (cputype == 68010) ? 46 : 44;
+#     (XM6:cpu/Star.c:1346 gen_flush_interrupts、全割込み共通。sha256 Star.c 15244cc14ae2684c342898e5d94a3b63f0b858679617455eab676fa2bcae6634)
+#   $ sed -n 13497p /Users/toshinari/Desktop/XEiJ_0261008/xeij/MC68000.java
+#       XEiJ.mpuClockTime += XEiJ.mpuModifiedUnit * 44;
+#     (XEiJ:MC68000.java:13497 irpInterrupt、ベクタ番号に依らない。sha256 MC68000.java 40b55529a04d086cfc465c901c87e870d312573c903fff12df445ccb8a3d4a17)
+#   (外付けボリュームの git が出す `non-monotonic index ... ._pack-*.idx` 警告は HEAD 表示に影響しないため除いた)
+#   ※XM6はmainline 2.06のソースを読んだもので、ユーザーが使うXM6 TypeG(クローズドソース)の値は未確認。
+# 移植の形: px68k本家のc68kはMXのc68k(kenyahiro系、例外サイクル表の表引き)とは別系統の古い版で、表を持たず CHECK_INT 内で
+#   USE_CYCLES(44) を固定で使う。関数の形が別なので逐語移植はできない。MXでは表 c68k_exception_cycle_table の 64-255
+#   (ベクタ割込みだけが参照する範囲)を44にすることで「割込み受付は全ベクタ44clk」という値だけを移植する。
+# 参照箇所の確認(訂正済みの集計): 表を引く箇所は `[vect]` 2か所(Core:c68k/c68kexec.c:325 C68k_Exec入口のCHECK_INT、
+#   Core:c68k/c68kmac.inc:294 Exec_EndのCHECK_INT。vect は IACK が返したベクタ番号)、命令側 `[res]` 65か所
+#   (op0 3・op4 34・op8 26・opA 1・opF 1)、生成器テンプレート gen68k.inc:1606/1635 の2か所。命令側65か所はすべて例外番号の
+#   コンパイル時定数(ZERO_DIVIDE 26・PRIVILEGE_VIOLATION 21・CHK 13・ILLEGAL 1・TRAPV 1・1010 1・1111 1・TRAP_BASE+(Opcode&0xF) 1)
+#   で最大47(Core:c68k/c68k.h:94-109)、gen68k.inc もコンパイル時定数だけを渡す。→ 64-255 は CHECK_INT の動的 vect からしか参照されない。
+#   (当初の診断パッチ・計画初版にあった「op8の7か所」は数え誤りで、上記へ訂正済み)
+# 一次資料: 手元のDocsに68000の例外実行時間表は無い(68000ファミリハンドブック 第7章「割込み」書籍p.97-98=PDF p.109-110を確認、
+#   クロック数の記載なし。付録にも実行時間表なし)。44clkを載せる一次資料はモトローラ「M68000 8-/16-/32-Bit Microprocessors
+#   User's Manual」の例外処理実行時間表([training knowledge]、ページ未確認、手元に無い)。Step 4 U-1でユーザーが
+#   (a)「3参照一致で進める」を承認(2026-10-19)。M68000 User's Manualでのページ確認は次サイクルの既定タスク
+#   (project_status.md D-100行に記録)。
+# 同じ欠陥の派生(修正無し、本パッチの対象外):
+#   px68k-libretro 617574f m68000/c68k/c68kexec.c:104-105 =4
+#   MPX68K ローカル 42fc340 / GitHub 0498eaecc2060a617a0aaa7c4cd205e403027f95 m68000/c68k/c68kexec.c:104-105 =4
+#   ThirdParty/Musashi m68kcpu.c:204-210(68000表、全5表で64-255=4)。c68kの表のコメント「taken from musashi core」が欠陥の出所と読める(推測)
+# 実測根拠: [P970-SIWIN-SUM] vec_hist=[45:33,54:49](10MHz)・[45:33,54:51](16.67MHz)で si 窓内の受付ベクタが $45(Timer-C)・$54(SCC)
+#   =64以上であることを確認。診断ビルド(本パッチと数値部分が同一)で si processor% 10MHz 98.17%(予測98.17)・16.67MHz 168.00%
+#   (予測168.00)、SCC無し/有りtickのΔが約1:4(.mx68k_cycles/P977_h1_verify.md)。[runtime log]+[user hands-on confirmation]。
+#   ★この一致は、MXの会計が割込み1回につき正確に+40clk動いたこと(機構と回数)の確認であり、実機の値が44であることそのものの
+#   実機検証ではない。残差(+0.21/+0.31pt)がある以上、siは44と48と54を区別できない。44の根拠は独立3参照実装の一致のみ
+#   (P977 Fable5条件C2)。
+# 経緯: 診断パッチ p977_c68k_vectored_irq_44clk_diag.patch(同じ差分、コメント1行のみ違う)をこのファイルへ改名して正式化(P977)。
+# 対象ファイル:行範囲: Core/c68k/c68kexec.c:99-105(適用前、P976適用後のCore。最終変更 2808c55)
+# 理由(1行): ベクタ割込み(MFP/SCC/DMAC/FDC/SCSI等)の受付が4clkしか課金されず、割込み1回あたり40clk速かった(D-100、D-15論点(B)の一部)
+# 由来サイクル: P977
+# 適用方法: git apply Patches/Core/p977_c68k_vectored_irq_44clk.patch
+#           撤回:  git apply -R Patches/Core/p977_c68k_vectored_irq_44clk.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#           P977作業ツリー(診断版が当たった状態)からの置き換え手順: 診断版のファイルは本ファイルへ改名済みのため、
+#             撤回には診断版の差分本体を保存した .mx68k_cycles/P977_diag_body_for_reverse.patch を使う:
+#             1. git apply -R .mx68k_cycles/P977_diag_body_for_reverse.patch
+#             2. git apply Patches/Core/p977_c68k_vectored_irq_44clk.patch
+# 環境変数: なし(表の定数を直すだけ。既定OFFのフラグは導入しない——CLAUDE.md「既定OFF放置パターン」規律は非該当)
+# 併用が必須の Bridge 側変更: なし(Bridge は表を参照しない)。
+# Musashi経路(X68030/040turbo/060turbo、およびMusashi 68000モード): 対象外・不変。機種ごとに正しい値が違う(オートベクタ欄
+#   000=44・010=46・020/030/040=30)ため、別サイクル(D-100の2サイクル目候補)で扱う。
+# 挙動の変化: c68k 経路でベクタ番号64以上の割込みを受け付けるたびに +40clk(10MHzで4.0µs、16.67MHzで2.4µs)。
+#   オートベクタ(25-31)・スプリアス(24)・TRAP・その他の例外は不変。ステートセーブ形式の変更なし。
+#
+diff --git a/Core/c68k/c68kexec.c b/Core/c68k/c68kexec.c
+index 8827631..91a828c 100644
+--- a/Core/c68k/c68kexec.c
++++ b/Core/c68k/c68kexec.c
+@@ -96,13 +96,13 @@ static const int32_t c68k_exception_cycle_table[256] =
+ 	  4, // 61: RESERVED
+ 	  4, // 62: RESERVED
+ 	  4, // 63: RESERVED
+-	     // 64-255: User Defined
+-	  4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+-	  4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+-	  4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+-	  4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+-	  4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,
+-	  4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4
++	     // 64-255: User Defined (ベクタ割込み受付=44clk。px68k本家/XM6/XEiJと同じ、P977/D-100)
++	  44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,
++	  44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,
++	  44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,
++	  44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,
++	  44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,
++	  44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44,44
+ };
+ 
+ // global variable
