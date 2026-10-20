@@ -133,6 +133,28 @@ Runtime jump-table changes (P913/P916, MC68060 / 060turbo) — again the files a
     exception like CAAR ($802) (MC68060 UM p.D-22 note 1). All other control registers fall through
     to the original 040 handler.
 
+Runtime exception-cycle table changes (P984, D-100) — again the files above stay unmodified:
+  - Where: Bridge/mx_cpu_musashi.c p984_apply_irq_cycle_fix(), called from the wrapper
+    mx_musashi_set_cpu_type(), which replaces every direct m68k_set_cpu_type() call in the Bridge
+    (6 sites: mx_cpu_musashi_init(), mx_cpu_musashi_set_model() x3, mx_cpu_musashi_set_model_from_env() x2).
+    m68k_set_cpu_type() resets CYC_EXCEPTION to the upstream table, so the swap must follow every call.
+    All call sites run only while the CPU is not executing (init / start of mx68k_reset_hard() /
+    startup env path), the same assumption as P899/P910.
+  - What: for the columns MX uses (0=68000, 3=68EC030, 4=68040, also used by 060turbo), a Bridge-side
+    copy of m68ki_exception_cycle_table[col] has vectors 64-255 set to that column's own autovector
+    value (vector 25): 68000=44, EC030=30, 040/060turbo=30. CYC_EXCEPTION is repointed to the copy.
+    Upstream sets 64-255 to 4 ("no data" placeholder, m68kcpu.c:134-135). Only interrupt
+    acknowledge reads vectors 64-255 (trap paths use constant vectors < 64).
+  - Why: interrupt acknowledge cost does not depend on the vector number — M68000UM Table 8-14,
+    MC68020 UM §8.2.17, MC68030 UM §11.6.17 (single Interrupt row), MC68060UM Table 10-26 note 3
+    ("either autovector or external vector"); XEiJ / XM6 / px68k agree. Absolute values (030/040/060=30)
+    are NOT claimed correct (upstream itself marks those columns "not correct"; tracked as D-103).
+  - 060turbo uses the 040 column's 30 (all its instruction/exception cycles are 040-column).
+    Alternatives if revisited: 19 (XEiJ MC68060.java) / 23 (MC68060UM Table 10-26).
+  - Re-vendor check: startup line "[P984-IRQCYC] ... replaced=192 unmatched=0 auto_uniform=1"
+    (vec64 equals vec25). auto_uniform=0 means upstream vectors 24-31 are no longer uniform and
+    vector 25 may not represent the autovector cost any more.
+
 Notes for 68030 support (to do in that cycle):
   - P869 implemented the minimal EC030 + no-FPU stubs above; P897 replaced the FPU stub with the
     MAME-derived port (environment-variable gated). Not implemented: PMMU no-op for the remaining EA

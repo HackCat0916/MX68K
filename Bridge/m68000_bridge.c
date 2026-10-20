@@ -33592,6 +33592,7 @@ void m68000_reset_pcguard_count(void)
         mx_cpu_musashi_p897_tick(g_mx68k_frame_num, debug_log);
         /* P910: [P910-040EXEC] 定期行(040型のときのみ) */
         mx_cpu_musashi_p910_tick(g_mx68k_frame_num, debug_log);
+        mx_cpu_musashi_p984_tick(g_mx68k_frame_num, debug_log);   /* P984: [P984-IRQCNT] */
     }
     g_p14_pcguard_count = 0;
     /* P19-DIAG: フレームごとのベクタテーブル異常カウンタもリセットする */

@@ -36,6 +36,7 @@ static int s_in_execute;
 static int s_p869_on;
 static void p869_on_read16(unsigned int address, unsigned int v);
 static void p869_on_read32(unsigned int address);
+static void p938_on_vecfetch32(unsigned int address);
 
 /* P887/P889: X68030ハイメモリ。NULL=無効。base/bytes は呼び出し側が指定する
  * (TS-6BE16相当=$01000000/16MB固定[XEiJ XEiJ.java:8056,8092]、
@@ -98,6 +99,7 @@ unsigned int m68k_read_memory_32(unsigned int address)
     uint32_t hi = bus_read16(address);
     uint32_t lo = bus_read16(address + 2);
     if (s_p869_on && !(s_himem && himem_hit(address))) p869_on_read32(address);
+    if (CPU_TYPE != CPU_TYPE_000) p938_on_vecfetch32(address);
     return (hi << 16) | lo;
 }
 void m68k_write_memory_8(unsigned int address, unsigned int value)  { bus_write8(address, value); }
@@ -108,10 +110,24 @@ void m68k_write_memory_32(unsigned int address, unsigned int value)
     bus_write16(address + 2, value & 0xffffu);
 }
 
+/* P984: [P984-IRQCNT] 用の割込み受付計数(受付の挙動は変えない、60フレームごとにゼロクリア) */
+static unsigned int s_p984_total, s_p984_auto, s_p984_vec64plus, s_p984_low;
+static unsigned long long s_p984_cyc_vec64plus;
+
 static int musashi_int_ack(int level)
 {
     int32_t v = s_bus.int_ack(level);
-    if (v == MX_C68K_INT_ACK_AUTOVECTOR) return (int)M68K_INT_ACK_AUTOVECTOR;
+    s_p984_total++;
+    if (v == MX_C68K_INT_ACK_AUTOVECTOR) {
+        s_p984_auto++;
+        return (int)M68K_INT_ACK_AUTOVECTOR;
+    }
+    if (v >= 64 && v <= 255) {
+        s_p984_vec64plus++;
+        s_p984_cyc_vec64plus += CYC_EXCEPTION[v];
+    } else {
+        s_p984_low++;
+    }
     return (int)v;
 }
 
@@ -662,13 +678,71 @@ void mx_cpu_musashi_p910_tick(int frame, mx_cpu_musashi_logf logf)
              bus_read16(0x0CBCu));
 }
 
+/* P984(D-100): 割込み例外のサイクル表。上流 m68ki_exception_cycle_table のうちMXが使う列
+ * (0=68000、3=68EC030、4=68040[060turboも流用])を複製し、64-255だけ同じ列のオートベクタ値(ベクタ25)に置き換える。
+ * 060turboは040列の30を流用する(命令・例外とも040列課金のため)。代わりの候補値は19(XEiJ MC68060)/23(MC68060UM Table 10-26)。
+ * 付け替えはCPU非実行区間(初期化・reset_hard冒頭・起動時の環境変数経路)でだけ行う(P899/P910と同じ前提)。 */
+static const unsigned char s_p984_src_col[3] = { 0, 3, 4 };
+static uint8 s_p984_exc[3][256];
+static int s_p984_built;
+
+static void p984_build(void)
+{
+    for (int i = 0; i < 3; i++) {
+        const uint8 *src = m68ki_exception_cycle_table[s_p984_src_col[i]];
+        memcpy(s_p984_exc[i], src, 256);
+        for (int v = 64; v <= 255; v++) s_p984_exc[i][v] = src[25];   /* 値はハードコードせず列のオートベクタ値を読む */
+    }
+    s_p984_built = 1;
+}
+
+static void p984_apply_irq_cycle_fix(void)
+{
+    int col = -1, idx = -1;
+    unsigned int replaced = 0, auto_uniform = 1, orig64 = 0;
+
+    if (!s_p984_built) p984_build();
+    for (int i = 0; i < 3; i++)
+        if (CYC_EXCEPTION == m68ki_exception_cycle_table[s_p984_src_col[i]]) { idx = i; col = s_p984_src_col[i]; break; }
+    if (idx >= 0) {
+        const uint8 *src = m68ki_exception_cycle_table[col];
+        CYC_EXCEPTION = s_p984_exc[idx];
+        orig64 = src[64];
+        for (int v = 64; v <= 255; v++) if (s_p984_exc[idx][v] != src[v]) replaced++;
+        for (int v = 24; v <= 31; v++) if (src[v] != src[25]) auto_uniform = 0;
+    } else {
+        auto_uniform = 0;   /* MXが使わない型、または付け替え済みの表(現行経路では起きない) */
+    }
+    debug_log("[P984-IRQCYC] type=%u col=%d vec24=%u vec25=%u vec31=%u vec64=%u vec255=%u orig64=%u "
+              "replaced=%u unmatched=%u auto_uniform=%u\n",
+              (unsigned)CPU_TYPE, col, CYC_EXCEPTION[24], CYC_EXCEPTION[25], CYC_EXCEPTION[31],
+              CYC_EXCEPTION[64], CYC_EXCEPTION[255], orig64, replaced, (unsigned)(idx < 0), auto_uniform);
+}
+
+/* P984: m68k_set_cpu_type は CYC_EXCEPTION を上流の表へ戻すので、必ずこのラッパー経由で呼ぶ */
+static void mx_musashi_set_cpu_type(unsigned int t)
+{
+    m68k_set_cpu_type(t);
+    p984_apply_irq_cycle_fix();
+}
+
+void mx_cpu_musashi_p984_tick(int frame, mx_cpu_musashi_logf logf)
+{
+    if (logf == NULL) return;
+    logf("[P984-IRQCNT] f=%d total=%u auto=%u vec64plus=%u low=%u cyc_vec64plus=%llu cyc64_now=%u\n",
+         frame, s_p984_total, s_p984_auto, s_p984_vec64plus, s_p984_low, s_p984_cyc_vec64plus,
+         (unsigned)CYC_EXCEPTION[64]);
+    s_p984_total = s_p984_auto = s_p984_vec64plus = s_p984_low = 0;
+    s_p984_cyc_vec64plus = 0;
+}
+
 /* --- 初期化・リセット --- */
 void mx_cpu_musashi_init(const mx_cpu_bus *bus)
 {
     s_bus = *bus;   /* 呼出し側はスタック上の構造体を渡す(m68000_bridge.c の c68k_init)ので値でコピーする */
     s_in_execute = 0;
     m68k_init();    /* 全コールバックをNULLへ戻すので、int_ackの登録は必ずこの後 */
-    m68k_set_cpu_type(M68K_CPU_TYPE_68000);
+    mx_musashi_set_cpu_type(M68K_CPU_TYPE_68000);
     m68k_set_int_ack_callback(musashi_int_ack);
     mx_musashi_fix_cp_dispatch();
     mx_musashi_fix_040_dispatch();   /* P910 */
@@ -807,6 +881,10 @@ static int s_win;                   /* MPU判別ウィンドウ中なら1 */
 static unsigned int s_since_enter;
 static unsigned int s_prev_op_ppc;
 static unsigned int s_lines_exc, s_lines_rte, s_lines_stub, s_lines_timeout;
+
+#define P938_CAP_FLINE 16u
+static unsigned int s_p938_fline_total;
+static unsigned int s_p938_fline_lines;
 
 /* P904: MOVEC Rn,Rc($4E7B)の観測。"040" プローブ時だけ有効。拡張語の読み出しで生値を控え、
  * 次の命令語フェッチで書込み後のCACRと次PC(例外へ飛んだかどうか)を併せて1行出す */
@@ -949,6 +1027,32 @@ static void p869_on_read32(unsigned int address)
     }
 }
 
+/* P938: F-line(ベクタ11)例外フレームの観測。既存p869_on_read32と異なり
+ * s_p869_on非依存で常時有効(CPU_TYPE!=68000のときのみ)。bus_read16を
+ * 直接使いp869系フックを二重に発火させない(既存の先読み規約を踏襲)。 */
+static void p938_on_vecfetch32(unsigned int address)
+{
+    unsigned int off, vec, a7, fmtvec, frame_sr, frame_pc_hi, frame_pc_lo;
+    if (!((REG_PC & 0x00FFFFFFu) == address)) return;
+    off = address - REG_VBR;
+    if (off >= 0x400u || (off & 3u) != 0) return;
+    vec = (off >> 2) & 0xFFu;
+    if (vec != 11u) return;
+    s_p938_fline_total++;
+    if (s_p938_fline_lines >= P938_CAP_FLINE) return;
+    s_p938_fline_lines++;
+    a7 = REG_A[7];
+    frame_sr   = bus_read16(a7 & 0x00FFFFFFu);
+    frame_pc_hi = bus_read16((a7 + 2) & 0x00FFFFFFu);
+    frame_pc_lo = bus_read16((a7 + 4) & 0x00FFFFFFu);
+    fmtvec     = bus_read16((a7 + 6) & 0x00FFFFFFu);
+    debug_log("[P938-FLINE] n=%u total=%u ppc=%08X ir=%04X sr=%04X a7=%08X "
+           "frame_sr=%04X frame_pc=%08X fmtvec=%04X\n",
+           s_p938_fline_lines, s_p938_fline_total, REG_PPC, REG_IR,
+           (unsigned int)m68ki_get_sr(), a7, frame_sr,
+           (frame_pc_hi << 16) | frame_pc_lo, fmtvec);
+}
+
 /* m68kfpu.c / m68kmmu.h のスタブから呼ばれる */
 static void p869_stub_event(int kind, unsigned int ppc, unsigned int ir, unsigned int ext)
 {
@@ -974,16 +1078,16 @@ static void p869_stub_event(int kind, unsigned int ppc, unsigned int ir, unsigne
 void mx_cpu_musashi_set_model(int model)
 {
     if (model == 1) {
-        m68k_set_cpu_type(M68K_CPU_TYPE_68EC030);
+        mx_musashi_set_cpu_type(M68K_CPU_TYPE_68EC030);
         CPU_ADDRESS_MASK = 0x00ffffffu;
         HAS_PMMU = 1;
     } else if (model == 2 || model == 3) {
         /* m68k_set_cpu_type が32bitマスク・HAS_PMMU=1 にするので後から上書きする */
-        m68k_set_cpu_type(M68K_CPU_TYPE_68040);
+        mx_musashi_set_cpu_type(M68K_CPU_TYPE_68040);
         CPU_ADDRESS_MASK = 0x00ffffffu;
         HAS_PMMU = 0;
     } else {
-        m68k_set_cpu_type(M68K_CPU_TYPE_68000);
+        mx_musashi_set_cpu_type(M68K_CPU_TYPE_68000);
     }
     s_is_060 = (model == 3);   /* P916 */
     s_p913_is_060 = 0;   /* P913: 本番経路では060プローブを必ず無効にする */
@@ -1081,7 +1185,7 @@ void mx_cpu_musashi_set_model_from_env(mx_cpu_musashi_logf logf)
     s_is_060 = m060 || m060nt;   /* P916: get_model_id と EmulatorBridge.c の逆変換(0x0105/0x0106→3)を揃える */
 
     if (ec030 || bare) {
-        m68k_set_cpu_type(M68K_CPU_TYPE_68EC030);
+        mx_musashi_set_cpu_type(M68K_CPU_TYPE_68EC030);
         /* ハイメモリ無しX68030の上位8bit無視ミラー(外部バス24bit相当) */
         CPU_ADDRESS_MASK = 0x00ffffffu;
         /* ec030: PMMU命令をMX作成no-opスタブ(m68kmmu.h)へ通す。PMMU_ENABLED は立てないので変換は起きない。
@@ -1092,7 +1196,7 @@ void mx_cpu_musashi_set_model_from_env(mx_cpu_musashi_logf logf)
          * HAS_PMMU=0: 030形式PMMU命令はno-opスタブでなく line-1111 へ(m68k_in.c の pmmu ハンドラ)。
          * P913: "060" も同じ040型構成(Musashiに060型は無い)。差分はMOVEPのベクタ61化のみ。
          * P914: "060nt" も同構成で、MOVEPはベクタ61化せず素通り実行する */
-        m68k_set_cpu_type(M68K_CPU_TYPE_68040);
+        mx_musashi_set_cpu_type(M68K_CPU_TYPE_68040);
         CPU_ADDRESS_MASK = 0x00ffffffu;
         HAS_PMMU = 0;
     }

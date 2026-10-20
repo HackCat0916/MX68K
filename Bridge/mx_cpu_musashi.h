@@ -74,5 +74,7 @@ const char *mx_cpu_musashi_fpu_env_raw(void);
 void mx_cpu_musashi_p897_tick(int frame, mx_cpu_musashi_logf logf);
 /* P910: [P910-040EXEC] の定期行(040型のときだけ出す、カウンタはプロセス内の累計) */
 void mx_cpu_musashi_p910_tick(int frame, mx_cpu_musashi_logf logf);
+/* P984: [P984-IRQCNT] の定期行(割込み受付の計数と課金合計、出力ごとにゼロクリア) */
+void mx_cpu_musashi_p984_tick(int frame, mx_cpu_musashi_logf logf);
 
 #endif /* MX_CPU_MUSASHI_H */
