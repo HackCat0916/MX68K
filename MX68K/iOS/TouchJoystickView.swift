@@ -11,7 +11,8 @@
 //        ★送出されるビット自体は P714 から不変 —— X68000 のジョイスティックポートは
 //          デジタル信号(方向ビット 4 本)のみでアナログ値の概念が無いため、
 //          「アナログスティック風」は**見た目とドラッグ操作の体験のみ**を指す。
-//          ノブのオフセットはデッドゾーン `dz` で 4 方向の量子化ビットへ落とす。
+//          ノブのオフセットは不感帯(P963 以降は絶対距離 `activationRadius` +
+//          角度しきい値 `sectorThreshold` の 2 段構成)で 4 方向の量子化ビットへ落とす。
 //
 //  ★規範(normative reference)は **MX68K 自身の macOS 実装**
 //    `MX68K/App/Services/InputManager.swift:791-810`(負論理ビット合成)である。
@@ -30,6 +31,114 @@
 //
 
 import SwiftUI
+import UIKit
+
+// MARK: - UIKit 直接タッチ追跡(P960/D-96)
+
+/// `DragGesture(minimumDistance: 0)` の UIKit 直接実装による置き換え。
+///
+/// ★D-96: iOS/iPadOS 27.0.1 では、SwiftUI の `DragGesture(minimumDistance: 0)` が
+///   指を静止させたまま押すと最大 0.75 秒程度認識が遅れる(システムジェスチャゲートの
+///   タイムアウト待ち)。`touchesBegan` 等を直接オーバーライドし、SwiftUI の
+///   ジェスチャ機構を通さずに down/up を取る。
+///
+/// コールバックの意味は `DragGesture` と揃えてある —— `onChanged` は押下開始時に
+/// translation `.zero` で 1 回、以後は指が動くたびに「開始点からの累積移動量」で呼ばれ、
+/// `onEnded` は指を離した時/キャンセル時に、**その時点の指の位置に関わらず** 1 回呼ばれる
+/// (追跡は開始時のヒットテストで確定し、以後は同じ `UITouch` を追い続ける標準 UIKit 挙動)。
+/// これにより「指がボタン外へ出ても解放は確実に届く」という従来の前提をそのまま保つ。
+///
+/// ★`SoftKeyboardView.swift` の iOS 分岐からも使うため `private` にしていない。
+struct TouchTrackingSurface: UIViewRepresentable {
+    /// true ならヒット領域を内接円に限る(円形ボタン/スティックの角でタッチを拾わない)。
+    var isCircular: Bool = false
+    var onChanged: (CGSize) -> Void
+    var onEnded: () -> Void
+
+    func makeUIView(context: Context) -> TouchTrackingUIView {
+        let view = TouchTrackingUIView()
+        apply(to: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: TouchTrackingUIView, context: Context) {
+        apply(to: uiView)
+    }
+
+    /// 押下中にビューが階層から外れた(パッド非表示・キーボード帯を閉じた等)場合、
+    /// `touchesCancelled` が届かないことがあるため、ここで解放を確実に送る
+    /// (キー/ビットの押しっぱなし防止)。
+    static func dismantleUIView(_ uiView: TouchTrackingUIView, coordinator: ()) {
+        uiView.endActiveTouch()
+    }
+
+    private func apply(to view: TouchTrackingUIView) {
+        view.isCircularHitArea = isCircular
+        view.onChanged = onChanged
+        view.onEnded = onEnded
+    }
+}
+
+final class TouchTrackingUIView: UIView {
+    var isCircularHitArea = false
+    var onChanged: ((CGSize) -> Void)?
+    var onEnded: (() -> Void)?
+
+    private var activeTouch: UITouch?
+    private var startLocation: CGPoint = .zero
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        // 1 ビュー = 1 本の指。別のボタン/スティックは別ビューなので同時押しは妨げない。
+        isMultipleTouchEnabled = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not supported")
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard isCircularHitArea else { return super.point(inside: point, with: event) }
+        let r = min(bounds.width, bounds.height) / 2
+        let dx = point.x - bounds.midX
+        let dy = point.y - bounds.midY
+        return dx * dx + dy * dy <= r * r
+    }
+
+    // ★super を呼ばない —— 次のレスポンダ(SwiftUI のホスティングビュー)へ
+    //   タッチを流すと、SwiftUI 側のジェスチャ処理を再び経由してしまう。
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard activeTouch == nil, let touch = touches.first else { return }
+        activeTouch = touch
+        startLocation = touch.location(in: self)
+        onChanged?(.zero)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        let p = touch.location(in: self)
+        onChanged?(CGSize(width: p.x - startLocation.x, height: p.y - startLocation.y))
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        endActiveTouch()
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = activeTouch, touches.contains(touch) else { return }
+        endActiveTouch()
+    }
+
+    /// 追跡中のタッチがあれば終了扱いにして `onEnded` を 1 回だけ呼ぶ。
+    func endActiveTouch() {
+        guard activeTouch != nil else { return }
+        activeTouch = nil
+        onEnded?()
+    }
+}
 
 // MARK: - 入力状態(ビット合成の唯一の集約点)
 
@@ -195,7 +304,8 @@ final class TouchJoystickInput {
 
 // MARK: - 1 個のタッチボタン
 
-/// `DragGesture(minimumDistance: 0)` でタッチの down/up を読む押しボタン。
+/// タッチの down/up を読む押しボタン(P960 で `DragGesture(minimumDistance: 0)` から
+/// UIKit 直接追跡 `TouchTrackingSurface` へ置換、D-96)。
 ///
 /// ★SwiftUI の `Button` を使わない —— P712f で「同一行に隣接して並べた `Button` が
 ///   同時発火する」不具合を経験している(P714 当時は 4 個密集する D-pad が
@@ -233,16 +343,15 @@ private struct TouchPadButton: View {
             .overlay(shape.stroke(Color.white.opacity(0.7), lineWidth: 1.5))
             .overlay(glyph)
             .frame(width: diameter, height: diameter)
-            // ★塗りつぶし済みの図形なので既定でヒットテストされるが、
-            //   縁取りだけの状態でも指が必ず拾えるよう明示する。
-            .contentShape(shape)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        // 最初の 1 回だけ down を送る。SwiftUI はジェスチャ開始後も
-                        // セッションを追跡し続ける(ライブなヒットテストではない)ため、
-                        // 指がボタン外へ出ても onEnded は確実に発火する
-                        // (SoftKeyboardView.swift:462-465 と同じ根拠)。
+            // P960/D-96 — DragGesture から UIKit 直接追跡へ置換。ヒット領域は
+            // 円形ボタンなら内接円、角丸矩形なら矩形全体。
+            .overlay(
+                TouchTrackingSurface(
+                    isCircular: isCircle,
+                    onChanged: { _ in
+                        // 最初の 1 回だけ down を送る。UIKit は開始時にヒットテストした
+                        // 同じ UITouch を追い続けるため、指がボタン外へ出ても onEnded は
+                        // 確実に発火する(`TouchTrackingSurface` の説明を参照)。
                         if !isDown {
                             isDown = true
                             // P724 — 連射 ON のボタンだけタイマー駆動へ分岐する。
@@ -253,8 +362,8 @@ private struct TouchPadButton: View {
                                 TouchJoystickInput.shared.setVirtualPadBit(bit, pressed: true)
                             }
                         }
-                    }
-                    .onEnded { _ in
+                    },
+                    onEnded: {
                         isDown = false
                         if autoFireEnabled {
                             TouchJoystickInput.shared.stopAutoFire(bit: bit)
@@ -262,6 +371,7 @@ private struct TouchPadButton: View {
                             TouchJoystickInput.shared.setVirtualPadBit(bit, pressed: false)
                         }
                     }
+                )
             )
             .accessibilityLabel(label)
     }
@@ -308,10 +418,12 @@ private struct TouchPadShape: Shape {
 /// ゲストへ送るのは **P714 と同じ 4 方向のデジタルビット**である
 /// (X68000 のジョイスティックポートにアナログ値の概念は無い)。
 ///
-/// ノブのオフセットを正規化(-1...1)し、デッドゾーン `dz` を超えた軸だけ
-/// 該当する方向ビットを ON にする —— 両軸が同時に閾値を超えれば 2 ビットが
-/// 同時に立ち、斜め入力は自然に成立する(`TouchJoystickInput` 側の既存の
-/// ビット合成がそのまま扱うため、斜め専用のロジックは追加しない)。
+/// 判定は 2 段構成(P963/D-97): ノブの移動距離が `activationRadius`(絶対 pt)に
+/// 達するまでは全ビット OFF、達した後は移動ベクトルを長さで正規化し、
+/// `sectorThreshold` を超えた軸だけ該当する方向ビットを ON にする —— 両軸が同時に
+/// 閾値を超えれば 2 ビットが同時に立ち、斜め入力は自然に成立する
+/// (`TouchJoystickInput` 側の既存のビット合成がそのまま扱うため、斜め専用の
+/// ロジックは追加しない)。
 private struct AnalogStickPad: View {
 
     /// ベース円の直径。
@@ -323,13 +435,29 @@ private struct AnalogStickPad: View {
     /// ベース内へノブが完全に収まる条件そのもの(半径差)。
     private var maxRadius: CGFloat { (baseDiameter - knobDiameter) / 2 }
 
-    /// 方向ビット ON のしきい値(正規化オフセットの絶対値)。
+    /// 方向ビットが立ち始める絶対距離のしきい値(pt)。
     ///
-    /// ★`InputManager.swift:795` の `let dz: Float = 0.5`(物理 GameController の
-    ///   左スティック量子化で使用中)からの値の再利用 —— 物理コントローラと
-    ///   タッチ操作で感度の一貫性を保つ。**値だけ**の引用であり、符号規約は
-    ///   同一ではない(下記 `apply(_:)` を参照)。
-    private static let dz: CGFloat = 0.5
+    /// ★MFC(姉妹プロジェクト)の fc140 修正([reference-implementation behaviour]、
+    ///   2026-10-17 クロスセッション共有、`iOS/VirtualPadView.swift` commit `cc468b6`)を
+    ///   参考に導入。旧 `dz`(可動半径に対する比率 0.5)は「動かし始め」の判定を
+    ///   `maxRadius` に依存させてしまい(MX68K では maxRadius=45pt の 50% = 22.5pt)、
+    ///   D-97 のワンテンポ遅延の主因と推定される。10pt という値自体は MFC 側が
+    ///   設計判断として選んだ値の借用であり、MX68K 独自の最適値としての根拠は無い ——
+    ///   実機 hands-on 確認で妥当性を見る前提(導入後に誤入力/遅延残存どちらの
+    ///   方向にも振れる余地あり)。
+    private static let activationRadius: CGFloat = 10
+
+    /// 活性化後、どの方向ビットを立てるかを決める角度しきい値(正規化ベクトル比較)。
+    ///
+    /// ★旧 `dz` の値(0.5)をそのまま引き継ぐ。iOS 専用ターゲット内の物理
+    ///   GameController 左スティック不感帯 `IOSGamepadInput.deadZone`
+    ///   (`MX68K/iOS/IOSGamepadInput.swift:71` で定義、`:174` で実使用)と値を揃え、
+    ///   物理コントローラとタッチ操作で感度の一貫性を保つ。**値だけ**の引用であり、
+    ///   符号規約は同一ではない(下記 `apply(_:)` を参照)。
+    ///   (旧コメントの `InputManager.swift:795` という引用は誤りだったため修正 ——
+    ///   同ファイルにその行は無く、かつ macOS 専用ターゲットのコードで本ファイルとは
+    ///   ターゲットが異なる。)
+    private static let sectorThreshold: CGFloat = 0.5
 
     /// 現在のノブ表示オフセット(クランプ済み)。
     @State private var knobOffset: CGSize = .zero
@@ -348,20 +476,23 @@ private struct AnalogStickPad: View {
                 .offset(knobOffset)
         }
         .frame(width: baseDiameter, height: baseDiameter)
-        // ★ベース**全体**がジェスチャ開始領域 —— ノブに正確に触れなくても
+        // ★ベース**全体**(内接円)がタッチ開始領域 —— ノブに正確に触れなくても
         //   ベース内であればドラッグを開始できる(実際のアナログスティックの操作感)。
-        .contentShape(Circle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
+        // P960/D-96 — DragGesture から UIKit 直接追跡へ置換。入力元だけを差し替え、
+        // translation(開始点からの累積移動量、y 正 = 下)の意味は従来と同一なので
+        // `clampToBase` / `apply` は無変更。
+        .overlay(
+            TouchTrackingSurface(
+                isCircular: true,
+                onChanged: { translation in
                     isDragging = true
-                    let clamped = Self.clampToBase(dx: value.translation.width,
-                                                   dy: value.translation.height,
+                    let clamped = Self.clampToBase(dx: translation.width,
+                                                   dy: translation.height,
                                                    maxRadius: maxRadius)
                     knobOffset = clamped
                     apply(clamped)
-                }
-                .onEnded { _ in
+                },
+                onEnded: {
                     isDragging = false
                     withAnimation(.easeOut(duration: 0.12)) {
                         knobOffset = .zero
@@ -374,6 +505,7 @@ private struct AnalogStickPad: View {
                     input.setVirtualPadBit(TouchJoystickInput.bitLeft, pressed: false)
                     input.setVirtualPadBit(TouchJoystickInput.bitRight, pressed: false)
                 }
+            )
         )
         .accessibilityLabel("Analog stick")
     }
@@ -394,21 +526,32 @@ private struct AnalogStickPad: View {
 
     /// クランプ済みオフセットを 4 方向のデジタルビットへ量子化して送出する。
     ///
-    /// ★符号規約 —— SwiftUI の `DragGesture` の `translation.height` は
-    ///   **正 = 下方向**である一方、`InputManager.swift:797` が使う
-    ///   `GCExtendedGamepad.leftThumbstick.yAxis` は Apple の規約で **正 = 上方向**。
-    ///   したがって y 軸の比較は `InputManager.swift` とは**逆**になる
-    ///   (`ny > dz` → Down、`ny < -dz` → Up)。x 軸は符号が一致するのでそのまま。
-    ///   `dz` の値 0.5 自体は `InputManager.swift:795` からの引用で不変。
+    /// 1 段目: 移動距離が `activationRadius` 未満なら 4 方向すべて OFF。
+    /// 2 段目: 移動ベクトルを長さで正規化し、`sectorThreshold` を超えた軸のビットを ON。
+    ///
+    /// ★符号規約 —— `TouchTrackingSurface` が渡す translation の `height` は
+    ///   (UIKit のビュー座標系、P960 以前の `DragGesture` と同じく)**正 = 下方向**である一方、
+    ///   `IOSGamepadInput.swift:176-177` が使う `GCExtendedGamepad.leftThumbstick.yAxis` は
+    ///   Apple の規約で **正 = 上方向**。したがって y 軸の比較は `IOSGamepadInput.swift` とは
+    ///   **逆**になる(`ny > t` → Down、`ny < -t` → Up)。x 軸は符号が一致するのでそのまま。
     private func apply(_ offset: CGSize) {
-        let nx = offset.width / maxRadius   // -1...1、正 = 右
-        let ny = offset.height / maxRadius  // -1...1、正 = 下
-        let dz = Self.dz
+        let dist = hypot(offset.width, offset.height)
         let input = TouchJoystickInput.shared
-        input.setVirtualPadBit(TouchJoystickInput.bitLeft,  pressed: nx < -dz)
-        input.setVirtualPadBit(TouchJoystickInput.bitRight, pressed: nx >  dz)
-        input.setVirtualPadBit(TouchJoystickInput.bitUp,    pressed: ny < -dz)
-        input.setVirtualPadBit(TouchJoystickInput.bitDown,  pressed: ny >  dz)
+        guard dist >= Self.activationRadius else {
+            input.setVirtualPadBit(TouchJoystickInput.bitLeft,  pressed: false)
+            input.setVirtualPadBit(TouchJoystickInput.bitRight, pressed: false)
+            input.setVirtualPadBit(TouchJoystickInput.bitUp,    pressed: false)
+            input.setVirtualPadBit(TouchJoystickInput.bitDown,  pressed: false)
+            return
+        }
+        // dist >= activationRadius(10) > 0 が保証されているので 0 除算は起きない。
+        let nx = offset.width / dist   // 正規化ベクトル、-1...1、正 = 右
+        let ny = offset.height / dist  // 正規化ベクトル、-1...1、正 = 下(符号規約は上記コメント参照)
+        let t = Self.sectorThreshold
+        input.setVirtualPadBit(TouchJoystickInput.bitLeft,  pressed: nx < -t)
+        input.setVirtualPadBit(TouchJoystickInput.bitRight, pressed: nx >  t)
+        input.setVirtualPadBit(TouchJoystickInput.bitUp,    pressed: ny < -t)
+        input.setVirtualPadBit(TouchJoystickInput.bitDown,  pressed: ny >  t)
     }
 }
 

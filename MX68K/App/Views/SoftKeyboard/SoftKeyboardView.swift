@@ -457,6 +457,25 @@ private struct SoftKeyButton: View {
 
         switch key.kind {
         case .normal:
+            #if os(iOS)
+            // P960/D-96 — iOS 27 の DragGesture(minimumDistance: 0) 認識遅延を避けるため、
+            // iOS のみ UIKit 直接追跡(`TouchTrackingSurface`、TouchJoystickView.swift)を使う。
+            // 開始時の UITouch を追い続けるため、指がキー外へ出ても onEnded は確実に届く。
+            content.overlay(
+                TouchTrackingSurface(
+                    onChanged: { _ in
+                        if !isDown {
+                            isDown = true
+                            mx68k_key_down(key.scancode)
+                        }
+                    },
+                    onEnded: {
+                        isDown = false
+                        mx68k_key_up(key.scancode)
+                    }
+                )
+            )
+            #else
             content.gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
@@ -474,6 +493,7 @@ private struct SoftKeyButton: View {
                         mx68k_key_up(key.scancode)
                     }
             )
+            #endif
         case .sticky:
             content.onTapGesture { state.toggleSticky(key.scancode) }
         case .ledPulse:
