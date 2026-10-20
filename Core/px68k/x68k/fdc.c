@@ -77,6 +77,7 @@ typedef struct {
 	int32_t st0;
 	int32_t st1;
 	int32_t st2;
+	int32_t seekint;	/* P982 (D-101): SEEK/RECALIBRATE 終了割込みの保留(SENSE INT 有効条件) */
 	uint8_t RspBuf[10];
 	uint8_t PrmBuf[10];
 	uint8_t DataBuf[0x8000];
@@ -287,11 +288,21 @@ static void FDC_ExecCmd(void)
 		} else {
 			fdc.st0 |= 0x50;		// ドライブなし
 		}
+		fdc.seekint = 1;
 		FDC_SetInt();
 		break;
 	case 8:		// SenseIntStatus
-		rsp->st0 = fdc.st0;
-		rsp->st1 = fdc.cyl;
+		/* P982 (D-101): 保留中のシーク終了割込みがあるときだけ ST0+PCN の2バイト、
+		 * 無いときは無効(0x80)の1バイト(XM6 vm/fdc.cpp:956-984,1672-1677,1710-1715 /
+		 * XEiJ FDC.java:1653-1721 と同じ構造) */
+		if ( fdc.seekint ) {
+			rsp->st0 = fdc.st0;
+			rsp->st1 = fdc.cyl;
+			fdc.seekint = 0;
+		} else {
+			rsp->st0 = 0x80;
+			fdc.rdnum = 1;
+		}
 		fdc.st0 = 0x80;
 		break;
 	case 10:	// ReadID
@@ -343,6 +354,7 @@ static void FDC_ExecCmd(void)
 		} else {
 			fdc.st0 |= 0x48;
 		}
+		fdc.seekint = 1;
 		FDC_SetInt();
 		break;
 	}
@@ -460,7 +472,6 @@ uint8_t FASTCALL FDC_Read(uint32_t adr)
 		ret  = 0x80;
 		ret |= ((fdc.rdnum)&&(!fdc.wexec))?0x40:0;
 		ret |= ((fdc.wrnum)||(fdc.rdnum))?0x10:0;
-		ret &= ((fdc.rdnum==1)&&(fdc.cmd==8))?0xaf:0xff;
 		break;
 	case 0x03:		/* Read data */
 		if ( fdc.bufnum ) {

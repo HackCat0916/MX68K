@@ -1,0 +1,259 @@
+# P982: FDC SENSE INTERRUPT STATUS を「シーク終了割込み保留時は ST0+PCN の2バイト、それ以外は 0x80 の1バイト」へ(D-101)
+#
+# 分類: A(独立2参照実装[XM6・XEiJ]で実証済みの「構造」の移植。逐語移植ではない——P977の「値の移植」の前例に倣う)
+# 出典リポジトリ: XM6 2.06(mainline、/Volumes/WD 8TB HDD/Develop/xm6)・XEiJ 0.26.10.08(/Users/toshinari/Desktop/XEiJ_0261008)の独立2者一致
+# 参照コミットハッシュ: XM6/XEiJ はどちらも git 管理外のため sha256 で版を固定する。生出力(本パッチ作成時に実行):
+#   $ shasum -a 256 "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   71bf9da88553a2119aa7797c1b4e8590d7daf18abb409f5a30bb33c7439fe1a4  /Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp
+#   7c240af5ab8f0310f88ee4e0a39dbab411027d74b4a894ad1e5f4a6b7d98fdf3  /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   (XM6 は XM6src.txt の版表記「version 2.06」。XEiJ はディレクトリ名 XEiJ_0261008。
+#    ※XM6 は mainline 2.06 のソースを読んだもので、ユーザーが使う XM6 TypeG[クローズドソース]の挙動は未確認)
+# 同じ欠陥の共有先(修正無し、本パッチの対象外。px68k 系統で共有された欠陥):
+#   px68k本家 74ddbb3 x68k/fdc.c:461 / px68k-libretro 617574f x68k/fdc.c:461 / MPX68K 42fc340 X68000 Shared/px68k/x68k/fdc.c:502
+#   いずれも `ret &= ((fdc.rdnum==1)&&(fdc.cmd==8))?0xaf:0xff;`(P982 Fix Plan「外部リポジトリの版固定」に生出力)
+# 移植の形: XM6 は fdc.seek(シーク系コマンド実行直後フラグ)、XEiJ はユニット別 fduSeekEndInterruptRequest で
+#   「SENSE INT が有効なのはシーク終了割込みの保留中だけ」を表す。MX の FDC は単一状態モデルなので、これを
+#   FDC 構造体の seekint 1 個へ写した。移植した構造は次の3点:
+#   (1) SENSE INT が有効(ST0+PCN)なのは、RECALIBRATE/SEEK 終了割込みが保留されているときだけ。
+#       XM6 は RECAL/SEEK 完了処理の成功・失敗どちらの分岐の後でも fdc.seek = TRUE(下の 820-849)。
+#       → case 7 / case 15 の if/else の外で seekint = 1 とする。
+#   (2) 有効なら2バイト(ST0, PCN)、無効なら 0x80 の1バイト。
+#       → 無効時は rsp->st0 = 0x80 とし、FDC_Write が FDC_ExecCmd の前に入れた rdnum = DAT_TABLE[8](=2)を 1 へ上書き。
+#   (3) STATUS レジスタ(MSR)に cmd 8 用のマスクは無い。→ fdc.c:463 の 0xaf マスクを削除。
+# 移植しない点(意図的):
+#   (a) ドライブ別 PCN(XM6 fdc.cyl[us] / XEiJ fduPCN)。MX は単一 fdc.cyl のまま。IOCS の経路(SEEK 1件ごとに完了と
+#       SENSE を待つ)では値が等価になる見込み(仮説、P982 T-3/T-4b で検出)。単一 fdc.cyl が READ/WRITE 系の物理
+#       トラック選択にも使われている問題は D-102(疑い)として別途起票。
+#   (b) XEiJ の状態遷移割込み(Attention Interrupt、ST0=0xC0|u)。MX はこの機構そのものを持たない(D-101 とは別件)。
+#   (c) XM6 の「シーク保留中は SENSE INT 以外のコマンドを無効にする」。MX の寛容な挙動はそのまま残す。
+# 逐語抜粋(必須条件B、P982 Fix Plan R2): 以下は本パッチ作成時に下記コマンドで取得した出力そのもの。
+#   XM6 は Shift_JIS のため iconv で UTF-8 へ変換し、タブを expand -t 4 で空白へ展開した(それ以外は無加工)。
+#   各行頭の「#   | 」はヘッダ用の接頭辞。
+#
+# --- XM6 vm/fdc.cpp:820-849(RECAL/SEEK の完了処理。成功・失敗どちらでも Interrupt(TRUE) と fdc.seek = TRUE)
+#   $ sed -n 820,849p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   |     if ((fdc.cmd == recalibrate) || (fdc.cmd == seek)) {
+#   |         // ST0作成(ただしUSのみ)
+#   |         fdc.st[0] = fdc.us;
+#   | 
+#   |         // ステータス判別
+#   |         if (status) {
+#   |             // ドライブ2,3はECを立てる
+#   |             if (drive <= 1) {
+#   |                 // Seek End
+#   |                 fdc.st[0] |= 0x20;
+#   |             }
+#   |             else {
+#   |                 // Equipment Check, Attention Interrupt
+#   |                 fdc.st[0] |= 0x10;
+#   |                 fdc.st[0] |= 0xc0;
+#   |             }
+#   |         }
+#   |         else {
+#   |             if (drive <= 1) {
+#   |                 // Seek End
+#   |                 fdc.st[0] |= 0x20;
+#   |             }
+#   |             // Not Ready, Abnormal Terminate
+#   |             fdc.st[0] |= 0x08;
+#   |             fdc.st[0] |= 0x40;
+#   |         }
+#   | 
+#   |         // SEEK完了割り込み
+#   |         Interrupt(TRUE);
+#   |         fdc.seek = TRUE;
+#
+# --- XM6 vm/fdc.cpp:956-984(シーク系コマンド実行直後だけ SENSE INT を有効にし、fdc.seek = FALSE → Result())
+#   $ sed -n 956,984p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   | 
+#   |     // シーク系コマンド実行直後は、SENSE INTERRUPT STATUS以外許されない
+#   |     if (fdc.seek) {
+#   |         // SENSE INTERRUPT STATUS
+#   |         if (mask == 0x08) {
+#   | #if defined(FDC_LOG)
+#   |             LOG0(Log::Normal, "SENSE INTERRUPT STATUSコマンド");
+#   | #endif  // FDC_LOG
+#   |             fdc.cmd = sense_int_stat;
+#   | 
+#   |             // 割り込みネゲート
+#   |             fdc.sr &= 0xf0;
+#   |             fdc.seek = FALSE;
+#   |             Interrupt(FALSE);
+#   | 
+#   |             // パラメータなし、実行フェーズなし
+#   |             Result();
+#   |             return;
+#   |         }
+#   | 
+#   |         // それ以外は全て無効コマンド
+#   | #if defined(FDC_LOG)
+#   |         LOG0(Log::Normal, "INVALIDコマンド");
+#   | #endif  // FDC_LOG
+#   |         fdc.cmd = invalid;
+#   |         Result();
+#   |         return;
+#   |     }
+#   | 
+#
+# --- XM6 vm/fdc.cpp:985-993(保留なしの SENSE INT は無効コマンド扱い)
+#   $ sed -n 985,993p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   |     // SENSE INTERRUPT STATUS(無効)
+#   |     if (mask == 0x08) {
+#   | #if defined(FDC_LOG)
+#   |         LOG0(Log::Normal, "INVALIDコマンド");
+#   | #endif  // FDC_LOG
+#   |         fdc.cmd = invalid;
+#   |         Result();
+#   |         return;
+#   |     }
+#
+# --- XM6 vm/fdc.cpp:1672-1677(有効時のリザルト: ST0・ドライブ別シリンダの2バイト)
+#   $ sed -n 1672,1677p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   |         case sense_int_stat:
+#   |             // ST0・シリンダを返す。データ転送
+#   |             fdc.out_pkt[0] = fdc.st[0];
+#   |             fdc.out_pkt[1] = fdc.cyl[fdc.us];
+#   |             fdc.out_len = 2;
+#   |             fdc.out_cnt = 0;
+#
+# --- XM6 vm/fdc.cpp:1710-1715(無効時のリザルト: 0x80 の1バイト)
+#   $ sed -n 1710,1715p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   |         case invalid:
+#   |         case reset_stdby:
+#   |             fdc.out_pkt[0] = 0x80;
+#   |             fdc.out_len = 1;
+#   |             fdc.out_cnt = 0;
+#   |             return;
+#
+# --- XEiJ xeij/FDC.java:1653-1722 fdcCommandSenseInterruptStatus()
+#   (デバッグ出力の行[FDC_DEBUG_TRACE/System.out を含む行]と、閉じ括弧だけの行を下記 grep で除いた。行末コメントは原文のまま)
+#   (FDC_ST0_IC の定義: xeij/FDC.java:153 `public static final int FDC_ST0_IC = 0x80 << 24;`、ユニット別 PCN: :1924 `public int fduPCN;`)
+#   $ sed -n 1653,1722p /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java | grep -v -e FDC_DEBUG_TRACE -e System.out -E -e '^[[:space:]]*}[[:space:]]*$'
+#   |   public static void fdcCommandSenseInterruptStatus () {
+#   |     //R-Phaseに移行するとき
+#   |     IOInterrupt.ioiFdcFall ();  //FDC割り込み要求(INT)を0にする
+#   |     for (int u = 0; u <= 3; u++) {  //ユニット0..3について
+#   |       FDUnit unit = fdcUnitArray[u];
+#   |       if ((fdcStatus & 1 << u) != 0) {  //FDnビジー(DnB)が1のとき
+#   |         if (unit.fduSeekEndInterruptWaiting) {  //シーク終了割り込み待機(seekEndInterruptWaiting)が1のとき
+#   |           unit.fduSeekEndInterruptWaiting = false;  //シーク終了割り込み待機(seekEndInterruptWaiting)を0にする
+#   |           unit.fduSeekEndInterruptRequest = true;  //シーク終了割り込み要求(seekEndInterruptRequest)を1にする
+#   |         } else {  //FDnビジー(DnB)が0のとき
+#   |           if (unit.fduAttentionCheckWaiting) {  //状態遷移確認フラグ(attentionCheckWaiting)が1のとき
+#   |             unit.fduAttentionCheckWaiting = false;  //状態遷移確認フラグ(attentionCheckWaiting)を0にする
+#   |             boolean ready = unit.fduIsReady ();
+#   |             if (ready != unit.fduSavedReady) {  //レディ信号の状態(isReady)が保存されたレディ信号の状態(savedReady)と違うとき
+#   |               unit.fduSavedReady = ready;  //レディ信号の状態(isReady)を保存する(isReady→savedReady)
+#   |               if (!unit.fduAttentionInterruptRequest) {  //状態遷移割り込み要求(attentionInterruptRequest)が0のとき
+#   |                 unit.fduAttentionInterruptRequest = true;  //状態遷移割り込み要求(attentionInterruptRequest)を1にする
+#   |     int status = FDC_ST0_IC;
+#   |     for (int u = 0; u <= 3; u++) {  //ユニット0..3について
+#   |       FDUnit unit = fdcUnitArray[u];
+#   |       if (unit.fduSeekEndInterruptRequest) {  //シーク終了割り込み要求(seekEndInterruptRequest)が1のとき
+#   |         unit.fduSeekEndInterruptRequest = false;  //シーク終了割り込み要求(seekEndInterruptRequest)を0にする
+#   |         status = unit.fduSeekResultStatus | u << 24 | (unit.fduPCN & 255) << 16;
+#   |         break;
+#   |       if (unit.fduAttentionInterruptRequest) {  //状態遷移割り込み要求(attentionInterruptRequest)が1のとき
+#   |         unit.fduAttentionInterruptRequest = false;  //状態遷移割り込み要求(attentionInterruptRequest)を0にする
+#   |         status = FDC_ST0_AI | u << 24 | (unit.fduPCN & 255) << 16;  //AI(Attention Interrupt)のリザルトステータスを出力する
+#   |         break;
+#   |     fdcResultBuffer[0] = (byte) (status >> 24);
+#   |     if (status == FDC_ST0_IC) {
+#   |       fdcRPhase (1);
+#   |     } else {
+#   |       fdcResultBuffer[1] = (byte) (status >> 16);
+#   |       fdcRPhase (2);
+#   |   }  //fdcCommandSenseInterruptStatus()
+#
+# 一次資料(構造そのもの): X68000 テクニカルデータブック 書籍p.155(PDF p.167)「(5)割り込み信号ステータス(In)・E9C001H」
+#   D7 の説明(本パッチ作成時に PDF を画像で開いて確認):
+#   「1:FDC 割り込み ON……リード/ライトの E-PHASE 終了によるリザルトステータスの読み取り要求、または SEEK、
+#     RECALIBRATE コマンドの E-PHASE 終了による SENSE INTERRUPT STATUS コマンドの起動要求、またはデバイスの
+#     状態遷移による SENSE INTERRUPT STATUS コマンドの起動要求」
+#   → SENSE INT が要求されるのはシーク系終了(と状態遷移)のときだけで、R/W 終了はリザルト読取り要求(本修正の(1))。
+#   補強: 同書 書籍p.152(PDF p.164)表4-14「各ドライブの現在のヘッド位置をFDCが記憶しており」(Fix Plan 作成時に確認)。
+#   SENSE INT のリザルト長(2バイト=ST0, PCN)は同書 p.153 が「μPD72065データシートなどの資料を参照」として載せておらず、
+#   手元に一次資料なし。根拠は独立2参照実装の一致+実機ログ(たんぼ氏、ふろっぴU君経由: C1 への SEEK 直後の
+#   SENSE INT が ST0=0x20 → MSR 0xD0 → PCN=0x01 → MSR 0x80 の2バイト返答、P979 §0)。
+# 実測根拠: [P981-SEEKCMP-SUM] total=200 match=20 mismatch=180 d0b_hist=[0x00:200] fdc_cmds=4372 seek_cmds=380
+#   (Quarth.hdm FD 起動、P981)。IOCS のシーク確認 $FF8B1E cmp.b d0,d2(IPLROM md5 0617321daa182c3f3d6f41fd02fb3275)が
+#   比べる PCN スロット $C91+drv*8 が常に 0(本マスクにより割込み処理 $FF1392 が PCN を読まない)ため、目標シリンダが
+#   0 以外だと必ず不一致 → RECAL+再 SEEK。RECAL 184(P979 cmd_hist)− 4 = 180 = mismatch 180。[runtime log]+[算術]。
+#   併せて、修正前の SENSE INT は READ/READ ID の後にも古い ST0 を返していた(rsp->st0 = fdc.st0、fdc.st0 を 0x80 へ
+#   戻すのは case 8 だけ)。P979 cmd_hist 0x08=2910 = 2×(0x07:184+0x0f:380) + 2×(0x46:890+0x4a:1) と整数一致
+#   ([static code reading]+[runtime log]+[算術])。保留フラグの移植でこれも消える(予測: 0x08 ≈ 1299)。
+# 経緯: P979(FDC コマンド列の実機ログ照合で RECAL 過多を発見)→ P980(IOCS 逆アセンブルで $FF8B1E の PCN 比較を特定)
+#   → P981(実行時プローブ [P981-SEEKCMP] で機構を確定)→ P982(本パッチ)。P980 §5 の最小修正案
+#   (「st0==0x80 なら1バイト、それ以外は2バイト」)は、READ 後の古い ST0 で READ の ST1 スロット $C91+8n を cyl で
+#   上書きするおそれ(仮説)があるため採らず、XM6/XEiJ の保留フラグ構造を移植した。
+# 対象ファイル:行範囲: Core/px68k/x68k/fdc.c:63-84(FDC 構造体), 280-296(case 7/8), 338-347(case 15), 459-464(STATUS)
+#   (適用前。最終変更 87981b5 = P686)
+# 理由(1行): SENSE INTERRUPT STATUS の PCN を STATUS マスクで隠し、保留の有無に依らず古い ST0 を返していたため、
+#   IOCS が PCN 不一致と判定して余分な RECAL+再 SEEK を出していた(D-101)
+# 由来サイクル: P982
+# 適用方法: git apply Patches/Core/p982_fdc_senseint_pcn.patch
+#           撤回:  git apply -R Patches/Core/p982_fdc_senseint_pcn.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+# 環境変数: なし(既定 OFF のフラグは導入しない——CLAUDE.md「既定OFF放置パターン」規律は非該当)。
+# 併用が必須の Bridge 側変更: なし。
+#   注記: Bridge/floppyu_fdc_passthrough_probe.c:236(P955 振り分け器スタブ、D-8 凍結中・既定 OFF)は旧 Core のマスクを
+#   まねたまま残る。凍結中のため本サイクルでは触らず、Docs/10 D-8 行に「再開時に整合が要る」と注記。
+#   Bridge/m68000_bridge.c の [P686-FDCDRV] 診断は st0_last/st0_n の分布が変わる(READ 後の古い ST0 の SENSE が消える
+#   ため。診断専用、ロースター外。P982 R-8 で想定内として事前記載)。
+# 挙動の変化: 全機種共通(FDC デバイスエミュレーションは CPU コアに依らない)。保留なしの SENSE INT は 0x80 の1バイトを
+#   返す(修正前は直前コマンドの ST0+cyl の2バイト。初回は 0x00)。保留ありの SENSE INT は ST0+PCN の2バイトで、
+#   STATUS は2バイト目まで DIO/CB を立てたまま返す。seekint は FDC 構造体内なので FDC_Init() の memset でリセット時に
+#   0 に戻る。FDC 構造体はステートセーブ対象ではないため保存形式は不変。
+#
+diff --git a/Core/px68k/x68k/fdc.c b/Core/px68k/x68k/fdc.c
+index 36cb506..ce9c2eb 100644
+--- a/Core/px68k/x68k/fdc.c
++++ b/Core/px68k/x68k/fdc.c
+@@ -77,6 +77,7 @@ typedef struct {
+ 	int32_t st0;
+ 	int32_t st1;
+ 	int32_t st2;
++	int32_t seekint;	/* P982 (D-101): SEEK/RECALIBRATE 終了割込みの保留(SENSE INT 有効条件) */
+ 	uint8_t RspBuf[10];
+ 	uint8_t PrmBuf[10];
+ 	uint8_t DataBuf[0x8000];
+@@ -287,11 +288,21 @@ static void FDC_ExecCmd(void)
+ 		} else {
+ 			fdc.st0 |= 0x50;		// ドライブなし
+ 		}
++		fdc.seekint = 1;
+ 		FDC_SetInt();
+ 		break;
+ 	case 8:		// SenseIntStatus
+-		rsp->st0 = fdc.st0;
+-		rsp->st1 = fdc.cyl;
++		/* P982 (D-101): 保留中のシーク終了割込みがあるときだけ ST0+PCN の2バイト、
++		 * 無いときは無効(0x80)の1バイト(XM6 vm/fdc.cpp:956-984,1672-1677,1710-1715 /
++		 * XEiJ FDC.java:1653-1721 と同じ構造) */
++		if ( fdc.seekint ) {
++			rsp->st0 = fdc.st0;
++			rsp->st1 = fdc.cyl;
++			fdc.seekint = 0;
++		} else {
++			rsp->st0 = 0x80;
++			fdc.rdnum = 1;
++		}
+ 		fdc.st0 = 0x80;
+ 		break;
+ 	case 10:	// ReadID
+@@ -343,6 +354,7 @@ static void FDC_ExecCmd(void)
+ 		} else {
+ 			fdc.st0 |= 0x48;
+ 		}
++		fdc.seekint = 1;
+ 		FDC_SetInt();
+ 		break;
+ 	}
+@@ -460,7 +472,6 @@ uint8_t FASTCALL FDC_Read(uint32_t adr)
+ 		ret  = 0x80;
+ 		ret |= ((fdc.rdnum)&&(!fdc.wexec))?0x40:0;
+ 		ret |= ((fdc.wrnum)||(fdc.rdnum))?0x10:0;
+-		ret &= ((fdc.rdnum==1)&&(fdc.cmd==8))?0xaf:0xff;
+ 		break;
+ 	case 0x03:		/* Read data */
+ 		if ( fdc.bufnum ) {
