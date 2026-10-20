@@ -30,6 +30,9 @@ cgrom*
 *.img
 *.mos
 *.MOS
+# P676: CD-ROM ISOイメージ(内蔵SCSI/MO/CD対応、ユーザー持込・絶対に含めない)
+*.iso
+*.cue
 
 # macOS
 .DS_Store
