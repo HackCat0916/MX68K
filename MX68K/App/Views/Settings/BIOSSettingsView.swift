@@ -136,21 +136,28 @@ struct BIOSSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                // P986: ROM30($FC0000-$FDFFFF)。iOSの設定UIは対象外のため macOS のみ表示する
-                // (iOSは config.json の値をそのまま受け渡すだけ)。
-                #if os(macOS)
-                HStack {
-                    Text("ROM30 (X68030 / 060turbo)")
-                    TextField("", text: $settingsViewModel.rom30Path)
-                    FilePickerButton(titleKey: "Browse...", destination: .biosDir) { path in
-                        settingsViewModel.rom30Path = path
-                    } onError: { _ in }
+                // P989: ROM30($FC0000-$FDFFFF)。macOS/iOS共通で表示する(P706のFilePickerButton.biosDir
+                // destinationが既にiOS対応済みのため、プラットフォーム分岐は不要)。
+                Group {
+                    HStack {
+                        Text("ROM30 (X68030 / 060turbo)")
+                        TextField("", text: $settingsViewModel.rom30Path)
+                        FilePickerButton(titleKey: "Browse...", destination: .biosDir) { path in
+                            settingsViewModel.rom30Path = path
+                            #if os(iOS)
+                            importError = nil
+                            #endif
+                        } onError: { message in
+                            #if os(iOS)
+                            importError = String(localized: "ROM30 — \(message)")
+                            #endif
+                        }
+                    }
+                    Text("ROM30: specify it together with its matching IPLROM30 (for the IPLROM 1.6 ROM30, use IPLROM30-1.6). Not used on 040turbo, including real-hardware ROMs (MX cannot tell ROM versions apart). Takes effect after a hard reset.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("ROM30: specify it together with its matching IPLROM30 (for the IPLROM 1.6 ROM30, use IPLROM30-1.6). Not used on 040turbo, including real-hardware ROMs (MX cannot tell ROM versions apart). Takes effect after a hard reset.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                #endif
 
                 // P274: SCSIINROM/SCSIEXROM は BIOS なので機種条件に関係なく常時表示。
                 HStack {
@@ -217,12 +224,10 @@ struct BIOSSettingsView: View {
                     Text(validationText(expected: iplrom30Size, path: settingsViewModel.iplrom30_060Path, name: "IPLROM30 (060turbo)"))
                         .foregroundColor(validationColor(expected: iplrom30Size, path: settingsViewModel.iplrom30_060Path))
                 }
-                #if os(macOS)
                 if !settingsViewModel.rom30Path.isEmpty {
                     Text(validationText(expected: rom30Size, path: settingsViewModel.rom30Path, name: "ROM30.DAT"))
                         .foregroundColor(validationColor(expected: rom30Size, path: settingsViewModel.rom30Path))
                 }
-                #endif
                 if !settingsViewModel.scsiInRomPath.isEmpty {
                     Text(validationText(expected: scsiRomSize, path: settingsViewModel.scsiInRomPath, name: "SCSIINROM.DAT"))
                         .foregroundColor(validationColor(expected: scsiRomSize, path: settingsViewModel.scsiInRomPath))
