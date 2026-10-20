@@ -9,6 +9,9 @@ void mx68k_shutdown(void);
 // ---- BIOS パス設定(init より前に呼ぶ) ----
 void mx68k_set_bios_path(const char* iplrom_path, const char* cgrom_path);
 void mx68k_set_bios_path_030(const char* iplrom30_path);
+// P988: 060turbo(CPUモデル3)専用の IPLROM30 パス。パス保存のみ、ハードリセットで読込み。
+// 空文字/NULLなら mx68k_set_bios_path_030 の共有パスを使う。X68030/040turboには影響しない。
+void mx68k_set_bios_path_030_060(const char* path);
 // P986: ROM30.DAT($FC0000-$FDFFFF、128KB)。パス保存のみ、ハードリセットで読込み。
 // X68030/060turbo(CPUモデル1/3)かつ環境変数 MX68K_CPU_CORE 未設定時のみ有効。040turboでは常に無効。
 // 有効時は SCSIINROM.DAT の $FC0000-$FC1FFF 上書きを抑止する。空文字/NULLでクリア。

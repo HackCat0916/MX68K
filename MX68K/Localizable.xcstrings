@@ -2481,6 +2481,36 @@
         }
       }
     },
+    "IPLROM30 (060turbo): used only when 060turbo is selected. If empty, the IPLROM30 above is shared. Takes effect after a hard reset.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IPLROM30 (060turbo): 060turbo選択時だけ使われます。未指定なら上のIPLROM30を共用します。ハードリセットで反映されます。"
+          }
+        }
+      }
+    },
+    "IPLROM30 (060turbo)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IPLROM30 (060turbo専用)"
+          }
+        }
+      }
+    },
+    "IPLROM30 (060turbo) — %@": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "IPLROM30 (060turbo専用) — %@"
+          }
+        }
+      }
+    },
     "Clock speed applies after pressing Apply — no hard reset needed.": {
       "localizations": {
         "ja": {

@@ -113,6 +113,29 @@ struct BIOSSettingsView: View {
                     }
                 }
 
+                // P988: 060turbo専用 IPLROM30。既存の IPLROM30 行と同じく macOS/iOS 共通で表示する。
+                // Section 直下の ViewBuilder 子要素数を増やしすぎないよう Group で1要素にまとめる。
+                Group {
+                    HStack {
+                        Text("IPLROM30 (060turbo)")
+                        TextField("", text: $settingsViewModel.iplrom30_060Path)
+                        FilePickerButton(titleKey: "Browse...", destination: .biosDir) { path in
+                            settingsViewModel.iplrom30_060Path = path
+                            #if os(iOS)
+                            importError = nil
+                            #endif
+                        } onError: { message in
+                            #if os(iOS)
+                            importError = String(localized: "IPLROM30 (060turbo) — \(message)")
+                            #endif
+                        }
+                    }
+                    Text("IPLROM30 (060turbo): used only when 060turbo is selected. If empty, the IPLROM30 above is shared. Takes effect after a hard reset.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 // P986: ROM30($FC0000-$FDFFFF)。iOSの設定UIは対象外のため macOS のみ表示する
                 // (iOSは config.json の値をそのまま受け渡すだけ)。
                 #if os(macOS)
@@ -189,6 +212,10 @@ struct BIOSSettingsView: View {
                 if !settingsViewModel.iplrom30Path.isEmpty {
                     Text(validationText(expected: iplrom30Size, path: settingsViewModel.iplrom30Path, name: "IPLROM30.DAT"))
                         .foregroundColor(validationColor(expected: iplrom30Size, path: settingsViewModel.iplrom30Path))
+                }
+                if !settingsViewModel.iplrom30_060Path.isEmpty {
+                    Text(validationText(expected: iplrom30Size, path: settingsViewModel.iplrom30_060Path, name: "IPLROM30 (060turbo)"))
+                        .foregroundColor(validationColor(expected: iplrom30Size, path: settingsViewModel.iplrom30_060Path))
                 }
                 #if os(macOS)
                 if !settingsViewModel.rom30Path.isEmpty {

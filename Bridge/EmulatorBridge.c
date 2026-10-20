@@ -671,7 +671,8 @@ static uint32_t himem_wired_bytes(void) {
 static int  s_ipl_loaded_model = -1;
 static char g_iplrom_path[4096];
 static char g_iplrom30_path[4096];   /* mx68k_set_bios_path_030 が保存し、reset_hard が読み込む */
-static char s_iplrom30_loaded_path[4096] = "";   /* 最後に読込み成功した IPLROM30 のパス(パス変更検出用) */
+static char g_iplrom30_060_path[4096];   /* P988: 060turbo専用 IPLROM30 パス(mx68k_set_bios_path_030_060 が保存、空なら g_iplrom30_path を共用) */
+static char s_iplrom30_loaded_path[4096] = "";   /* 最後に読込み成功した IPLROM30 のパス(パス変更検出用、機種非依存の単一追跡) */
 static bool load_ipl_file(const char *path);
 /* P986: ROM30($FC0000-$FDFFFF、128KB)。パスは mx68k_set_rom30_path が保存し、reset_hard が毎回読み直す。
  * s_rom30 は BE生順(ファイル順)。s_rom30_active は reset_hard でのみ更新する配線確定値で、
@@ -2171,16 +2172,20 @@ void mx68k_reset_hard(void) {
     } else {
         p872_latched = g_cpu_model;
         if (cpu_is_030_chassis(p872_latched)) {
-            /* 030系のままパスだけ変更された場合も再読込みする */
-            if (s_ipl_loaded_model != 1 || strcmp(s_iplrom30_loaded_path, g_iplrom30_path) != 0) {
-                bool ok = load_ipl_file(g_iplrom30_path);
+            /* P988: 060turbo(3)で専用パスが指定されていればそちらを優先する。IPL[] の実体は1つなので、
+             * 追跡は s_iplrom30_loaded_path 1個のまま、読み込むべきパスだけを機種別に決める。
+             * 030系のままパスだけ変更された場合や、機種往復で読み込むべきパスが変わった場合も再読込みする */
+            const char *use_path = (p872_latched == 3 && g_iplrom30_060_path[0])
+                                    ? g_iplrom30_060_path : g_iplrom30_path;
+            if (s_ipl_loaded_model != 1 || strcmp(s_iplrom30_loaded_path, use_path) != 0) {
+                bool ok = load_ipl_file(use_path);
                 if (ok) {
                     s_ipl_loaded_model = 1;
-                    strncpy(s_iplrom30_loaded_path, g_iplrom30_path, sizeof(s_iplrom30_loaded_path) - 1);
+                    strncpy(s_iplrom30_loaded_path, use_path, sizeof(s_iplrom30_loaded_path) - 1);
                     s_iplrom30_loaded_path[sizeof(s_iplrom30_loaded_path) - 1] = '\0';
                 }
                 snprintf(p872_ipl, sizeof(p872_ipl), "%.64s:%s",
-                         p872_basename(g_iplrom30_path), ok ? "OK" : "FAIL");
+                         p872_basename(use_path), ok ? "OK" : "FAIL");
             }
             if (s_ipl_loaded_model != 1) {
                 p872_latched = 0;
@@ -8155,6 +8160,17 @@ void mx68k_set_bios_path_030(const char* iplrom30_path) {
         g_iplrom30_path[sizeof(g_iplrom30_path) - 1] = '\0';
     } else {
         g_iplrom30_path[0] = '\0';
+    }
+}
+
+/* P988: 060turbo専用 IPLROM30 パスを保存するだけ。読込みは 060turbo 選択時の mx68k_reset_hard() で行う
+ * (空文字/NULLでクリアし、共有の IPLROM30 パスへ戻す) */
+void mx68k_set_bios_path_030_060(const char* path) {
+    if (path) {
+        strncpy(g_iplrom30_060_path, path, sizeof(g_iplrom30_060_path) - 1);
+        g_iplrom30_060_path[sizeof(g_iplrom30_060_path) - 1] = '\0';
+    } else {
+        g_iplrom30_060_path[0] = '\0';
     }
 }
 

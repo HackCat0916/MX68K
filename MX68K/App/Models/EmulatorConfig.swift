@@ -4,6 +4,7 @@ struct BIOSConfig: Codable {
     var iplromPath: String = ""
     var cgromPath: String = ""
     var iplrom30Path: String = ""
+    var iplrom30_060Path: String = "" // P988: 060turbo専用 IPLROM30(空なら iplrom30Path を共用)
     var rom30Path: String = ""        // P986: ROM30.DAT($FC0000-$FDFFFF、X68030/060turboのみ有効、自動検出しない)
     var scsiExtRomPath: String = ""   // P241 Stage A: 外付け SCSI(CZ-6BS1)IPL ROM
     var scsiInRomPath: String = ""    // P244: 内蔵 SCSI IPL ROM(Stage 2実装まで未機能)
@@ -19,6 +20,7 @@ struct BIOSConfig: Codable {
         iplromPath     = try c.decodeIfPresent(String.self, forKey: .iplromPath) ?? ""
         cgromPath      = try c.decodeIfPresent(String.self, forKey: .cgromPath) ?? ""
         iplrom30Path   = try c.decodeIfPresent(String.self, forKey: .iplrom30Path) ?? ""
+        iplrom30_060Path = try c.decodeIfPresent(String.self, forKey: .iplrom30_060Path) ?? ""
         rom30Path      = try c.decodeIfPresent(String.self, forKey: .rom30Path) ?? ""
         scsiExtRomPath = try c.decodeIfPresent(String.self, forKey: .scsiExtRomPath) ?? ""
         scsiInRomPath  = try c.decodeIfPresent(String.self, forKey: .scsiInRomPath) ?? ""

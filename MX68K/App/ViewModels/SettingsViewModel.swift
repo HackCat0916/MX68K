@@ -5,6 +5,7 @@ class SettingsViewModel: ObservableObject {
     @Published var iplromPath: String = ""
     @Published var cgromPath: String = ""
     @Published var iplrom30Path: String = ""
+    @Published var iplrom30_060Path: String = ""   // P988
     @Published var rom30Path: String = ""   // P986
     @Published var scsiExtRomPath: String = ""
     @Published var scsiInRomPath: String = ""
@@ -102,6 +103,7 @@ class SettingsViewModel: ObservableObject {
         config.bios.iplromPath = iplromPath
         config.bios.cgromPath = cgromPath
         config.bios.iplrom30Path = iplrom30Path
+        config.bios.iplrom30_060Path = iplrom30_060Path
         config.bios.rom30Path = rom30Path
         config.bios.scsiExtRomPath = scsiExtRomPath
         config.bios.scsiInRomPath = scsiInRomPath
@@ -162,6 +164,7 @@ class SettingsViewModel: ObservableObject {
         iplromPath = config.bios.iplromPath
         cgromPath = config.bios.cgromPath
         iplrom30Path = config.bios.iplrom30Path
+        iplrom30_060Path = config.bios.iplrom30_060Path
         rom30Path = config.bios.rom30Path
         scsiExtRomPath = config.bios.scsiExtRomPath
         scsiInRomPath = config.bios.scsiInRomPath
