@@ -4,6 +4,7 @@ struct BIOSConfig: Codable {
     var iplromPath: String = ""
     var cgromPath: String = ""
     var iplrom30Path: String = ""
+    var rom30Path: String = ""        // P986: ROM30.DAT($FC0000-$FDFFFF、X68030/060turboのみ有効、自動検出しない)
     var scsiExtRomPath: String = ""   // P241 Stage A: 外付け SCSI(CZ-6BS1)IPL ROM
     var scsiInRomPath: String = ""    // P244: 内蔵 SCSI IPL ROM(Stage 2実装まで未機能)
 
@@ -18,6 +19,7 @@ struct BIOSConfig: Codable {
         iplromPath     = try c.decodeIfPresent(String.self, forKey: .iplromPath) ?? ""
         cgromPath      = try c.decodeIfPresent(String.self, forKey: .cgromPath) ?? ""
         iplrom30Path   = try c.decodeIfPresent(String.self, forKey: .iplrom30Path) ?? ""
+        rom30Path      = try c.decodeIfPresent(String.self, forKey: .rom30Path) ?? ""
         scsiExtRomPath = try c.decodeIfPresent(String.self, forKey: .scsiExtRomPath) ?? ""
         scsiInRomPath  = try c.decodeIfPresent(String.self, forKey: .scsiInRomPath) ?? ""
     }
@@ -241,6 +243,10 @@ struct ExtensionsConfig: Codable {
     // P686 (D-70): 外付け FDD ユニット(ドライブ 2/3 = C:/D:)の装着。
     // 既定 false = 実機の外付け未接続状態(Human68k に C:/D: は出ない)。
     var externalFDDUnit: Bool = false
+    // P958: ふろっぴU君(USB接続FDD)の利用設定。既定 false。反映はハードリセット(⌘R)。
+    var floppyuEnabled: Bool = false
+    // P958: ふろっぴU君の割当てドライブ。0 = ドライブ0/1、2 = ドライブ2/3(外付けFDDユニットが必要)。
+    var floppyuAssignedBase: Int = 0
     // P490 (MIDI Stage 2): リセット送信 / 音源種別 / 送信遅延 / 入出力デバイス選択。
     var midiResetOnInit: Bool = true
     var midiResetType: Int = 0       // 0=LA, 1=GM, 2=GS, 3=XG
@@ -354,6 +360,9 @@ struct ExtensionsConfig: Codable {
         midiEnabled = try c.decodeIfPresent(Bool.self, forKey: .midiEnabled) ?? false
         // P686: 新キー。旧 config.json には存在しないため decodeIfPresent 必須。
         externalFDDUnit = try c.decodeIfPresent(Bool.self, forKey: .externalFDDUnit) ?? false
+        // P958: 新キー。旧 config.json には存在しないため decodeIfPresent 必須。
+        floppyuEnabled      = try c.decodeIfPresent(Bool.self, forKey: .floppyuEnabled) ?? false
+        floppyuAssignedBase = try c.decodeIfPresent(Int.self, forKey: .floppyuAssignedBase) ?? 0
         // P490: 新キー。既存 config.json(P488 以前)には存在しないため decodeIfPresent 必須。
         midiResetOnInit    = try c.decodeIfPresent(Bool.self, forKey: .midiResetOnInit) ?? true
         midiResetType      = try c.decodeIfPresent(Int.self, forKey: .midiResetType) ?? 0

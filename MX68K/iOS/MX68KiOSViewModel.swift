@@ -824,6 +824,8 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         }
         // P872: 空でも常に渡す(パスを消したら Bridge 側も空にする)
         config.bios.iplrom30Path.withCString { mx68k_set_bios_path_030($0) }
+        // P986: ROM30。受け渡しのみ(iOSの設定UIは無い)。空でも常に渡す
+        config.bios.rom30Path.withCString { mx68k_set_rom30_path($0) }
         // P712c — SCSI ROM の再送(macOS EmulatorViewModel.swift:476-490 の逐語移植)。
         // これを呼ばないと Bridge 側 s_scsi_in_rom_loaded が false のままとなり、
         // scsi_in_bridge_install() の gate_machine && gate_rom が成立せず

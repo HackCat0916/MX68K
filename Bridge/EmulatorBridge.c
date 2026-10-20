@@ -23,6 +23,9 @@
 #include "mt32_bridge.h"          /* P825: 内蔵 MT-32 の再構成(フレーム境界)とシャットダウン */
 #include "mx_cpu_iface.h"         /* P860: CPUコア抽象層(ステート/モニタのレジスタアクセス) */
 #include "mx_cpu_musashi.h"       /* P887: ハイメモリ(mx_cpu_musashi_set_highmem 等) */
+#include "fd_latency_experiment.h" /* P940: FDC/DMA 人為的遅延実験(既定 OFF、macOS 限定) */
+#include "floppyu_usb_transport.h" /* P945: ふろっぴU君 USB通信基盤(既定 OFF、macOS 限定) */
+#include "floppyu_fdc_passthrough_probe.h" /* P949: FDC テーブル差替え素通しプローブ(既定 OFF) */
 
 /* P509 (D-48): m68000_bridge.c 定義の診断プローブ。本サイクルの変更を
  * Bridge の 2 ファイルに閉じるため、宣言をヘッダではなくここに置く。
@@ -385,8 +388,6 @@ extern void p82xq_emit_verdict(void);              /* P82-X-Q プローブの ve
 extern void p82xr_emit_verdict(uint32_t frame);    /* P82-X-R プローブの verdict one-shot */
 extern void p82xr_tick(void);                      /* P82-X-R 毎フレームの CP-R-4/CP-R-5 ドライバ */
 extern void p82xt_tick(void);                      /* P82-X-T 毎フレームの CP-T-2/T-3/T-5/T-6 ドライバ */
-/* P976: DRAMリフレッシュ周期の設定(m68000_bridge.c、クロック num/den [MHz]) */
-extern void     m68000_set_refresh_clock(int32_t num, int32_t den);
 extern void p82xu_tick(void);                      /* P82-X-U 毎フレームの CP-U-1/U-3/U-5 ドライバ */
 extern void mx68k_diag_mfp_int(int32_t irq, const char* src); /* P47-D-DIAG-G ラッパ */
 extern uint32_t m68000_get_reg(int32_t regnum);   // P28-FIX
@@ -394,6 +395,8 @@ extern void m68000_set_reg(int32_t regnum, uint32_t val); // P28-FIX
 /* P872: CPUコアの実行時切替(m68000_bridge.c で定義、Bridge内部用) */
 extern void     m68000_set_cpu_backend_model(int model);   /* 0=c68k、1=Musashi EC030、2=Musashi 68040 */
 extern int      m68000_cpu_env_override(void);             /* MX68K_CPU_CORE 設定時に1 */
+/* P976: DRAMリフレッシュ周期の設定(m68000_bridge.c、クロック num/den [MHz]) */
+extern void     m68000_set_refresh_clock(int32_t num, int32_t den);
 extern uint32_t m68000_get_cpu_state_id(void);             /* ステートのCPU識別子 */
 extern int      m68000_cpu_backend_is_musashi(void);
 
@@ -668,7 +671,18 @@ static uint32_t himem_wired_bytes(void) {
 static int  s_ipl_loaded_model = -1;
 static char g_iplrom_path[4096];
 static char g_iplrom30_path[4096];   /* mx68k_set_bios_path_030 が保存し、reset_hard が読み込む */
+static char s_iplrom30_loaded_path[4096] = "";   /* 最後に読込み成功した IPLROM30 のパス(パス変更検出用) */
 static bool load_ipl_file(const char *path);
+/* P986: ROM30($FC0000-$FDFFFF、128KB)。パスは mx68k_set_rom30_path が保存し、reset_hard が毎回読み直す。
+ * s_rom30 は BE生順(ファイル順)。s_rom30_active は reset_hard でのみ更新する配線確定値で、
+ * m68000_bridge.c の trace_Memory_ReadB/W が参照する(s_scsi_in_rom と同じく外部リンケージ)。 */
+static char g_rom30_path[4096];
+uint8_t  s_rom30[0x20000];
+bool     s_rom30_active = false;
+uint64_t g_p986_rom30_rd = 0;
+uint64_t g_p986_scsiin_suppressed = 0;
+uint64_t g_p986_rom_rd_total = 0;
+static bool load_rom30_file(const char *path);
 /* P918 (D-85): load_ipl_file() が成功するたびに1増やす。機種切替や動作中の「適用」による
  * IPL[] の差し替えを、リセット時のベクタ領域 cold/warm 判定で検出するための世代番号。 */
 static unsigned s_ipl_load_gen = 0;
@@ -700,6 +714,11 @@ int         g_mercury_installed = 0;
  * wired 側は static にしない(g_scsi_ext_board_wired と同じ様式)。 */
 static bool g_ext_fdd_enabled = false;
 int         g_ext_fdd_wired   = 0;
+/* P958: ふろっぴU君の利用設定(設定値のみ)。配線確定値は振り分け器側
+ * (floppyu_fdc_passthrough_probe.c)が init / ハードリセットの install で持つ。
+ * g_floppyu_assigned_base は 0(ドライブ0/1)または 2(ドライブ2/3)。 */
+static bool    g_floppyu_enabled       = false;
+static int32_t g_floppyu_assigned_base = 0;
 /* P634 (D-43): Mercury の LR クロックを観測経路のみ自走化する機構
  * (実体・状態変数はすべて m68000_bridge.c 側 — 読出フックと同一翻訳単位に
  *  まとめ、状態定義を分散させない。feedback_instrumentation_layout_adjacency_corruption
@@ -1701,7 +1720,13 @@ int mx68k_init(void) {
     scsi_ext_bridge_install(g_scsi_ext_board_wired,
                             s_scsi_ext_rom_loaded ? 1 : 0,
                             g_wired_machine_type);
+    mx68k_fdlat_init(g_fd_fast_access);   /* P940: 配線行を無条件1行(既定 OFF) */
+    mx68k_floppyu_usb_init();             /* P945: 配線行を無条件1行(既定 OFF) */
     DMA_Init();
+    mx68k_fdlat_note_dma_init("init");    /* P940: dmainit_gen++(install とは独立) */
+    mx68k_fdlat_install("init");          /* P940: ON 時のみ DMA_SetReadyCB(0, ...) */
+    /* P958: 設定値から配線を確定(ON でテーブル0x4A/ReadyCB(0)を振り分け器へ、OFF は元値のまま) */
+    mx68k_floppyu_fdcpt_install("init", g_floppyu_enabled ? 1 : 0, g_floppyu_assigned_base, g_ext_fdd_wired);
     ADPCM_Init(g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
     ADPCM_SetVolume(15);   /* P210: 移植時にこの呼出しが漏れていた。ADPCM_VolumeShift が
                             * 初期値 65536(通常の 13-16 の ~4096 倍)のまま -> 飽和クリップ
@@ -1978,6 +2003,7 @@ void mx68k_shutdown(void) {
     }
     s_p53_shutdown_done = 1;
 #endif
+    mx68k_floppyu_usb_shutdown();   /* P945: ON 時のみ受信スレッド停止・通知解除・sum 行(冪等) */
 
 #if P51B_ENABLE
     /* P51-B Edit E(I-3 採用、Plan §5.5 / §9.6): バッファ解放とログファイルの
@@ -1997,6 +2023,11 @@ void mx68k_shutdown(void) {
     /* P483: Mercury 窓アクセスの分母(モニタ B のサマリ)をセッション終了時にも吐く。
      * 「pass が 0」だったときに blocked が非 0 か 0 かで解釈が一意に決まる。 */
     mx68k_p483_dump_mcry_counters("shutdown");
+    /* P986: ROM30の分母付きサマリ。rom30_rd=0 のとき rom_rd_total で「ROMに触れていない」と
+     * 「触れたがROM30を経由していない」を区別する。 */
+    debug_log("[P986-ROM30] summary active=%d rom30_rd=%llu scsiin_suppressed=%llu rom_rd_total=%llu tag=shutdown\n",
+              s_rom30_active ? 1 : 0, (unsigned long long)g_p986_rom30_rd,
+              (unsigned long long)g_p986_scsiin_suppressed, (unsigned long long)g_p986_rom_rd_total);
     /* P640: P637 (D-67 切り分けプローブ) の要約行をセッション終了時に必ず 1 行出す。
      * P637 の periodic トリガは「対象アドレスに一致したアクセス」の末尾からしか
      * 呼ばれないため、これが無いと stat_rd_b/w・err1・ch3_ccr_wr(総数)が
@@ -2140,9 +2171,14 @@ void mx68k_reset_hard(void) {
     } else {
         p872_latched = g_cpu_model;
         if (cpu_is_030_chassis(p872_latched)) {
-            if (s_ipl_loaded_model != 1) {
+            /* 030系のままパスだけ変更された場合も再読込みする */
+            if (s_ipl_loaded_model != 1 || strcmp(s_iplrom30_loaded_path, g_iplrom30_path) != 0) {
                 bool ok = load_ipl_file(g_iplrom30_path);
-                if (ok) s_ipl_loaded_model = 1;
+                if (ok) {
+                    s_ipl_loaded_model = 1;
+                    strncpy(s_iplrom30_loaded_path, g_iplrom30_path, sizeof(s_iplrom30_loaded_path) - 1);
+                    s_iplrom30_loaded_path[sizeof(s_iplrom30_loaded_path) - 1] = '\0';
+                }
                 snprintf(p872_ipl, sizeof(p872_ipl), "%.64s:%s",
                          p872_basename(g_iplrom30_path), ok ? "OK" : "FAIL");
             }
@@ -2163,6 +2199,38 @@ void mx68k_reset_hard(void) {
         m68000_set_cpu_backend_model(p872_latched);
     }
     g_wired_cpu_model = p872_latched;
+
+    /* P986: ROM30の配線確定。X68030/060turbo かつ環境変数overrideなしで rom30Path が指定され、
+     * 読込みに成功したときだけ有効にする。040turboは実機版・パッチ版を見分けられないため常に無効
+     * (パッチ版を040turboで使うと実機で衝突する、保守的な無効化)。IPLROM30読込み失敗で
+     * p872_latched が0に落ちた場合は not030 になる。ログは030筐体または rom30Path 指定時のみ出す。 */
+    {
+        const char *reason;
+        const char *result;
+        bool ok = false;
+        if (!g_rom30_path[0])                      { reason = "unset";    result = "unset"; }
+        else if (p872_override)                    { reason = "override"; result = "skip"; }
+        else if (!cpu_is_030_chassis(p872_latched)) { reason = "not030";   result = "skip"; }
+        else if (p872_latched == 2 /*040turbo*/)   { reason = "040turbo"; result = "skip"; }
+        else {
+            ok = load_rom30_file(g_rom30_path);
+            reason = ok ? "ok" : "loadfail";
+            result = ok ? "OK" : "FAIL";
+        }
+        s_rom30_active = ok;
+        if (cpu_is_030_chassis(p872_latched) || g_rom30_path[0]) {
+            char sig[24] = "none";
+            if (ok) {
+                for (int i = 0; i < 8; i++)
+                    snprintf(sig + i * 2, sizeof(sig) - (size_t)(i * 2), "%02X", s_rom30[0x24 + i]);
+            }
+            debug_log("[P986-ROM30] reset path=%.64s chassis=%d override=%d result=%s active=%d reason=%s "
+                      "sig=%s frame=%d\n",
+                      g_rom30_path[0] ? p872_basename(g_rom30_path) : "(unset)",
+                      p872_latched, p872_override, result, s_rom30_active ? 1 : 0, reason, sig,
+                      (int)g_mx68k_frame_num);
+        }
+    }
 
     /* P898: FPUの配線確定。P872と同じく環境変数override時はMusashiに触れない
      * (P868/P869の実験経路を保つ)。EC030型が実際に配線された場合のみ、
@@ -2671,6 +2739,10 @@ void mx68k_reset_hard(void) {
                             g_wired_machine_type);
     debug_log("[MX68K] Step 16: DMA_Init()\n");
     DMA_Init();
+    mx68k_fdlat_note_dma_init("hardreset");   /* P940: dmainit_gen++(install とは独立) */
+    mx68k_fdlat_install("hardreset");         /* P940: ON 時のみ再登録(DMA_Init が FDC_IsDataReady へ戻すため) */
+    /* P958: 設定値から再計算(ON で再登録、ON→OFF なら保存済み元値へ復元) */
+    mx68k_floppyu_fdcpt_install("hardreset", g_floppyu_enabled ? 1 : 0, g_floppyu_assigned_base, g_ext_fdd_wired);
     debug_log("[MX68K] Step 17: ADPCM_Init(%d)\n", g_audio_sample_rate_hz);
     ADPCM_Init(g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
     ADPCM_SetVolume((uint8_t)g_adpcm_volume);   /* P210: リセット経路の自己完結性(ADPCM_Init は
@@ -3713,6 +3785,7 @@ static int consume_pending_ops(void) {
     if (atomic_load(&g_pending_load)) {
         int rc = do_load_state(g_pending_state_path);
         debug_log("[P198] do_load_state('%s') rc=%d\n", g_pending_state_path, rc);
+        mx68k_fdlat_reset(rc);   /* P940: 復元後にゲートを開放側へ(rc の成否に関わらず。T-7 は [P198] 行の直後に reset 行を期待) */
         atomic_store(&g_state_op_rc, rc);
         atomic_store(&g_state_op_kind, 2);
         atomic_fetch_add(&g_state_op_seq, 1);
@@ -3866,6 +3939,30 @@ void mx68k_run_frame(void) {
                       buserr_vec2, aderr_vec2);
         }
         first = 0;
+    }
+    /* P964-CLOCKWORK: 環境変数 MX68K_DEBUG_P964_CLOCKWORK 設定時のみ、固定フレームで
+     * ゲストRAMの $0CB6/$0CB8/$0CBA(word)・$0D20/$0D24(long)を読み取り専用で記録する。
+     * getenv() は初回のみ評価してキャッシュ。未設定時はここで即座に素通りする。
+     * long 値は P34-DIAG と同じく上位/下位 word を個別に読んで合成する
+     * (MEM はワード単位バイトスワップ配置のため、uint32_t 直読みでは word 順が入れ替わる)。 */
+    {
+        static int s_p964_enabled = -1;
+        if (s_p964_enabled < 0) {
+            s_p964_enabled = (getenv("MX68K_DEBUG_P964_CLOCKWORK") != NULL) ? 1 : 0;
+        }
+        if (s_p964_enabled && MEM &&
+            (frame_num == 0 || frame_num == 60 || frame_num == 300 ||
+             frame_num == 600 || frame_num == 1200 || frame_num == 1800)) {
+            static int s_p964_fire_count = 0;
+            uint16_t cb6 = *(uint16_t*)&MEM[0x0cb6];
+            uint16_t cb8 = *(uint16_t*)&MEM[0x0cb8];
+            uint16_t cba = *(uint16_t*)&MEM[0x0cba];
+            uint32_t d20 = ((uint32_t)*(uint16_t*)&MEM[0x0d20] << 16) | *(uint16_t*)&MEM[0x0d22];
+            uint32_t d24 = ((uint32_t)*(uint16_t*)&MEM[0x0d24] << 16) | *(uint16_t*)&MEM[0x0d26];
+            s_p964_fire_count++;
+            debug_log("[P964-CLOCKWORK] frame=%d cb6=0x%04x cb8=0x%04x cba=0x%04x d20=0x%08x d24=0x%08x (n=%d/6)\n",
+                      frame_num, cb6, cb8, cba, d20, d24, s_p964_fire_count);
+        }
     }
 #if P56_ENABLE
     /* P56 スナップショットトリガ: frame == P56_SNAPSHOT_TRIGGER_FRAME(既定 60)で
@@ -4697,7 +4794,9 @@ void mx68k_run_frame(void) {
                     uint32_t p367_dst0_a = (DMA[0].OCR & 0x80) ? DMA[0].MAR : DMA[0].DAR;
                     uint16_t p367_mtc0_a = DMA[0].MTC;
 #endif
+                    mx68k_fdlat_observe_site();   /* P940: DMA[0] 読取りのみ(OFF 時即 return) */
                     DMA_Exec(0);   /* 本来の呼出し(計装付き) */
+                    mx68k_floppyu_fdcpt_observe_dma0_post();   /* P951: ON 時のみ観測(OFF 時即 return) */
 #if P367_ENABLE
                     {
                         uint32_t p367_dst1_a = (DMA[0].OCR & 0x80) ? DMA[0].MAR : DMA[0].DAR;
@@ -4727,7 +4826,9 @@ void mx68k_run_frame(void) {
                     uint32_t p367_dst0_b = (DMA[0].OCR & 0x80) ? DMA[0].MAR : DMA[0].DAR;
                     uint16_t p367_mtc0_b = DMA[0].MTC;
 #endif
+                    mx68k_fdlat_observe_site();   /* P940: DMA[0] 読取りのみ(OFF 時即 return) */
                     DMA_Exec(0);
+                    mx68k_floppyu_fdcpt_observe_dma0_post();   /* P951: ON 時のみ観測(OFF 時即 return) */
 #if P367_ENABLE
                     {
                         uint32_t p367_dst1_b = (DMA[0].OCR & 0x80) ? DMA[0].MAR : DMA[0].DAR;
@@ -4857,12 +4958,14 @@ void mx68k_run_frame(void) {
                     mx68k_draw_display_line();
                 }
             }
+            mx68k_fdlat_tick_line(g_p641_frame_clocks_10m, vl, vline_total_val);   /* P940: ゲスト時間加算(OFF 時即 return) */
             vl++;
             clk_line_start = clk_next;                                                    /* P657 */
             clk_next = (int32_t)(((int64_t)clk_total * (vl + 1)) / vline_total_val);  /* MPX 535 */
             hsync = 1;
         }
     } while (vl < (int)vline_total_val);        /* MPX: while(vline<VLINE_TOTAL) */
+    mx68k_floppyu_fdcpt_tick_frame();           /* P949: 300フレーム毎の集計行(OFF 時即 return) */
 
     /* P808: フレーム末の予算超過(frame_icount ≤ 0)を次フレームへ持ち越す(既定 ON、
      * オプトアウト時は持ち越さず旧挙動=px68k-libretro/MPX68K 同型)。
@@ -7604,6 +7707,26 @@ static bool load_ipl_file(const char *path) {
     return ok;
 }
 
+/* P986: ROM30.DAT(0x20000 バイト)を s_rom30 へ読み込む。load_ipl_file と同じく一時バッファへ読み、
+ * ちょうど 0x20000 バイト読めたときだけ書き換えるので、失敗しても既存の内容は壊れない。
+ * ROM30が有効になるのは Musashi 経路(map_fetch は no-op)だけなので、c68k 用の LE16 スワップ版は作らない。 */
+static bool load_rom30_file(const char *path) {
+    if (!path || !path[0]) return false;
+    FILE* fp = fopen(path, "rb");
+    if (!fp) {
+        debug_log("[MX68K] ROM30: %s -> fopen failed\n", path);
+        return false;
+    }
+    uint8_t* tmp = (uint8_t*)malloc(0x20000);
+    bool ok = false;
+    if (tmp) ok = (fread(tmp, 1, 0x20000, fp) == 0x20000);
+    fclose(fp);
+    if (ok) memcpy(s_rom30, tmp, 0x20000);
+    free(tmp);
+    debug_log("[MX68K] ROM30: %s -> %s\n", path, ok ? "OK" : "FAIL");
+    return ok;
+}
+
 /* P920 (D-86): CGROM の 6x12 フォント領域(ゲスト $FBF400-$FBFFFF = FONT[0xBF400..0xC0000))が
  * 全部0のとき、X68000用IPLROMファイルから補完する。IPLROM30 の _FNTADR は 6x12 で
  * $FBF400+code*12 を返すが、X68000から吸い出した CGROM.DAT ではこの領域が空のことがある
@@ -7808,6 +7931,13 @@ void mx68k_set_mercury_enabled(bool enabled) { g_mercury_enabled = enabled; }
 /* P686 (D-70): 外付け FDD ユニットの装着設定。設定値のみを更新し、配線は
  * init / ハードリセットのラッチで確定する(Mercury / MIDI と同型)。 */
 void mx68k_set_ext_fdd_enabled(bool enabled) { g_ext_fdd_enabled = enabled; }
+
+/* P958: ふろっぴU君の利用設定。設定値のみを更新し、配線は init / ハードリセットの
+ * mx68k_floppyu_fdcpt_install() で確定する(外付けFDDと同型)。 */
+void mx68k_set_floppyu_config(bool enabled, int32_t assigned_base) {
+    g_floppyu_enabled       = enabled;
+    g_floppyu_assigned_base = assigned_base;
+}
 
 /* P488: MIDI ボード(CZ-6BM1)の装着設定。設定値のみを更新し、配線は init /
  * ハードリセットのラッチで確定する(Mercury と同型)。 */
@@ -8028,6 +8158,16 @@ void mx68k_set_bios_path_030(const char* iplrom30_path) {
     }
 }
 
+/* P986: パスを保存するだけ。読込みと有効化は mx68k_reset_hard() で行う(空文字/NULLでクリア) */
+void mx68k_set_rom30_path(const char* path) {
+    if (path) {
+        strncpy(g_rom30_path, path, sizeof(g_rom30_path) - 1);
+        g_rom30_path[sizeof(g_rom30_path) - 1] = '\0';
+    } else {
+        g_rom30_path[0] = '\0';
+    }
+}
+
 void mx68k_set_sound_enabled(bool en) {
     (void)en;
 }
@@ -8073,6 +8213,7 @@ void mx68k_set_turbo_audio_rate(int ratio_q16) {
  * ★このファイル冒頭で FDD_TIMING_SHIM_NO_MACROS を定義しているため、以下の
  *   usleep() は素のシステムコールであって自分自身への再帰ではない。 */
 int mx68k_fdd_usleep_shim(useconds_t microseconds) {
+    mx68k_fdlat_arm((unsigned)microseconds, g_fd_fast_access);   /* P940: 遅延アーム(OFF 時即 return) */
     if (g_fd_fast_access) {
         /* XM6 fast mode 相当の 64µs 固定(fdc.cpp の 128 hus × 0.5µs)。
          * 参照実装 3 種(MPX68K / px68k 本家 / px68k-libretro)のように遅延を
@@ -11275,6 +11416,11 @@ static int p600_read_flat(const P600Region* r, uint32_t addr, uint8_t* out) {
          *   rm_ipl は 256KB マスク + スワップ)、ROM の中身をそのまま見せたい
          *   ビューアが採るべきは前者。後者を採ると $FC0000-$FDFFFF がゼロ埋めの
          *   上位半分を指してしまう。 */
+        /* P986: ROM30有効時の $FC0000-$FDFFFF はゲストの見え方に合わせて ROM30 を返す */
+        if (s_rom30_active && off < 0x20000u) {
+            *out = s_rom30[off];
+            return 1;
+        }
         if (!IPL) return 0;
         *out = IPL[off & 0x1FFFFu];
         return 1;

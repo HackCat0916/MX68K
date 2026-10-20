@@ -1471,6 +1471,96 @@
         }
       }
     },
+    "FloppyU: Detected": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君: 検出済み"
+          }
+        }
+      }
+    },
+    "FloppyU: Not detected": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君: 未検出"
+          }
+        }
+      }
+    },
+    "FloppyU: Detection error (code %d)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君: 検出エラー(コード %d)"
+          }
+        }
+      }
+    },
+    "Use FloppyU": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君を利用する"
+          }
+        }
+      }
+    },
+    "FloppyU drives": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君の割当てドライブ"
+          }
+        }
+      }
+    },
+    "Drives 0 and 1": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ドライブ0と1"
+          }
+        }
+      }
+    },
+    "Drives 2 and 3": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ドライブ2と3"
+          }
+        }
+      }
+    },
+    "⚠ Drives 2 and 3 require the External FDD Unit above. FloppyU stays inactive until it is turned on.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ ドライブ2と3には上の外付けFDDユニットが必要です。オンにするまでふろっぴU君は無効のままです。"
+          }
+        }
+      }
+    },
+    "Shows whether a FloppyU unit is connected by USB. While FloppyU is in use, the assigned drives are handed to it instead of the disk images mounted in the emulator. USB communication is not implemented yet, so those drives currently always report that no disk is inserted.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君がUSBで接続されているかを表示します。ふろっぴU君の利用中は、割当てドライブがエミュレータでマウントしたディスクイメージの代わりにふろっぴU君へ渡されます。USB通信は未実装のため、現在そのドライブは常に「ディスクが入っていません」となります。"
+          }
+        }
+      }
+    },
     "FPU Enabled": {
       "localizations": {
         "ja": {
@@ -2377,6 +2467,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "⚠ 「適用」を押した後、ハードリセット(⌘R)で反映されます。"
+          }
+        }
+      }
+    },
+    "ROM30: specify it together with its matching IPLROM30 (for the IPLROM 1.6 ROM30, use IPLROM30-1.6). Not used on 040turbo, including real-hardware ROMs (MX cannot tell ROM versions apart). Takes effect after a hard reset.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ROM30: 対になるIPLROM30(IPLROM 1.6のROM30なら、IPLROM30-1.6)と一緒に指定してください。040turboでは、実機版を含め使用されません(MXはROMの版を見分けられないため)。ハードリセットで反映されます。"
           }
         }
       }

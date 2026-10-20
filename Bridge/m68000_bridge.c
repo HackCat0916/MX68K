@@ -24094,6 +24094,14 @@ extern uint8_t s_scsi_in_rom[];            /* EmulatorBridge.c(P247), LE16スワ
 extern bool    s_scsi_in_rom_loaded;       /* 同(P247) */
 int            mx68k_get_machine_type(void);/* EmulatorBridge.c(P253) の getter */
 
+/* P986: ROM30($FC0000-$FDFFFF、128KB、BE生順)。s_rom30_active は reset_hard でのみ更新される
+ * 配線確定値(X68030/060turbo かつ rom30Path 指定かつ読込み成功、040turbo・環境変数override時は常に0)。 */
+extern uint8_t  s_rom30[];
+extern bool     s_rom30_active;
+extern uint64_t g_p986_rom30_rd;            /* ROM30から返した回数 */
+extern uint64_t g_p986_scsiin_suppressed;   /* P254のSCSIINROM上書きを抑止した回数 */
+extern uint64_t g_p986_rom_rd_total;        /* $FC0000-$FFFFFF 分岐に入った総回数(分母) */
+
 #if P602_ENABLE
 /* ====================================================================
  *  P602 (D-57): 同人版ソーサリアンが MC68040 搭載と誤検出される件の
@@ -24723,13 +24731,22 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
                           (unsigned)(val & 0xFFu));
             }
         }
+        /* P986: ROM30有効時は $FC0000-$FDFFFF を ROM30(BE生順)で置き換える。
+         * P254の判定より前に評価し、ROM30有効時はP254を抑止するので順序の競合は無い。 */
+        g_p986_rom_rd_total++;
+        if (s_rom30_active && addr <= 0xfdffff) {
+            val = s_rom30[addr & 0x1ffff];
+            g_p986_rom30_rd++;
+        }
         /* P254: 二重ゲート成立時のみ $FC0000-$FC1FFF を SCSI IPL ROM のデータへ差し替え。
            s_scsi_in_rom は LE16スワップ済 → (adr^1) で真のBEバイトを復元(scsi.c:717 準拠)。
-           ゲート不成立 or $fc2000 以上は上の IPL[] 値のまま(既存挙動不変)。 */
+           ゲート不成立 or $fc2000 以上は上の IPL[] 値のまま(既存挙動不変)。
+           P986: ROM30有効時はROM30自身のSCSI IPLを優先し、この上書きを抑止する。 */
         if (addr <= 0xfc1fff
             && mx68k_get_machine_type() == 4
             && s_scsi_in_rom_loaded) {
-            val = s_scsi_in_rom[(addr & 0x1fff) ^ 1];
+            if (s_rom30_active) g_p986_scsiin_suppressed++;
+            else val = s_scsi_in_rom[(addr & 0x1fff) ^ 1];
         }
 #if P82XC_ENABLE
         p82xc_branch = 1u;   /* ROM/IPL 分岐 */
@@ -25637,15 +25654,27 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         uint32_t offset = addr & 0x1ffff;
         /* P17-FIX-C: IPL[]はBE格納。rm16_mainのIPL部分と同じBE明示読みで整合 */
         val = ((uint16_t)IPL[offset & 0x1fffe] << 8) | IPL[(offset & 0x1fffe) + 1];
+        /* P986: ROM30有効時は $FC0000-$FDFFFF を ROM30 のワード(BE明示組み立て)で置き換える。 */
+        g_p986_rom_rd_total++;
+        if (s_rom30_active && addr <= 0xfdfffe) {
+            uint32_t r30 = offset & 0x1fffe;
+            val = (uint16_t)(((uint16_t)s_rom30[r30] << 8) | (uint16_t)s_rom30[r30 + 1]);
+            g_p986_rom30_rd++;
+        }
         /* P254: 二重ゲート成立時のみ SCSI IPL ROM のワードへ差し替え。
            s_scsi_in_rom は LE16スワップ済 → s_ipl_fetch と同じ手動BE再構成で読む
-           (m68000_bridge.c:8675-8676 等の house style。ポインタキャストは使わない)。 */
+           (m68000_bridge.c:8675-8676 等の house style。ポインタキャストは使わない)。
+           P986: ROM30有効時はこの上書きを抑止する。 */
         if (addr <= 0xfc1fff
             && mx68k_get_machine_type() == 4
             && s_scsi_in_rom_loaded) {
-            uint32_t scsi_off = addr & 0x1ffe;
-            val = (uint16_t)(((uint16_t)s_scsi_in_rom[scsi_off ^ 1] << 8)
-                             | (uint16_t)s_scsi_in_rom[(scsi_off + 1) ^ 1]);
+            if (s_rom30_active) {
+                g_p986_scsiin_suppressed++;
+            } else {
+                uint32_t scsi_off = addr & 0x1ffe;
+                val = (uint16_t)(((uint16_t)s_scsi_in_rom[scsi_off ^ 1] << 8)
+                                 | (uint16_t)s_scsi_in_rom[(scsi_off + 1) ^ 1]);
+            }
         }
     } else if (addr >= 0xf00000 && addr <= 0xfbfffe) {
         uint32_t offset = addr & 0xfffff;
@@ -30407,6 +30436,7 @@ extern uint8_t s_scsi_in_rom[];            /* EmulatorBridge.c(P247), LE16スワ
 extern bool    s_scsi_in_rom_loaded;       /* 同(P247, 外部リンケージ) */
 int            mx68k_get_machine_type(void);/* EmulatorBridge.c(P253) getter */
 
+/* P986: ROM30は対象外のまま。ROM30有効時はMusashi(map_fetchはno-op)が動いておりc68kは使われないため。 */
 static void scsi_in_fetch_overlay_apply(void)
 {
     if (mx68k_get_machine_type() == 4 /*SCSI*/ && s_scsi_in_rom_loaded) {

@@ -5,6 +5,7 @@ class SettingsViewModel: ObservableObject {
     @Published var iplromPath: String = ""
     @Published var cgromPath: String = ""
     @Published var iplrom30Path: String = ""
+    @Published var rom30Path: String = ""   // P986
     @Published var scsiExtRomPath: String = ""
     @Published var scsiInRomPath: String = ""
     @Published var scsiMode: String = "none"   // P274: SCSI 利用方法("none"/"internal"/"external")
@@ -32,6 +33,8 @@ class SettingsViewModel: ObservableObject {
     @Published var mercuryUnit: Bool = false
     @Published var midiEnabled: Bool = false   // P488: MIDI ボード(CZ-6BM1)
     @Published var externalFDDUnit: Bool = false   // P686 (D-70): 外付け FDD ユニット
+    @Published var floppyuEnabled: Bool = false    // P958: ふろっぴU君を利用する
+    @Published var floppyuAssignedBase: Int = 0    // P958: 0 = ドライブ0/1、2 = ドライブ2/3
     // P490 (MIDI Stage 2)
     @Published var midiResetOnInit: Bool = true
     @Published var midiResetType: Int = 0      // 0=LA, 1=GM, 2=GS, 3=XG
@@ -99,6 +102,7 @@ class SettingsViewModel: ObservableObject {
         config.bios.iplromPath = iplromPath
         config.bios.cgromPath = cgromPath
         config.bios.iplrom30Path = iplrom30Path
+        config.bios.rom30Path = rom30Path
         config.bios.scsiExtRomPath = scsiExtRomPath
         config.bios.scsiInRomPath = scsiInRomPath
         config.extensions.scsiMode = scsiMode
@@ -129,6 +133,8 @@ class SettingsViewModel: ObservableObject {
         config.extensions.mercuryUnit = mercuryUnit
         config.extensions.midiEnabled = midiEnabled
         config.extensions.externalFDDUnit = externalFDDUnit   // P686
+        config.extensions.floppyuEnabled = floppyuEnabled               // P958
+        config.extensions.floppyuAssignedBase = floppyuAssignedBase     // P958
         config.extensions.midiResetOnInit = midiResetOnInit
         config.extensions.midiResetType = midiResetType
         config.extensions.midiDelayMs = midiDelayMs
@@ -156,6 +162,7 @@ class SettingsViewModel: ObservableObject {
         iplromPath = config.bios.iplromPath
         cgromPath = config.bios.cgromPath
         iplrom30Path = config.bios.iplrom30Path
+        rom30Path = config.bios.rom30Path
         scsiExtRomPath = config.bios.scsiExtRomPath
         scsiInRomPath = config.bios.scsiInRomPath
         scsiMode = config.extensions.scsiMode
@@ -186,6 +193,8 @@ class SettingsViewModel: ObservableObject {
         mercuryUnit = config.extensions.mercuryUnit
         midiEnabled = config.extensions.midiEnabled
         externalFDDUnit = config.extensions.externalFDDUnit   // P686
+        floppyuEnabled = config.extensions.floppyuEnabled               // P958
+        floppyuAssignedBase = config.extensions.floppyuAssignedBase     // P958
         midiResetOnInit = config.extensions.midiResetOnInit
         midiResetType = config.extensions.midiResetType
         midiDelayMs = config.extensions.midiDelayMs

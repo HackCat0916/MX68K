@@ -573,6 +573,10 @@ class EmulatorViewModel: ObservableObject {
         config.bios.iplrom30Path.withCString { path in
             mx68k_set_bios_path_030(path)
         }
+        // P986: ROM30。空でも常に渡す(パスを消したら Bridge 側も空にする)
+        config.bios.rom30Path.withCString { path in
+            mx68k_set_rom30_path(path)
+        }
         // P241 Stage A: 外付け SCSI(CZ-6BS1)IPL ROM。任意 — 空なら外付け SCSI 起動のみ無効。
         if !config.bios.scsiExtRomPath.isEmpty {
             config.bios.scsiExtRomPath.withCString { path in
@@ -690,6 +694,9 @@ class EmulatorViewModel: ObservableObject {
         // P686 (D-70): 外付け FDD ユニット。設定値のみ push し、配線は
         // init / ハードリセットで確定する(Mercury と同型)。
         mx68k_set_ext_fdd_enabled(config.extensions.externalFDDUnit)
+        // P958: ふろっぴU君の利用設定。設定値のみ push し、配線は init / ハードリセットで確定する。
+        mx68k_set_floppyu_config(config.extensions.floppyuEnabled,
+                                 Int32(config.extensions.floppyuAssignedBase))
         // P488: MIDI ボード(CZ-6BM1 / $EAE000)の装着設定。Mercury と同じく
         // 値は Bridge 側で「設定値」として保持され、配線はハードリセット（⌘R）で確定する。
         mx68k_set_midi_enabled(config.extensions.midiEnabled)

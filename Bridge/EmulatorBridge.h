@@ -9,6 +9,10 @@ void mx68k_shutdown(void);
 // ---- BIOS パス設定(init より前に呼ぶ) ----
 void mx68k_set_bios_path(const char* iplrom_path, const char* cgrom_path);
 void mx68k_set_bios_path_030(const char* iplrom30_path);
+// P986: ROM30.DAT($FC0000-$FDFFFF、128KB)。パス保存のみ、ハードリセットで読込み。
+// X68030/060turbo(CPUモデル1/3)かつ環境変数 MX68K_CPU_CORE 未設定時のみ有効。040turboでは常に無効。
+// 有効時は SCSIINROM.DAT の $FC0000-$FC1FFF 上書きを抑止する。空文字/NULLでクリア。
+void mx68k_set_rom30_path(const char* path);
 
 // ---- CPUモデル(P872) ----
 // 0=MC68000(c68k)、1=MC68EC030(X68030、Musashi)、2=MC68040(X68030+040turbo、Musashi、P910)、
@@ -51,6 +55,14 @@ void mx68k_set_mercury_enabled(bool enabled);
 // ドライブ2/3へ EC=1(未接続)を返し、Human68k に C:/D: は現れない
 // (テクニカルデータブック 印刷 p.157 5-5(3))。
 void mx68k_set_ext_fdd_enabled(bool enabled);
+// P958: ふろっぴU君の利用設定。既定 OFF。設定値のみ保持し、配線は init / ハードリセットで確定する。
+// assigned_base は 0(ドライブ0/1)または 2(ドライブ2/3)。2 は外付けFDDユニット配線時のみ有効
+// (未配線なら振り分け器は無効のまま)。USB通信は未実装のため、割当てドライブは常に「FDなし」を返す。
+void mx68k_set_floppyu_config(bool enabled, int32_t assigned_base);
+// P957: ふろっぴU君 USB存在検出(読取り専用、ポートを開かない)。実装は Bridge/floppyu_usb_transport.c。
+// >=0 = VID/PID一致のUSBデバイス数 / -1 = IOKit照会失敗 / -2 = 非対応(iOS)。
+// 環境変数・通信状態とは無関係に動作する。設定画面の1秒周期表示用で、エミュレーションには影響しない。
+int32_t mx68k_floppyu_usb_device_present(void);
 // P488: MIDIボード(CZ-6BM1)の装着設定。既定 false。
 // Mercury Unitと割込みレベル4を共有するため、両方の同時装着はCore側で未サポート
 // (IRQH_CallBack[8]はレベルあたり1コールバックのみ、Core改変禁止のため多重化しない)。
