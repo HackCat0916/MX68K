@@ -155,6 +155,40 @@ Runtime exception-cycle table changes (P984, D-100) — again the files above st
     (vec64 equals vec25). auto_uniform=0 means upstream vectors 24-31 are no longer uniform and
     vector 25 may not represent the autovector cost any more.
 
+Runtime DBcc cycle change (P986, D-104) — again the files above stay unmodified:
+  - Where: Bridge/mx_cpu_musashi.c p986_apply_dbcc_fix(), called from the same wrapper
+    mx_musashi_set_cpu_type() right after p984_apply_irq_cycle_fix(). m68k_set_cpu_type() resets
+    CYC_DBCC_F_NOEXP to 0, so switching to 68000/EC030 restores the upstream value automatically.
+  - What: on CPU_TYPE_040 only, CYC_DBCC_F_NOEXP (the extra cost added when DBcc branches; used only
+    by the 15 DBcc handlers in m68kops.c) is set to target - base, where base is
+    CYC_INSTRUCTION[0x51C8] (6 in the 040 column) and target = 4 (040turbo) / 1 (060turbo, s_is_060).
+    The value is negative, written the same way as upstream's CYC_BCC_NOTAKE_B = -2. The two
+    fall-through paths (condition true / counter expired) are unchanged (030-equivalent).
+  - Why: guest clock-measurement code (CH30, XEiJ IPLROM 1.6) divides a dbra-loop count by a
+    per-MPU factor (040=4, 060=1); with Musashi's 6 the displayed clock was 1/1.5 (040) and 1/6 (060)
+    of the setting. Source of 4/1: XEiJ misc/rom16pat.s table; 060 also XEiJ MC68060.java.
+    Not verified against MC68040UM/MC68060UM.
+  - Bridge::mx_cpu_musashi_set_model() now assigns s_is_060 before calling the wrapper.
+  - Re-vendor check: startup line "[P986-DBCCFIX] ... base=6 base_uniform=1" on 040/060turbo.
+    base_uniform=0 or base < target means the upstream DBcc cycle table changed; the field is then
+    left untouched (applied=0).
+
+Runtime jump-table changes (P991, D-106, PFLUSH on 040turbo/060turbo) — again the files above stay unmodified:
+  - Where: end of Bridge/mx_cpu_musashi.c mx_musashi_fix_040_dispatch() (once at init,
+    regardless of CPU type).
+  - What: PFLUSHN/PFLUSH (An) $F500-$F50F, PFLUSHAN $F510 (line-1111 after P899) and PFLUSHA $F518
+    (upstream m68k_op_pflush_32, which raises line-1111 when HAS_PMMU=0) — 18 entries — are replaced
+    by mx_pflush_040(). On 040-plus types: no-op in supervisor mode, privilege violation in user mode.
+    Other types call the saved original handler (68000 = line-1111, EC030 = upstream stub).
+    $F511-$F517/$F519-$F51F are left as line-1111. The cycle column is unchanged (4).
+  - Why: MX's 040turbo/060turbo run with HAS_PMMU=0 (no MMU, no ATC), so a flush has nothing to do.
+    MC68EC060 treats PFLUSH as a NOP (MC68060UM §1.1.2.2); XEiJ MC68060.java irpPflush does not
+    raise line-1111 either. Before this change XEiJ IPLROM 1.6's mpu_check took line-1111 on
+    pflusha and classified the 060turbo as "unknown".
+  - Re-vendor check: startup line
+    "[P991-PFLUSHFIX] installed=18 pre_fline=17 pre_pflush32=1 skipped=0 f518_ok=1".
+    Any other count means the upstream decode of $F5xx changed.
+
 Notes for 68030 support (to do in that cycle):
   - P869 implemented the minimal EC030 + no-FPU stubs above; P897 replaced the FPU stub with the
     MAME-derived port (environment-variable gated). Not implemented: PMMU no-op for the remaining EA

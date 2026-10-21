@@ -400,19 +400,26 @@ static void mx_musashi_fix_movep_dispatch(void)
     debug_log("[P913-INIT] movep=%u mismatch=%u (expect 256/0)\n", n_hit, n_mismatch);
 }
 
-/* P990: PFLUSHA($F518)の到達を数える診断プローブ。必ず元のハンドラへ渡す(挙動は不変) */
-static void (*s_p990_pflush_orig)(void);
+/* P990: PFLUSH系の到達カウンタ(全形式・全機種の分母)。P991で診断プローブを mx_pflush_040 へ置き換えた後も、
+ * [P916-060EXEC] のログ互換のためこの名前のまま使う */
 static unsigned int s_p990_pflush_n;
 static unsigned int s_p990_pflush_first_ppc, s_p990_pflush_first_ir;
 
-static void mx_p990_pflush_probe(void)
+/* P991(D-106): PFLUSH系($F500-$F50F PFLUSHN/PFLUSH (An)、$F510 PFLUSHAN、$F518 PFLUSHA)。
+ * MXの040turbo/060turboはMMUもATCも持たない(HAS_PMMU=0)ので、スーパーバイザでは何もしない
+ * (MC68EC060ではPFLUSHは仮想NOP: M68060UM §1.1.2.2。XEiJ MC68060.java irpPflush もユーザーモードは特権違反)。
+ * 040以外の型は差し替え前のハンドラへ渡す(68000=line-1111、EC030=上流のスタブ。従来どおり) */
+static void (*s_p991_pflush_orig[0x20])(void);   /* 添字 = 命令語 - 0xF500 */
+static unsigned int s_p991_pflush_nop, s_p991_pflush_user, s_p991_pflush_other;
+
+static void mx_pflush_040(void)
 {
-    s_p990_pflush_n++;
-    if (s_p990_pflush_n == 1) {
-        s_p990_pflush_first_ppc = REG_PPC;
-        s_p990_pflush_first_ir  = REG_IR;
-    }
-    s_p990_pflush_orig();
+    unsigned int op = REG_IR & 0xffffu;
+    if (s_p990_pflush_n++ == 0) { s_p990_pflush_first_ppc = REG_PPC; s_p990_pflush_first_ir = op; }
+    if (!CPU_TYPE_IS_040_PLUS(CPU_TYPE)) { s_p991_pflush_orig[op - 0xF500u](); return; }
+    if (!FLAG_S) { s_p991_pflush_user++; m68ki_exception_privilege_violation(); return; }
+    s_p991_pflush_nop++;
+    if (op != 0xF518u) s_p991_pflush_other++;
 }
 
 /* P910: MOVEC(CAAR)とCINV/CPUSH($F400-$F4FF、scope≠0)の表の項目を差し替える。
@@ -450,9 +457,25 @@ static void mx_musashi_fix_040_dispatch(void)
     s_movec_rc_orig = jt[0x4E7B]; jt[0x4E7B] = mx_movec_rc; n_movec++;
     debug_log("[P910-040FIX] cinv=%u skipped=%u movec=%u (expect 192/0/2)\n", n_cinv, n_skip, n_movec);
     mx_musashi_fix_movep_dispatch();   /* P913 */
-    /* P990: 機種未確定の時点で呼ばれるため無条件に差し替える(ログ側で060turboに絞る) */
-    if (jt[0xF518] != NULL) { s_p990_pflush_orig = jt[0xF518]; jt[0xF518] = mx_p990_pflush_probe; }
-    else debug_log("[P990-PFLUSH] WARN jt[F518]=NULL, probe not installed\n");
+    /* P991: 機種未確定の時点で呼ばれるため無条件に差し替える(機種の判定は mx_pflush_040 の中で行う)。
+     * $F500-$F510 はF-line(P899後)、$F518 は上流の専用ハンドラ(m68k_op_pflush_32)であることを確かめてから差し替える。
+     * サイクル表(m68ki_cycles[4])は既に4なので変えない */
+    {
+        unsigned int n_inst = 0, n_pre_fline = 0, n_pre_pflush32 = 0, n_pskip = 0, f518_ok = 0;
+        for (op = 0xF500; op <= 0xF518; op++) {
+            if (op > 0xF510 && op < 0xF518) continue;   /* $F511-$F517 は無効形式なのでF-lineのまま */
+            if (op != 0xF518 ? jt[op] == fline : (jt[op] != fline && jt[op] != NULL)) {
+                if (op != 0xF518) n_pre_fline++; else { n_pre_pflush32++; f518_ok = 1; }
+                s_p991_pflush_orig[op - 0xF500u] = jt[op];
+                jt[op] = mx_pflush_040;
+                n_inst++;
+            } else {
+                n_pskip++;
+            }
+        }
+        debug_log("[P991-PFLUSHFIX] installed=%u pre_fline=%u pre_pflush32=%u skipped=%u f518_ok=%u (expect 18/17/1/0/1)\n",
+                  n_inst, n_pre_fline, n_pre_pflush32, n_pskip, f518_ok);
+    }
 }
 
 /* P917: 起動方法フラグ($0CBF)の確定命令 Seq (A0)(IPLROM30 $FF012E の $57D0)を観測する診断プローブ。
@@ -680,9 +703,12 @@ void mx_cpu_musashi_p910_tick(int frame, mx_cpu_musashi_logf logf)
 {
     if (logf == NULL || CPU_TYPE != CPU_TYPE_040) return;
     logf("[P910-040EXEC] f=%d movec_040=%u caar_illegal=%u first_caar_ppc=%08X cinv_exec=%u cinv_user=%u "
-         "first_cinv_ppc=%08X first_cinv_ir=%04X\n",
+         "first_cinv_ppc=%08X first_cinv_ir=%04X "
+         "pflush_n=%u pflush_nop=%u pflush_user=%u pflush_other=%u pflush_first_ppc=%08X pflush_first_ir=%04X cbc_w=%04X\n",
          frame, s_p910_movec_040, s_p910_caar_illegal, s_p910_first_caar_ppc, s_p910_cinv_exec, s_p910_cinv_user,
-         s_p910_first_cinv_ppc, s_p910_first_cinv_ir);
+         s_p910_first_cinv_ppc, s_p910_first_cinv_ir,
+         s_p990_pflush_n, s_p991_pflush_nop, s_p991_pflush_user, s_p991_pflush_other,   /* P991 */
+         s_p990_pflush_first_ppc, s_p990_pflush_first_ir, bus_read16(0x0CBCu));
     /* P916: 060turbo のときだけ。pcr= は ID|Rev|書けるビット の合成値、cbc_w はゲスト $0CBC/$0CBD の生の値
      * (フレーム間のCPU停止中に呼ばれる。RAMを読むだけで副作用は無い) */
     if (s_is_060)
@@ -737,11 +763,36 @@ static void p984_apply_irq_cycle_fix(void)
               CYC_EXCEPTION[64], CYC_EXCEPTION[255], orig64, replaced, (unsigned)(idx < 0), auto_uniform);
 }
 
-/* P984: m68k_set_cpu_type は CYC_EXCEPTION を上流の表へ戻すので、必ずこのラッパー経由で呼ぶ */
+/* P986(D-104): DBcc が分岐したときのサイクル数を 040turbo=4・060turbo=1 にする。
+ * Musashi の040列は分岐時6(=030と同じ)なので、CH30 等のMPU別補正(040=4・060=1)で表示が1.5倍/6倍ずれる。
+ * 上流の CYC_DBCC_F_NOEXP(分岐時の追加分、DBcc 15関数だけが使う)を target - 基本値 にする(負値。上流の CYC_BCC_NOTAKE_B=-2 と同じ書き方)。
+ * 値の出典: XEiJ misc/rom16pat.s の補正表、060は MC68060.java も同じ。分岐しない2経路は変えない(030相当のまま)。
+ * base_uniform=0 や base<target なら書き換えずに行だけ出す(上流のサイクル表が変わったときに黙って変な値を入れない) */
+static void p986_apply_dbcc_fix(void)
+{
+    unsigned int base = CYC_INSTRUCTION[0x51C8];   /* dbf d0 */
+    unsigned int uniform = 1, applied = 0;
+    int target = -1;
+    for (unsigned int cc = 0; cc < 16; cc++)
+        for (unsigned int r = 0; r < 8; r++)
+            if (CYC_INSTRUCTION[0x50C8u | (cc << 8) | r] != base) uniform = 0;
+    if (CPU_TYPE == CPU_TYPE_040) target = s_is_060 ? 1 : 4;
+    if (target >= 0 && uniform && (int)base >= target) {
+        CYC_DBCC_F_NOEXP = (uint)(target - (int)base);
+        applied = 1;
+    }
+    debug_log("[P986-DBCCFIX] type=%u is060=%d base=%u base_uniform=%u noexp=%d exp=%u taken=%d target=%d applied=%u\n",
+              (unsigned)CPU_TYPE, s_is_060, base, uniform, (int)CYC_DBCC_F_NOEXP, (unsigned)CYC_DBCC_F_EXP,
+              (int)base + (int)CYC_DBCC_F_NOEXP, target, applied);
+}
+
+/* P984: m68k_set_cpu_type は CYC_EXCEPTION を上流の表へ戻すので、必ずこのラッパー経由で呼ぶ。
+ * P986: 同じく CYC_DBCC_F_NOEXP も上流値(0)へ戻るので、DBcc の上書きもここで毎回やり直す */
 static void mx_musashi_set_cpu_type(unsigned int t)
 {
     m68k_set_cpu_type(t);
     p984_apply_irq_cycle_fix();
+    p986_apply_dbcc_fix();
 }
 
 void mx_cpu_musashi_p984_tick(int frame, mx_cpu_musashi_logf logf)
@@ -1095,6 +1146,8 @@ static void p869_stub_event(int kind, unsigned int ppc, unsigned int ir, unsigne
  * model=0 は 68000型へ戻す(m68k_set_cpu_type が CPU_ADDRESS_MASK=0x00FFFFFF・HAS_PMMU=0 を再設定する)。 */
 void mx_cpu_musashi_set_model(int model)
 {
+    /* P916。P986: ラッパー内の p986_apply_dbcc_fix が今回の機種の値を見るよう、型の設定より前に代入する */
+    s_is_060 = (model == 3);
     if (model == 1) {
         mx_musashi_set_cpu_type(M68K_CPU_TYPE_68EC030);
         CPU_ADDRESS_MASK = 0x00ffffffu;
@@ -1107,7 +1160,6 @@ void mx_cpu_musashi_set_model(int model)
     } else {
         mx_musashi_set_cpu_type(M68K_CPU_TYPE_68000);
     }
-    s_is_060 = (model == 3);   /* P916 */
     s_p913_is_060 = 0;   /* P913: 本番経路では060プローブを必ず無効にする */
     s_p913_movep_passthrough = 0;   /* P914 */
     fpu_apply_for_model(model != 0);   /* P897。本番経路では直後に reset_hard が set_fpu_config で上書きする */
