@@ -400,6 +400,21 @@ static void mx_musashi_fix_movep_dispatch(void)
     debug_log("[P913-INIT] movep=%u mismatch=%u (expect 256/0)\n", n_hit, n_mismatch);
 }
 
+/* P990: PFLUSHA($F518)の到達を数える診断プローブ。必ず元のハンドラへ渡す(挙動は不変) */
+static void (*s_p990_pflush_orig)(void);
+static unsigned int s_p990_pflush_n;
+static unsigned int s_p990_pflush_first_ppc, s_p990_pflush_first_ir;
+
+static void mx_p990_pflush_probe(void)
+{
+    s_p990_pflush_n++;
+    if (s_p990_pflush_n == 1) {
+        s_p990_pflush_first_ppc = REG_PPC;
+        s_p990_pflush_first_ir  = REG_IR;
+    }
+    s_p990_pflush_orig();
+}
+
 /* P910: MOVEC(CAAR)とCINV/CPUSH($F400-$F4FF、scope≠0)の表の項目を差し替える。
  * mx_musashi_fix_cp_dispatch の直後に1回だけ呼ぶ(表は m68k_init() が1回だけ作る)。
  * 件数がずれても中止せず実数を出す(smoke_test.sh が完全一致で照合する) */
@@ -435,6 +450,9 @@ static void mx_musashi_fix_040_dispatch(void)
     s_movec_rc_orig = jt[0x4E7B]; jt[0x4E7B] = mx_movec_rc; n_movec++;
     debug_log("[P910-040FIX] cinv=%u skipped=%u movec=%u (expect 192/0/2)\n", n_cinv, n_skip, n_movec);
     mx_musashi_fix_movep_dispatch();   /* P913 */
+    /* P990: 機種未確定の時点で呼ばれるため無条件に差し替える(ログ側で060turboに絞る) */
+    if (jt[0xF518] != NULL) { s_p990_pflush_orig = jt[0xF518]; jt[0xF518] = mx_p990_pflush_probe; }
+    else debug_log("[P990-PFLUSH] WARN jt[F518]=NULL, probe not installed\n");
 }
 
 /* P917: 起動方法フラグ($0CBF)の確定命令 Seq (A0)(IPLROM30 $FF012E の $57D0)を観測する診断プローブ。
@@ -670,12 +688,12 @@ void mx_cpu_musashi_p910_tick(int frame, mx_cpu_musashi_logf logf)
     if (s_is_060)
         logf("[P916-060EXEC] f=%d movec_040=%u pcr_rd=%u pcr_wr=%u buscr_rd=%u buscr_wr=%u absent_illegal=%u "
              "absent_hist=802:%u,803:%u,804:%u,805:%u first_absent_ppc=%08X first_absent_cr=%03X first_pcr_ppc=%08X "
-             "pcr=%08X buscr=%08X movep_exec=%u cbc_w=%04X\n",
+             "pcr=%08X buscr=%08X movep_exec=%u cbc_w=%04X pflush_n=%u pflush_first_ppc=%08X pflush_first_ir=%04X\n",
              frame, s_p910_movec_040, s_p916_pcr_rd, s_p916_pcr_wr, s_p916_buscr_rd, s_p916_buscr_wr,
              s_p916_absent_total, s_p916_absent[0], s_p916_absent[1], s_p916_absent[2], s_p916_absent[3],
              s_p916_first_absent_ppc, s_p916_first_absent_cr, s_p916_first_pcr_ppc,
              MX_060_PCR_ID | (MX_060_PCR_REV << 8) | s_060_pcr_w, s_060_buscr, s_p916_movep_exec,
-             bus_read16(0x0CBCu));
+             bus_read16(0x0CBCu), s_p990_pflush_n, s_p990_pflush_first_ppc, s_p990_pflush_first_ir);
 }
 
 /* P984(D-100): 割込み例外のサイクル表。上流 m68ki_exception_cycle_table のうちMXが使う列
