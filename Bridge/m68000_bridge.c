@@ -2361,6 +2361,55 @@ static void p972_note_tcdcr_write(uint8_t val) {
     }
 }
 
+/* ====================================================================
+ * P993: [P993-TCDCRTIMER] / [P993-DMASTART] 診断プローブ(D-108、既定OFF、
+ * 環境変数 MX68K_DEBUG_P993_DMACCLK=1 で有効、観測のみ)。
+ * IPLROM 1.6 の measure_dmac_clock(DMAC ch2 の 5000 ワード転送を MFP Timer-C/D で計測)が
+ * 得る経過時間を確認する。P972 と違い c68k/Musashi の両バックエンドを対象とし、PC 範囲での
+ * 絞り込みもしない(どの PC からの書込みかは生値で残し、事後に判別する)。
+ * cyc = 完了済みチャンクの executed 総和 + 現チャンク内の進捗 mx_cpu_cycles_done()(命令境界精度)。
+ * ==================================================================== */
+static int s_p993_on = 0;
+static unsigned long long s_p993_cyc_base = 0;   /* 完了済みチャンクの累計(チャンク境界でのみ加算) */
+static int      s_p993_active = 0;
+static uint8_t  s_p993_tcdcr_start = 0;
+static unsigned long long s_p993_cyc_start = 0;
+static uint32_t s_p993_pc_start = 0;
+
+static void p993_init(void) {
+    const char *ev = getenv("MX68K_DEBUG_P993_DMACCLK");
+    s_p993_on = (ev != NULL && strcmp(ev, "1") == 0) ? 1 : 0;
+    if (s_p993_on) debug_log("[P993-DMACCLK-CFG] enabled=1\n");
+}
+
+static inline unsigned long long p993_now_cyc(void) {
+    int32_t done = mx_cpu_cycles_done();          /* 現在実行中チャンク内の進捗(両バックエンド対応) */
+    if (done < 0) done = 0;
+    return s_p993_cyc_base + (unsigned long long)done;
+}
+
+/* TCDCR 書込み(実書込みの前に呼ばれるので MFP[MFP_TCDCR] は旧値)。 */
+static void p993_note_tcdcr_write(uint8_t val) {
+    uint32_t pc = MX68KQ_GUEST_PC();
+    uint8_t prev = (uint8_t)MFP[MFP_TCDCR];
+    unsigned long long now = p993_now_cyc();
+    if (!(prev & 0x77u) && (val & 0x77u)) {
+        s_p993_active = 1;
+        s_p993_tcdcr_start = val;
+        s_p993_cyc_start = now;
+        s_p993_pc_start = pc;
+    } else if (s_p993_active && !(val & 0x77u)) {
+        s_p993_active = 0;
+        debug_log("[P993-TCDCRTIMER] pc=0x%08x pc_start=0x%08x tcdcr_start=0x%02x tcdcr_stop=0x%02x "
+                  "cyc_start=%llu cyc_stop=%llu delta_cyc=%llu tcdr=0x%02x tddr=0x%02x musashi=%d\n",
+                  (unsigned)pc, (unsigned)s_p993_pc_start,
+                  (unsigned)s_p993_tcdcr_start, (unsigned)val,
+                  s_p993_cyc_start, now, now - s_p993_cyc_start,
+                  (unsigned)(uint8_t)MFP[MFP_TCDR], (unsigned)(uint8_t)MFP[MFP_TDDR],
+                  mx_cpu_be_musashi() ? 1 : 0);
+    }
+}
+
 /* TCDR/TDDR 読出し(reg: 0=TCDR、1=TDDR)。値は MFP_Read と同じ MFP[reg]。 */
 static void p972_note_counter_read(int reg) {
     if (!s_p972_pending || mx_cpu_be_musashi()) return;
@@ -27313,6 +27362,8 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
     p806_io_wait(addr, 0);
     /* P972: TCDCR 書込みの観測(既定OFF、実書込みの前)。 */
     if (s_p972_on && (addr & 0x00FFFFFFu) == 0xE8801Du) p972_note_tcdcr_write((uint8_t)(val & 0xFFu));
+    /* P993: TCDCR 書込みの観測(既定OFF、両バックエンド、実書込みの前)。 */
+    if (s_p993_on && (addr & 0x00FFFFFFu) == 0xE8801Du) p993_note_tcdcr_write((uint8_t)(val & 0xFFu));
     /* P946 (D-94): $E8C003 へのストローブ書込み。無効化されうる #if の内側に置かないこと。 */
     if ((addr & 0x00FFFFFFu) == 0x00E8C003u) {
         if (s_p946_last_read_was_ioc) p946_prn_strobe_with_ioc_check++;
@@ -28025,6 +28076,16 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
         }
     }
 #endif /* P69_PROBE_ENABLE */
+    /* P993: DMAC ch2 起動(CCR $E84087 の STR bit7 書込み)時のパラメータ記録(既定OFF、フレーム窓なし)。
+     * 実書込み前に呼ばれるので DMA[2] は「これから起動される転送の設定値」。read-only。 */
+    if (s_p993_on && (addr & 0x00FFFFFFu) == 0xE84087u && (val & 0x80u)) {
+        debug_log("[P993-DMASTART] f=%d pc=0x%08x ch=2 via=B ocr=0x%02x dcr=0x%02x mtc=%u mar=0x%06x dar=0x%06x "
+                  "cyc=%llu musashi=%d\n",
+                  g_mx68k_frame_num, (unsigned)MX68KQ_GUEST_PC(),
+                  (unsigned)DMA[2].OCR, (unsigned)DMA[2].DCR, (unsigned)DMA[2].MTC,
+                  (unsigned)DMA[2].MAR, (unsigned)DMA[2].DAR,
+                  p993_now_cyc(), mx_cpu_be_musashi() ? 1 : 0);
+    }
 #if P318_ENABLE
     /* P318: D-4実測用。DMACレジスタ書込みをgameplay窓(frame 5550-5750、
      * P315/P316と同一)に限定し、上限なしで記録する。既存のP69-DMAC-W
@@ -28126,6 +28187,8 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
     p806_io_wait(addr, 1);
     /* P972: ワード書込み $E8801C の下位バイトが TCDCR(既定OFF、実書込みの前)。 */
     if (s_p972_on && addr == 0xE8801Cu) p972_note_tcdcr_write((uint8_t)(val & 0xFFu));
+    /* P993: 同上(ワード書込み $E8801C の下位バイト、既定OFF)。 */
+    if (s_p993_on && addr == 0xE8801Cu) p993_note_tcdcr_write((uint8_t)(val & 0xFFu));
     /* P946 (D-94): $E8C002 ワード書込み(下位バイトがストローブ相当)。WriteB を経由しない
      * (mem_wrap.c wm16_main が PRN_Write を直接呼ぶ)ため個別に数える。無効化されうる #if の内側に置かないこと。 */
     if (addr == 0x00E8C002u) {
@@ -29706,6 +29769,16 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
 #endif
     }
 #endif /* P69_PROBE_ENABLE */
+    /* P993: DMAC ch2 起動(CCR $E84087 の STR bit7 書込み、ワード $E84086 の下位バイト)時のパラメータ記録(既定OFF、フレーム窓なし)。
+     * 実書込み前に呼ばれるので DMA[2] は「これから起動される転送の設定値」。read-only。 */
+    if (s_p993_on && addr == 0xE84086u && (val & 0x80u)) {
+        debug_log("[P993-DMASTART] f=%d pc=0x%08x ch=2 via=W ocr=0x%02x dcr=0x%02x mtc=%u mar=0x%06x dar=0x%06x "
+                  "cyc=%llu musashi=%d\n",
+                  g_mx68k_frame_num, (unsigned)MX68KQ_GUEST_PC(),
+                  (unsigned)DMA[2].OCR, (unsigned)DMA[2].DCR, (unsigned)DMA[2].MTC,
+                  (unsigned)DMA[2].MAR, (unsigned)DMA[2].DAR,
+                  p993_now_cyc(), mx_cpu_be_musashi() ? 1 : 0);
+    }
 #if P318_ENABLE
     /* P318: D-4実測用。DMACレジスタ書込みをgameplay窓(frame 5550-5750、
      * P315/P316と同一)に限定し、上限なしで記録する。既存のP69-DMAC-W
@@ -30611,6 +30684,7 @@ static void c68k_init(void)
     p806_io_wait_init();
     p970_siwin_init();
     p972_init();
+    p993_init();
     p981_init();
 
 #if P82XC_ENABLE
@@ -32708,6 +32782,7 @@ int32_t m68000_execute(int32_t cycles)
         if (s_p970_siwin_on) p970_siwin_chunk_end(executed);
         if (s_p976_log_on) s_p976_elapsed += (unsigned long long)(executed > 0 ? executed : 0);
         if (s_p972_on && !mx_cpu_be_musashi()) s_p972_cyc_base += (unsigned long long)(executed > 0 ? executed : 0);
+        if (s_p993_on) s_p993_cyc_base += (unsigned long long)(executed > 0 ? executed : 0);
 #if P113_ENABLE
         /* P113-FB: chunk 境界 S sample (C68k_Exec return 直後)。S 1->0 を検出した
          * chunk の post-PC (=RTE landing 先、C68k_Get_PC は Really_End で sync 済、MINOR-2)・
