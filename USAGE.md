@@ -87,6 +87,7 @@ MX68Kの動作には、実機由来のX68000 BIOS ROMファイルが必要です
 | `IPLROM.DAT` | IPL ROM（無印〜XVI） | 131,072 バイト | 必須 |
 | `CGROM.DAT` | キャラクタジェネレータROM | 786,432 バイト | 必須 |
 | `IPLROM30.DAT` | IPL ROM（X68030モード） | 131,072 バイト | 任意 |
+| `ROM30.DAT` | X68030用ROM（$FC0000〜$FDFFFF）、対応する`IPLROM30.DAT`と組で使用 | 131,072 バイト | 任意（設定画面「BIOS」タブで明示指定、自動検出されない。X68030/060turboのみ有効、040turboでは使用しない） |
 | `SCSIINROM.DAT` | 内蔵SCSI起動用IPL ROM | 8,192 バイト | 任意（内蔵SCSIから起動する場合） |
 | `SCSIEXROM.DAT` | 外付けSCSIボード（CZ-6BS1相当）起動用IPL ROM | 8,192 バイト | 任意（外付けSCSIから起動する場合） |
 
@@ -101,6 +102,7 @@ MX68K requires original X68000 BIOS ROM files obtained from a real machine (they
 | `IPLROM.DAT` | IPL ROM (Original–XVI) | 131,072 bytes | Yes |
 | `CGROM.DAT` | Character Generator ROM | 786,432 bytes | Yes |
 | `IPLROM30.DAT` | IPL ROM (X68030 mode) | 131,072 bytes | Optional |
+| `ROM30.DAT` | X68030 ROM ($FC0000–$FDFFFF), paired with its matching `IPLROM30.DAT` | 131,072 bytes | Optional (set the path explicitly in the BIOS settings tab — not auto-detected; used only on X68030/060turbo, never on 040turbo) |
 | `SCSIINROM.DAT` | Internal SCSI boot IPL ROM | 8,192 bytes | Optional (booting from internal SCSI) |
 | `SCSIEXROM.DAT` | External SCSI board (CZ-6BS1) boot IPL ROM | 8,192 bytes | Optional (booting from external SCSI) |
 

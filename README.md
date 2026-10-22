@@ -38,7 +38,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **ネイティブmacOSアプリ** — SwiftUI + Metal で構築されたモダンなmacOSアプリ
 - **px68kコア** — 実績のあるpx68kエミュレーションコアをベースに実機ソフトの動作を目指す
 - **Apple Silicon ネイティブ** — arm64アーキテクチャに最適化（M1/M2/M3/M4シリーズ対応）
-- **X68030対応** — 機種選択でX68000（SASI/SCSI世代）に加えX68030（MC68EC030、Musashi CPUコア）を選択可能。ハイメモリ（TS-6BE16相当／060turbo相当、16〜768MB）にも対応
+- **X68030対応** — 機種選択でX68000（SASI/SCSI世代）に加えX68030（MC68EC030、Musashi CPUコア）を選択可能。ハイメモリ（TS-6BE16相当／060turbo相当、16〜768MB）にも対応。さらにX68030のCPU換装相当として040turbo（MC68040）・060turbo（MC68060相当）も選択可能（実験的機能）
 - **FPU 68881/68882**（X68030選択時のみ）— 設定画面からFPU有効化・チップ選択（68881/68882）が可能
 - **FPUボード CZ-6BP1相当**（X68000の SASI/SCSI 機種、MC68881）— 設定画面「Hardware」タブの「FPU Board」トグルで装着（FLOAT3.X 等の浮動小数点ドライバから使用、CZ-6BP2 は未対応）
 - **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
@@ -67,7 +67,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **Native macOS App** — a modern macOS app built with SwiftUI + Metal
 - **px68k Core** — based on the proven px68k emulation core, aiming for compatibility with real X68000 software
 - **Apple Silicon Native** — optimized for arm64 (M1/M2/M3/M4 series)
-- **X68030 Support** — in addition to X68000 (SASI/SCSI-era machines), select X68030 (MC68EC030, via the Musashi CPU core). High memory support included (TS-6BE16-equivalent / 060turbo-equivalent, 16–768 MB)
+- **X68030 Support** — in addition to X68000 (SASI/SCSI-era machines), select X68030 (MC68EC030, via the Musashi CPU core). High memory support included (TS-6BE16-equivalent / 060turbo-equivalent, 16–768 MB). 040turbo (MC68040) and 060turbo (MC68060-equivalent), the X68030 CPU-upgrade configurations, can also be selected (experimental)
 - **FPU 68881/68882** (X68030 only) — enable the FPU and select the chip (68881/68882) from the settings screen
 - **FPU board, CZ-6BP1-equivalent** (X68000 SASI/SCSI models, MC68881) — install it with the "FPU Board" toggle in the Hardware settings tab (used through a floating-point driver such as FLOAT3.X; CZ-6BP2 is not supported)
 - **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP** (FD, single/multi-image archives)
@@ -204,6 +204,7 @@ build from source only), see [USAGE.md](USAGE.md).
 | `IPLROM.DAT` | IPL ROM（無印〜XVI） | 131,072 バイト | 必須 |
 | `CGROM.DAT` | キャラクタジェネレータROM | 786,432 バイト | 必須 |
 | `IPLROM30.DAT` | IPL ROM（X68030モード） | 131,072 バイト | 任意 |
+| `ROM30.DAT` | X68030用ROM（$FC0000〜$FDFFFF）、対応する`IPLROM30.DAT`と組で使用 | 131,072 バイト | 任意（設定画面「BIOS」タブで明示指定、自動検出されない。X68030/060turboのみ有効、040turboでは使用しない） |
 | `SCSIINROM.DAT` | 内蔵SCSI起動用IPL ROM | 8,192 バイト | 任意（内蔵SCSIから起動する場合） |
 | `SCSIEXROM.DAT` | 外付けSCSIボード（CZ-6BS1相当）起動用IPL ROM | 8,192 バイト | 任意（外付けSCSIから起動する場合） |
 
@@ -221,6 +222,7 @@ The emulator requires original X68000 BIOS ROM files, obtained from a real machi
 | `IPLROM.DAT` | IPL ROM (Original–XVI) | 131,072 bytes | Yes |
 | `CGROM.DAT` | Character Generator ROM | 786,432 bytes | Yes |
 | `IPLROM30.DAT` | IPL ROM (X68030 mode) | 131,072 bytes | Optional |
+| `ROM30.DAT` | X68030 ROM ($FC0000–$FDFFFF), paired with its matching `IPLROM30.DAT` | 131,072 bytes | Optional (set the path explicitly in the BIOS settings tab — not auto-detected; used only on X68030/060turbo, never on 040turbo) |
 | `SCSIINROM.DAT` | Internal SCSI boot IPL ROM | 8,192 bytes | Optional (booting from internal SCSI) |
 | `SCSIEXROM.DAT` | External SCSI board (CZ-6BS1) boot IPL ROM | 8,192 bytes | Optional (booting from external SCSI) |
 
