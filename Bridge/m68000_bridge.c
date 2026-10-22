@@ -5360,9 +5360,9 @@ static int trace_filter(uint32_t addr) {
     if (addr >= 0xff0000 && addr < 0xff1000) return 1;
     // IOC 割込み制御
     if (addr >= 0xe9c000 && addr < 0xe9c010) return 1;
-    // FDC registers
+    // FDC レジスタ
     if (addr >= 0xe94000 && addr < 0xe94020) return 1;
-    // DMA registers
+    // DMA レジスタ
     if (addr >= 0xe84000 && addr < 0xe84040) return 1;
     // I/O 領域 (ハードウェアのポーリングループを広く捕捉)
     if (addr >= 0xe80000 && addr < 0xea0000) return 1;

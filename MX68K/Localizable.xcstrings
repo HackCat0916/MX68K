@@ -7662,6 +7662,38 @@
           }
         }
       }
+    },
+    "※ この表示はゲストが送信した Note On/Off に基づくものであり、音源が実際に発音中のボイスとは異なる場合があります(リリース中の残響・発音数上限・ホールドペダルは反映されません)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ This display is based on Note On/Off messages sent by the guest, and may differ from the voices actually sounding on the synth (release decay, polyphony limits, and the hold pedal are not reflected)"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ この表示はゲストが送信した Note On/Off に基づくものであり、音源が実際に発音中のボイスとは異なる場合があります(リリース中の残響・発音数上限・ホールドペダルは反映されません)"
+          }
+        }
+      }
+    },
+    "※ 表示範囲はノート 0〜95(C-1〜B6、ノート 60 = C4)です。ノート 96〜127 が ON のときは行末に ▶件数 を表示します": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ The displayed range is notes 0-95 (C-1-B6, note 60 = C4). When notes 96-127 are ON, a trailing count indicator is shown at the end of the row"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "※ 表示範囲はノート 0〜95(C-1〜B6、ノート 60 = C4)です。ノート 96〜127 が ON のときは行末に ▶件数 を表示します"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
