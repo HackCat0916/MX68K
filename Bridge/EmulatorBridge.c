@@ -397,6 +397,9 @@ extern void     m68000_set_cpu_backend_model(int model);   /* 0=c68k、1=Musashi
 extern int      m68000_cpu_env_override(void);             /* MX68K_CPU_CORE 設定時に1 */
 /* P976: DRAMリフレッシュ周期の設定(m68000_bridge.c、クロック num/den [MHz]) */
 extern void     m68000_set_refresh_clock(int32_t num, int32_t den);
+/* P996: DMAC 最大速度転送の CPU 停止課金(m68000_bridge.c) */
+extern void     m68000_set_dma_charge(int chassis030, int32_t num, int32_t den);
+extern void     m68000_dma_stall_reset(void);
 extern uint32_t m68000_get_cpu_state_id(void);             /* ステートのCPU識別子 */
 extern int      m68000_cpu_backend_is_musashi(void);
 
@@ -1610,6 +1613,9 @@ int mx68k_init(void) {
     /* P808: 命令境界オーバーシュート補正(P974 以降既定 ON、MX68K_DEBUG_OVERSHOOT_FIX=0 でオプトアウト)。 */
     p808_load_overshoot_fix();
 
+    /* P996: DMA ストール負債の初期化(mx68k_reset_hard でも 0 に戻す) */
+    m68000_dma_stall_reset();
+
     /* P633: ここにあった P490 の packetList 付け替え(欠陥 A 対策)は、CoreMIDI
      * 連携層を Bridge/midi_coremidi.c へ移設し、新実装が自前の書込可能バッファを
      * 静的に所有する設計にしたため不要になり削除した。 */
@@ -2448,6 +2454,7 @@ void mx68k_reset_hard(void) {
     debug_log("[MX68K] Step 2: IRQH_Init() + m68000_reset()\n");
     IRQH_Init();
     m68000_reset();
+    m68000_dma_stall_reset();   /* P996 */
     debug_log("[MX68K] Step 3: Memory_Init()\n");
     Memory_Init();
     debug_log("[MX68K] Step 4: MFP_Init()\n");
@@ -4198,6 +4205,8 @@ void mx68k_run_frame(void) {
     /* P976: 主記憶DRAMリフレッシュ周期(14.70us)を同じ num/den のクロックで CPUclk に換算して設定する
      * (値が変わったときだけ Core へ反映。16MHz 設定は 50/3MHz=245clk) */
     m68000_set_refresh_clock(clk_num, clk_den);
+    /* P996 (D-108): X68030 系の DMAC 最大速度転送の CPU 停止課金。同じ num/den で 800ns を換算する */
+    m68000_set_dma_charge(cpu_is_030_chassis(g_wired_cpu_model), clk_num, clk_den);
     int32_t clkdiv = clk_num;   /* 表示・診断ログ専用の分子エイリアス */
     clk_total = (int32_t)(((int64_t)clk_total * clk_num) / (10 * (int64_t)clk_den));  /* CPU 予算 = base*(clock/10) */
 
@@ -7558,6 +7567,7 @@ static int do_load_state(const char* path) {
     /* CPUレジスタは最後に復元する(その中でもPCが最後) */
     state_cpu_load(blk_cpu);
     cpu_setOPbase24(mx_cpu_get_pc());
+    m68000_dma_stall_reset();   /* P996: 未消化の DMA ストール負債はセーブしないので 0 に戻す */
 
     /* 保存されたイメージパスが現在のものと異なればFDDを再マウントする。
      * mx68k_fdd_insertはエミュレーションスレッドから呼んでも安全(パスの保存と

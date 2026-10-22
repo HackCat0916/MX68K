@@ -1918,10 +1918,13 @@ static void p976_refresh_apply(void) {
     /* C68k_Init の memset 後も追従できるよう、キャッシュではなく C68K の現在値と比べる */
     if (C68K.RefreshPeriodQ8 != want) C68k_Set_RefreshPeriod(&C68K, want);
 }
-/* P976: s_mx_cpu_backend を書き換えた直後に必ず呼ぶ(リフレッシュは c68k 経路のみ) */
+static void p996_update_active(void);   /* P996: 定義は P993 節の後 */
+/* P976: s_mx_cpu_backend を書き換えた直後に必ず呼ぶ(リフレッシュは c68k 経路のみ)。
+ * P996: DMA 課金のゲート(Musashi 経路のみ)も同じ箇所で再計算する。 */
 static inline void p976_refresh_update_active(void) {
     s_p976_refresh_active = (s_p976_refresh_on && !mx_cpu_be_musashi()) ? 1 : 0;
     p976_refresh_apply();
+    p996_update_active();
 }
 int m68000_cpu_env_override(void);   /* P872: 定義はファイル末尾の mx_cpu_* 節 */
 
@@ -2407,6 +2410,148 @@ static void p993_note_tcdcr_write(uint8_t val) {
                   s_p993_cyc_start, now, now - s_p993_cyc_start,
                   (unsigned)(uint8_t)MFP[MFP_TCDR], (unsigned)(uint8_t)MFP[MFP_TDDR],
                   mx_cpu_be_musashi() ? 1 : 0);
+    }
+}
+
+/* ====================================================================
+ * P996 (D-108): X68030 系の DMAC「最大速度オートリクエスト」転送に CPU 停止時間を課金する。
+ * Core の DMA_Write(CCR STR 書込み)は転送全体を同期実行し CPU 時間を 0 で済ませるため、
+ * 書込み前後の MTC 差から転送オペランド数を求め、800ns/16bit 転送(X68030 Inside/Out
+ * 書籍 p.133-134)を CPU サイクルに換算して「ストール負債」に積む。負債は m68000_execute()
+ * の内側ループ先頭で、CPU を実行せずに予算だけ消費して返す(DMA がバスを保持中)。
+ * 既定 ON、MX68K_DEBUG_DMA_CHARGE=0 と完全一致したときだけ無効。ゲートは
+ * 030 筐体 && Musashi(X68000/c68k 経路は対象外、D-109)。DMA[] と書込み値は変更しない。
+ * ==================================================================== */
+#define P996_CHARGE_LOG_MAX 32
+#define P996_SUM_WINDOW     600
+static int      s_p996_on         = 0;   /* 環境変数(既定 ON) */
+static const char *s_p996_env     = NULL;
+static int      s_p996_chassis030 = 0;
+static int      s_p996_active     = 0;   /* on && chassis030 && musashi */
+static int32_t  s_p996_num        = 0;   /* クロック [MHz] = num/den。0 は未設定 */
+static int32_t  s_p996_den        = 1;
+static uint64_t s_p996_stall_debt = 0;   /* 未消化の停止サイクル数 */
+static uint64_t s_p996_acc        = 0;   /* 換算の端数(単位: 1/(5*den) サイクル) */
+static int      s_p996_cfg_logged = 0;
+static int      s_p996_cfg_last[5];      /* on, chassis030, musashi, num, den */
+static unsigned s_p996_charge_logs = 0;
+static int      s_p996_win_next   = 0;
+static unsigned s_p996_str_seen, s_p996_charged, s_p996_skip_reqmode, s_p996_skip_chain,
+                s_p996_skip_cnt, s_p996_skip_gate, s_p996_anomaly, s_p996_zero_ops;
+static unsigned long long s_p996_stall_total = 0;
+
+typedef struct {
+    uint32_t ch;
+    char     via;
+    uint8_t  ccr_w, ocr, dcr, csr;
+    uint16_t mtc;
+    uint32_t pc;
+} p996_snap_t;
+
+static void p996_init(void) {
+    s_p996_env = getenv("MX68K_DEBUG_DMA_CHARGE");
+    s_p996_on = (s_p996_env == NULL || strcmp(s_p996_env, "0") != 0) ? 1 : 0;
+}
+
+/* 有効状態の再計算。値が変わったときだけ [P996-CFG] を出す(クロック未設定の間は出さない)。 */
+static void p996_update_active(void) {
+    int mus = mx_cpu_be_musashi() ? 1 : 0;
+    s_p996_active = (s_p996_on && s_p996_chassis030 && mus) ? 1 : 0;
+    if (s_p996_num <= 0) return;
+    int cur[5] = { s_p996_on, s_p996_chassis030, mus, (int)s_p996_num, (int)s_p996_den };
+    if (s_p996_cfg_logged && memcmp(cur, s_p996_cfg_last, sizeof(cur)) == 0) return;
+    memcpy(s_p996_cfg_last, cur, sizeof(cur));
+    s_p996_cfg_logged = 1;
+    debug_log("[P996-CFG] dma_charge=%d env=%.16s chassis030=%d musashi=%d num=%d den=%d\n",
+              s_p996_on, s_p996_env ? s_p996_env : "(unset)", s_p996_chassis030, mus,
+              (int)s_p996_num, (int)s_p996_den);
+}
+
+/* mx68k_run_frame() から毎フレーム、m68000_set_refresh_clock() の直後に呼ぶ。 */
+void m68000_set_dma_charge(int chassis030, int32_t num, int32_t den) {
+    s_p996_chassis030 = chassis030 ? 1 : 0;
+    s_p996_num = num;
+    s_p996_den = (den > 0) ? den : 1;
+    p996_update_active();
+    if (g_mx68k_frame_num >= s_p996_win_next) {
+        if (s_p996_str_seen > 0) {
+            debug_log("[P996-DMASUM] f=%d str_seen=%u charged=%u skip_reqmode=%u skip_chain=%u skip_cnt=%u "
+                      "skip_gate=%u anomaly=%u stall_total=%llu zero_ops=%u\n",
+                      g_mx68k_frame_num, s_p996_str_seen, s_p996_charged, s_p996_skip_reqmode,
+                      s_p996_skip_chain, s_p996_skip_cnt, s_p996_skip_gate, s_p996_anomaly,
+                      s_p996_stall_total, s_p996_zero_ops);
+        }
+        s_p996_str_seen = s_p996_charged = s_p996_skip_reqmode = s_p996_skip_chain = 0;
+        s_p996_skip_cnt = s_p996_skip_gate = s_p996_anomaly = s_p996_zero_ops = 0;
+        s_p996_stall_total = 0;
+        s_p996_win_next = g_mx68k_frame_num + P996_SUM_WINDOW;
+    }
+}
+
+/* mx68k_init / mx68k_reset_hard / ステートロードから呼ぶ。未消化の負債はセーブしない(R-7)。 */
+void m68000_dma_stall_reset(void) {
+    s_p996_stall_debt = 0;
+    s_p996_acc = 0;
+}
+
+/* CCR($E84000+ch*$40+7)への STR 付き書込みを実書込みの前に検出し、前値を退避する。
+ * 退避したら 1(実書込みの後に p996_post を呼ぶ)。ccr は書込まれる CCR の値。 */
+static inline int p996_pre(uint32_t a, uint32_t ccr, char via, p996_snap_t *s) {
+    if (!(ccr & 0x80u)) return 0;
+    s_p996_str_seen++;
+    if (!s_p996_active) { s_p996_skip_gate++; return 0; }
+    uint32_t ch = (a - 0xE84000u) >> 6;
+    s->ch    = ch;
+    s->via   = via;
+    s->ccr_w = (uint8_t)ccr;
+    s->ocr   = DMA[ch].OCR;
+    s->dcr   = DMA[ch].DCR;
+    s->csr   = DMA[ch].CSR;
+    s->mtc   = DMA[ch].MTC;
+    s->pc    = MX68KQ_GUEST_PC();
+    return 1;
+}
+
+/* 1 オペランドあたりの 16bit 転送回数(dmac.c DMA_Exec の opsize 別 case)。5 のみ一次資料で確定。 */
+static inline unsigned p996_units_per_op(int opsize) {
+    switch (opsize) {
+        case 1: return 2u;
+        case 2: return 4u;
+        case 6: return 2u;
+        default: return 1u;   /* 0/3/4/5(7 は DMA_Exec に case が無い) */
+    }
+}
+
+static void p996_post(const p996_snap_t *s) {
+    uint32_t ch = s->ch;
+    uint16_t mtc_post = DMA[ch].MTC;
+    if ((s->ocr & 3u) != 1u)  { s_p996_skip_reqmode++; return; }
+    if (s->ocr & 8u)          { s_p996_skip_chain++;   return; }
+    if (s->ccr_w & 0x40u)     { s_p996_skip_cnt++;     return; }
+    if (mtc_post > s->mtc)    { s_p996_anomaly++;      return; }
+    unsigned ops = (unsigned)(s->mtc - mtc_post);
+    if (ops == 0) { s_p996_zero_ops++; return; }
+    int opsize = (int)((s->ocr >> 4) & 3u) + (int)((s->dcr >> 1) & 4u);
+    unsigned units = ops * p996_units_per_op(opsize);
+    uint64_t div = 5u * (uint64_t)s_p996_den;
+    s_p996_acc += (uint64_t)units * 4u * (uint64_t)s_p996_num;
+    uint64_t stall = s_p996_acc / div;
+    s_p996_acc %= div;
+    s_p996_charged++;
+    s_p996_stall_total += stall;
+    if (stall > 0) {
+        s_p996_stall_debt += stall;
+        mx_cpu_end_timeslice();   /* CCR を書いた命令の直後で CPU を止め、次の反復で負債を消化する */
+    }
+    if (s_p996_charge_logs < P996_CHARGE_LOG_MAX) {
+        s_p996_charge_logs++;
+        debug_log("[P996-DMACHARGE] f=%d pc=%08x ch=%u via=%c ocr=%02x dcr=%02x ccr_w=%02x mtc_pre=%u mtc_post=%u "
+                  "csr_pre=%02x csr_post=%02x cer=%02x opsize=%d ops=%u units=%u stall=%u debt=%llu\n",
+                  g_mx68k_frame_num, (unsigned)s->pc, (unsigned)ch, s->via,
+                  (unsigned)s->ocr, (unsigned)s->dcr, (unsigned)s->ccr_w,
+                  (unsigned)s->mtc, (unsigned)mtc_post,
+                  (unsigned)s->csr, (unsigned)DMA[ch].CSR, (unsigned)DMA[ch].CER,
+                  opsize, ops, units, (unsigned)stall, (unsigned long long)s_p996_stall_debt);
     }
 }
 
@@ -27960,7 +28105,17 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
         /* P644: ch2 ($E84087) は Mercury 担当チャンネル。件数のみ計上する。 */
         p637_ch2_write_note(addr, val, /*size=*/1);
     }
+    /* P996 (D-108): DMAC CCR($E84000+ch*$40+7)への STR 書込みを検出し、実書込み前の生値を退避。
+     * 実書込みの後に転送オペランド数を求めて CPU 停止時間を課金する。DMA[] と val は変更しない。 */
+    p996_snap_t p996_s;
+    int p996_hit = 0;
+    {
+        uint32_t a996 = addr & 0x00FFFFFFu;
+        if (a996 >= 0xE84000u && a996 <= 0xE840FFu && (a996 & 0x3Fu) == 0x07u)
+            p996_hit = p996_pre(a996, val & 0xFFu, 'B', &p996_s);
+    }
     Memory_WriteB(addr, val);
+    if (p996_hit) p996_post(&p996_s);
 #if P413_ENABLE
     /* P413-RANGEWATCH (byte write): D-25 幻ボード検出窓への書き込みを
      * 成功/失敗に関わらず無条件に記録する。Core の書き込みハンドラ
@@ -28077,7 +28232,8 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
     }
 #endif /* P69_PROBE_ENABLE */
     /* P993: DMAC ch2 起動(CCR $E84087 の STR bit7 書込み)時のパラメータ記録(既定OFF、フレーム窓なし)。
-     * 実書込み前に呼ばれるので DMA[2] は「これから起動される転送の設定値」。read-only。 */
+     * 実書込み(Memory_WriteB)の後に呼ばれる。DMA[2] は CCR 書込み適用後の値
+     * (オートリクエスト最大速度では MTC=0・MAR/DAR 終端)。P994 で判明、P996 で訂正。read-only。 */
     if (s_p993_on && (addr & 0x00FFFFFFu) == 0xE84087u && (val & 0x80u)) {
         debug_log("[P993-DMASTART] f=%d pc=0x%08x ch=2 via=B ocr=0x%02x dcr=0x%02x mtc=%u mar=0x%06x dar=0x%06x "
                   "cyc=%llu musashi=%d\n",
@@ -28105,11 +28261,10 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
                       is_ccr_start ? "  *** CH START (CCR bit7) ***" : "");
 #if P321_ENABLE
             /* P321: CH START検出時点でのDMACチャンネル生レジスタ値
-             * (OCR/DCR/MTC/MAR)を記録する。DMA_Write()がCCR書込みを
-             * 実際に適用しMDA_Exec()を呼ぶのはこのトレースフックの
-             * 「後」(既存の慣例、実書込前に呼ばれる)なので、ここで
-             * 読む DMA[ch].OCR 等は「これから使われる直前の設定値」
-             * ——起動される転送の実パラメータそのもの。read-only
+             * (OCR/DCR/MTC/MAR)を記録する。このフックは実書込み
+             * (Memory_WriteB)の後に呼ばれる。DMA[ch] は CCR 書込み適用後の値
+             * (オートリクエスト最大速度では DMA_Exec() 完了後で MTC=0・MAR/DAR 終端)
+             * であり、起動時の設定値ではない(P994 で判明、P996 で訂正)。read-only
              * (DMA[]配列へは一切書き込まない)。 */
             if (is_ccr_start) {
                 uint8_t  ocr = DMA[ch].OCR;
@@ -29599,7 +29754,14 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
         /* P644: ch2 ($E84086 への word write の下位バイト) も同様に計上。 */
         p637_ch2_write_note(addr, val, /*size=*/2);
     }
+    /* P996 (D-108): ワード書込み $E84000+ch*$40+6 の下位バイトが CCR(wm16_main は上位→addr、
+     * 下位→addr+1)。.L は bus_write16 2 回に分割されるのでここで拾える。Byte 経路と同じ扱い。 */
+    p996_snap_t p996_s;
+    int p996_hit = 0;
+    if (addr >= 0xE84000u && addr <= 0xE840FFu && (addr & 0x3Fu) == 0x06u)
+        p996_hit = p996_pre(addr, val & 0xFFu, 'W', &p996_s);
     Memory_WriteW(addr, val);
+    if (p996_hit) p996_post(&p996_s);
 #if P413_ENABLE
     /* P413-RANGEWATCH (word write): D-25 幻ボード検出窓への書き込みを
      * 成功/失敗に関わらず無条件に記録する。Core の書き込みハンドラ
@@ -29770,7 +29932,8 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
     }
 #endif /* P69_PROBE_ENABLE */
     /* P993: DMAC ch2 起動(CCR $E84087 の STR bit7 書込み、ワード $E84086 の下位バイト)時のパラメータ記録(既定OFF、フレーム窓なし)。
-     * 実書込み前に呼ばれるので DMA[2] は「これから起動される転送の設定値」。read-only。 */
+     * 実書込み(Memory_WriteW)の後に呼ばれる。DMA[2] は CCR 書込み適用後の値
+     * (オートリクエスト最大速度では MTC=0・MAR/DAR 終端)。P994 で判明、P996 で訂正。read-only。 */
     if (s_p993_on && addr == 0xE84086u && (val & 0x80u)) {
         debug_log("[P993-DMASTART] f=%d pc=0x%08x ch=2 via=W ocr=0x%02x dcr=0x%02x mtc=%u mar=0x%06x dar=0x%06x "
                   "cyc=%llu musashi=%d\n",
@@ -30685,6 +30848,8 @@ static void c68k_init(void)
     p970_siwin_init();
     p972_init();
     p993_init();
+    p996_init();
+    p996_update_active();
     p981_init();
 
 #if P82XC_ENABLE
@@ -31172,6 +31337,18 @@ int32_t m68000_execute(int32_t cycles)
             }
         }
         /* ===== P748 ここまで ================================================= */
+        /* P996 (D-108): DMAC 最大速度転送のストール負債を消化する。CPU は実行せず(DMA がバスを
+         * 保持中)予算だけ進める。c >= 1 なので take >= 1 となり、ループは必ず前進する。
+         * 戻り値 cycles - remaining <= cycles を保つので、フレームループ側は通常チャンクと同じ経路。
+         * 負債が無い既定経路では比較 1 回のみ。 */
+        if (s_p996_stall_debt > 0) {
+            int32_t take = (s_p996_stall_debt < (uint64_t)c) ? (int32_t)s_p996_stall_debt : c;
+            s_p996_stall_debt -= (uint64_t)take;
+            remaining -= take;
+            s_p657_exec_consumed += take;               /* MFP H-SYNC hpos の算出と整合させる */
+            if (s_p993_on) s_p993_cyc_base += (unsigned long long)take;
+            continue;
+        }
         /* P981 (D-101): FDC コマンド開始から P981_WINDOW_FRAMES 以内だけ単命令ステップにし、
          * 各命令境界で PC==$FF8B1E を判定する。既定(env 未設定)では s_p981_on==0 の
          * 1回の分岐だけで抜け、c にも chunk にも触れない。HALT/STOP 中は縮めない。 */
