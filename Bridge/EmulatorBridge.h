@@ -2312,22 +2312,6 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* チャンクごとの PC: CP-V-3 / CP-V
  *  ブロックが消滅し pre-P90 とバイト等価に戻る。 */
 #define P90_ENABLE    0
 
-/* P91-VECNUM: 元例外ベクタ番号 n を CPU 例外ディスパッチ (vec[n] フェッチ) 時点で
- *  ground-truth 直接捕捉する観測専用 probe。vec[n] の hi-word read (ReadW 経由、P67 が
- *  vec$0B8 で実証・Code-Review が c68k READ_LONG_F=Read_Word 経由を Core 直読で確認) で
- *  handler lo24==$FF05E4 (= default ハンドラ行き = 致命) のとき n=addr/4 と a7 上の
- *  group-1/2 例外フレーム (6byte SR+PC) を small ring に latch (最新上書き、panic 直前の
- *  最後の該当 fetch=culprit を保持)。決着軸は「panic は真の CPU 例外 (Codex) か制御フロー
- *  終端 (P87/P90) か」: ring 非空=例外発火 (n が例外源を一意確定)、ring 空=P91 ring 自身を
- *  主証拠に CP-T-1 (s_p82xt_t1_done) cross-check で経路漏れ/真に例外なしを機械判定。c68k は
- *  group-0 (bus/addr error=vec2/3) を一切ディスパッチしないため bus/addr は赤鯡・group-0
- *  解読は防御的 unreachable。dump は既存 P90 dump 直後の panic-terminus one-shot
- *  ($FF0632/$FF063C、s_p91_dumped)。callback は latch のみ・dump しない (P88 M2-loc 教訓)。
- *  P87-A/P87-B/CP-T-1/CP-R-6/P67 を一切改変せず独立 ring/判定を並走。read-only・guest
- *  メモリ非書込・Core 関数 (Set/Exec) 非呼出。純粋追加で既存出力を1バイトも改変しない。
- *  P91_ENABLE 0 で全 #if ブロックが消滅し pre-P91 とバイト等価に戻る。 */
-#define P91_ENABLE    0
-
 /* P92-EXCSIG: 例外 dispatch シグネチャ probe — 「panic は真の CPU 例外経由か /
  *  control-flow 終端か」を frame-push×vec-fetch 相関で確実裁定 (P91 宙吊りを解消)。
  *  主 (a): WriteW で supervisor-stack frame-push (PC long + SR word の 3 連続降順
