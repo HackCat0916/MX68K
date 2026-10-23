@@ -6880,293 +6880,6 @@ static void p90_emit_dump(void) {
 }
 #endif /* P90_ENABLE */
 
-#if P92_ENABLE
-/* ===================================================================
- * P92-EXCSIG: 例外 dispatch シグネチャ probe — frame-push × vec-fetch 相関 +
- *   $B8 positive control。P91 が宙吊りに残した「panic は真の CPU 例外経由か /
- *   control-flow 終端か」を、直前 frame-push との相関で data-read 偽陽性を排除し、
- *   リテラル TRAP#14 (vec $B8) dispatch を positive control として捕捉することで決着。
- *
- *   全 CPU 例外は同一 epilogue: PUSH_32(PC) [WriteW×2 @A7-2/A7-4] + PUSH_16(SR)
- *   [WriteW×1 @A7-6] = 3 連続降順 word write → READ_LONG(vect*4) [ReadW] vec fetch。
- *   命令フェッチは Fetch[] direct で ReadW 非経由だが vec fetch は data read で必ず
- *   ReadW 経由 (P82XC 実測)。bsr/jsr は long のみ (2 word, SR なし) で弁別。
- *
- *   主 (a-1) WriteW: ゲート addr∈[0x1EF0,0x2010) (P67 sp=$1FF6 逆算で上流 frame 先頭
- *     word @$2000 を含む) への word write を見て 3 連続降順 (A7-2/A7-4/A7-6) を追跡、
- *     seq>=3 で faulting PC=(hi<<16)|lo / SR を frame-push 値から直接組立て arm
- *     (token=global write_ctr)。raw 3-tuple も保存 (push 順仮定がズレても再解釈可)。
- *   主 (a-2) ReadW: STEP1 (positive control) addr==$B8 を lo24 filter 外で先に判定
- *     (vec46 handler=$FF0632≠$FF05E4 で filter を通らない) → b8_seen, lo24==$FF0632
- *     assert, faulting PC==$FF062A を P67 cross-check。STEP2 (上流例外) lo24==$FF05E4
- *     の vec fetch (addr==$00 除外) を frame-push×freshness (write_ctr delta<=2) 相関
- *     → frame あり=真の例外 dispatch / なし=data-read (P91 偽陽性)。
- *   傍証 (b) ReadW: addr∈[0x1EF0,0x2010) かつ full longword==$xxFF05E6 (現 word==
- *     0x05E6 && 直前 ReadW 値の低位 byte==0xFF) → handler $FF05E8 実行の直接証拠、
- *     上位 byte=元ベクタ番号 nn。
- *   (c): 既存 P47-D PC ring を terminus dump で read-only 再走査
- *     ($FF036E/$FF042A/$FF05E4/$FF0192 出現)。新 hook ゼロ、ring 非破壊。
- *
- * 安全性: read-only — guest メモリに書かず Core 関数 (Set/Exec) を呼ばない。値読出は
- *   helper p47_read_long_le (self-bounding、OOB で $FFFFFFFF) のみ。WriteW latch は
- *   P59G10 strip 影響なし (ゲート全域 ≥0x400 で never stripped)。既存出力 (P87/P88/
- *   P82XG/P47D/P89/P90/P91/CP-R/CP-T/P67) を1バイトも改変せず独立 latch/判定を並走。
- *   P92_ENABLE 0 で pre-P92 とバイト等価。 */
-
-/* --- supervisor-stack frame-push tracker (WriteW 側) --- */
-static uint32_t s_p92_prev_sw_addr = 0xFFFFFFFFu; /* 直前 stack write addr (降順検出用) */
-static uint32_t s_p92_sw_seq       = 0;           /* 連続降順 word write 数 */
-static uint32_t s_p92_sw_ring_a[3] = {0,0,0};     /* 直近 3 write の addr (古→新) */
-static uint32_t s_p92_sw_ring_v[3] = {0,0,0};     /* 直近 3 write の val (古→新) */
-static uint32_t s_p92_frame_pc     = 0;           /* 組立 faulting PC (PC hi<<16|lo) */
-static uint32_t s_p92_frame_sr     = 0;           /* 組立 SR (3 番目=A7-6 の値) */
-static int      s_p92_frame_armed  = 0;           /* frame 完成 (seq>=3) で arm */
-static uint32_t s_p92_frame_token  = 0;           /* arm 時の write_ctr (freshness) */
-static uint32_t s_p92_write_ctr    = 0;           /* GLOBAL word-write カウンタ */
-
-/* --- ReadW 側 latch state --- */
-static uint32_t s_p92_prev_readw_hi = 0;          /* 直前 ReadW 値 (b の上位 word 用) */
-/* STEP1 の陽性対照 ($B8 = TRAP#14 ベクタ) */
-static int      s_p92_b8_seen   = 0;
-static uint32_t s_p92_b8_pc     = 0;              /* faulting PC (=$FF062A 期待) */
-static uint32_t s_p92_b8_sr     = 0;
-static uint32_t s_p92_b8_handler= 0;              /* handler lo24 (=$FF0632 期待) */
-static int      s_p92_b8_pc_match = 0;            /* faulting PC==$FF062A の照合 */
-/* STEP2 上流真例外 (smoking gun) — small ring */
-#define P92_EXC_RING 4u
-static int      s_p92_exc_seen  = 0;
-static uint32_t s_p92_exc_total = 0;
-static uint32_t s_p92_exc_vec[P92_EXC_RING];      /* ベクタ = addr/4 */
-static uint32_t s_p92_exc_pc[P92_EXC_RING];       /* faulting PC */
-static uint32_t s_p92_exc_sr[P92_EXC_RING];
-static uint32_t s_p92_exc_slot[P92_EXC_RING];     /* ベクタスロットのアドレス */
-/* data-read (frame 無し vec-fetch = P91 偽陽性クラス) — small ring */
-#define P92_DR_RING 8u
-static uint32_t s_p92_dr_total = 0;
-static uint32_t s_p92_dr_addr[P92_DR_RING];
-/* 傍証 (b): handler $FF05E8 実行 */
-static int      s_p92_handler_seen = 0;
-static uint32_t s_p92_handler_nn   = 0;           /* 復元前の元ベクタ番号 nn */
-/* ダンプの one-shot */
-static int      s_p92_dumped = 0;
-
-/* WriteW 側: supervisor-stack への word write を 1 件処理 (callsite ゲート済)。
- * 降順 3 連続 (A7-2/A7-4/A7-6) を追跡し seq>=3 で frame 組立 + arm。 */
-static void p92_on_stack_write(uint32_t addr, uint32_t val) {
-    if (s_p92_dumped) return;
-    /* 降順連続検出: addr == prev - 2 なら継続、否なら seq=1 で再起。 */
-    if (s_p92_sw_seq != 0u && addr == (s_p92_prev_sw_addr - 2u)) {
-        s_p92_sw_seq++;
-    } else {
-        s_p92_sw_seq = 1u;
-    }
-    s_p92_prev_sw_addr = addr;
-    /* 直近 3 write を (古→新) で保持。 */
-    s_p92_sw_ring_a[0] = s_p92_sw_ring_a[1];
-    s_p92_sw_ring_a[1] = s_p92_sw_ring_a[2];
-    s_p92_sw_ring_a[2] = addr;
-    s_p92_sw_ring_v[0] = s_p92_sw_ring_v[1];
-    s_p92_sw_ring_v[1] = s_p92_sw_ring_v[2];
-    s_p92_sw_ring_v[2] = (uint32_t)(val & 0xFFFFu);
-
-    if (s_p92_sw_seq >= 3u) {
-        /* push 順: PC lo @A7-2 (最古), PC hi @A7-4 (中), SR @A7-6 (最新)。
-         * ただし降順 write 列は A7-2(高位 addr) → A7-6(低位 addr) の順で到来し、
-         * ring[2]=最新=最低位 addr=SR。68k は PC.lo を高位 addr に、PC.hi を低位
-         * addr に置く (big-endian、PC は long で A7-4..A7-1 を占有、SR は A7-6..A7-5)。
-         * ∴ ring[0]=A7-2=PC.lo, ring[1]=A7-4=PC.hi, ring[2]=A7-6=SR。
-         * raw 3-tuple も保存済ゆえ dump で再解釈可能。 */
-        uint32_t pc_lo = s_p92_sw_ring_v[0] & 0xFFFFu;
-        uint32_t pc_hi = s_p92_sw_ring_v[1] & 0xFFFFu;
-        uint32_t sr    = s_p92_sw_ring_v[2] & 0xFFFFu;
-        s_p92_frame_pc    = (pc_hi << 16) | pc_lo;
-        s_p92_frame_sr    = sr;
-        s_p92_frame_armed = 1;
-        s_p92_frame_token = s_p92_write_ctr;
-    }
-}
-
-/* ReadW 側: 全 ReadW で 1 回呼ぶ (callsite で関数呼出。値は p47_read_long_le 直読)。
- * STEP1 ($B8 positive control) → STEP2 ($FF05E4 上流例外) → (b) $05E6 handler 検出。 */
-static void p92_on_readw(uint32_t addr) {
-    if (s_p92_dumped) return;
-    uint32_t hl = p47_read_long_le(addr);          /* 現読み longword (host-LE, OOB-safe) */
-    uint32_t cur_word = (hl == 0xFFFFFFFFu) ? 0xFFFFu : (hl & 0xFFFFu);  /* MEM[addr..+1] */
-    uint32_t lo24 = (hl == 0xFFFFFFFFu) ? 0xFFFFFFFFu : (hl & 0x00FFFFFFu);
-    uint32_t fresh_delta = s_p92_write_ctr - s_p92_frame_token; /* 符号なしの回り込みは問題なし */
-    int fresh_ok = s_p92_frame_armed && (fresh_delta <= 2u);
-
-    /* ---- 傍証 (b): handler $FF05E8 実行 = supervisor stack からの $xxFF05E6 pop ---- */
-    /* full longword==$xxFF05E6 (現 word==0x05E6 && 直前 ReadW 値の低位 byte==0xFF)。 */
-    if (addr >= 0x1EF0u && addr < 0x2010u) {
-        if (cur_word == 0x05E6u && (s_p92_prev_readw_hi & 0x00FFu) == 0x00FFu) {
-            if (!s_p92_handler_seen) {
-                s_p92_handler_seen = 1;
-                /* $nnFF05E6: 直前 ReadW 値 ($xxFF) の高位 byte = nn。 */
-                s_p92_handler_nn = (s_p92_prev_readw_hi >> 8) & 0xFFu;
-            }
-        }
-    }
-
-    /* ---- STEP1: positive control ($B8) を lo24 filter の外で先に判定 ---- */
-    /* vec46 ($B8) handler=$FF0632 (panic 表示) で lo24≠$FF05E4。filter を通すと永久に
-     * 弾かれ b8_seen 不発 → 全 run INCONCLUSIVE。∴ 最初に addr==$B8 で判定する。 */
-    if (addr == 0xB8u) {
-        if (!s_p92_b8_seen && fresh_ok) {
-            s_p92_b8_seen    = 1;
-            s_p92_b8_pc      = s_p92_frame_pc;
-            s_p92_b8_sr      = s_p92_frame_sr;
-            s_p92_b8_handler = lo24;
-            s_p92_b8_pc_match = (s_p92_frame_pc == 0xFF062Au) ? 1 : 0;
-            s_p92_frame_armed = 0;  /* frame 消費 */
-        }
-        /* prev 更新は末尾でまとめて行う。$B8 処理後はここで return せず STEP2 を素通り
-         * させる (lo24≠$FF05E4 ゆえ STEP2 は自然に対象外)。 */
-    }
-
-    /* ---- STEP2: 上流真例外 (lo24==$FF05E4 vec slot fetch) ---- */
-    /* vec-table aligned read のみ (CP-R-1/P91 と同窓 addr<0x400)。addr==$00 は
-     * reset-SSP slot data-read 偽陽性 (P91 n=0) として完全除外。 */
-    if ((addr & 3u) == 0u && addr < 0x400u && addr != 0u && lo24 == 0x00FF05E4u) {
-        if (fresh_ok) {
-            /* frame-push 直後 = 真の上流例外 dispatch (smoking gun)。 */
-            uint32_t slot = s_p92_exc_total & (P92_EXC_RING - 1u);
-            s_p92_exc_vec[slot]  = addr >> 2;
-            s_p92_exc_pc[slot]   = s_p92_frame_pc;
-            s_p92_exc_sr[slot]   = s_p92_frame_sr;
-            s_p92_exc_slot[slot] = addr;
-            s_p92_exc_total++;
-            s_p92_exc_seen = 1;
-            s_p92_frame_armed = 0;  /* 1 vec-fetch につき 1 frame 消費 */
-        } else {
-            /* frame-push 無し = data-read (P91 偽陽性クラス、反証データ)。 */
-            uint32_t slot = s_p92_dr_total & (P92_DR_RING - 1u);
-            s_p92_dr_addr[slot] = addr;
-            s_p92_dr_total++;
-        }
-    }
-
-    /* prev ReadW 値更新 (全 ReadW、b の上位 word 用)。 */
-    s_p92_prev_readw_hi = cur_word;
-}
-
-static void p92_emit_dump(void) {
-    if (s_p92_dumped) return;
-    s_p92_dumped = 1;
-
-    debug_log("[P92-EXCSIG] ==== begin (frame=%u) ====\n",
-              (unsigned)g_mx68k_frame_num);
-
-    /* --- STEP1 の陽性対照 ($B8) --- */
-    debug_log("[P92-EXCSIG] STEP1 b8_seen=%d handler_lo24=$%06x (expect $FF0632) "
-              "fault_pc=$%06x (expect $FF062A) pc_match=%d sr=$%04x\n",
-              s_p92_b8_seen, (unsigned)(s_p92_b8_handler & 0x00FFFFFFu),
-              (unsigned)(s_p92_b8_pc & 0x00FFFFFFu), s_p92_b8_pc_match,
-              (unsigned)(s_p92_b8_sr & 0xFFFFu));
-
-    /* --- STEP2 上流真例外 --- */
-    debug_log("[P92-EXCSIG] STEP2 exc_seen=%d total=%u\n",
-              s_p92_exc_seen, (unsigned)s_p92_exc_total);
-    {
-        uint32_t cnt = (s_p92_exc_total < P92_EXC_RING)
-                       ? s_p92_exc_total : P92_EXC_RING;
-        for (uint32_t i = 0; i < cnt; ++i) {
-            uint32_t idx;
-            if (s_p92_exc_total < P92_EXC_RING) idx = i;
-            else idx = (s_p92_exc_total + i) & (P92_EXC_RING - 1u);
-            debug_log("[P92-EXCSIG]   exc[%u] vec=%u slot=$%06x fault_pc=$%06x "
-                      "sr=$%04x\n", (unsigned)i, (unsigned)s_p92_exc_vec[idx],
-                      (unsigned)s_p92_exc_slot[idx],
-                      (unsigned)(s_p92_exc_pc[idx] & 0x00FFFFFFu),
-                      (unsigned)(s_p92_exc_sr[idx] & 0xFFFFu));
-        }
-    }
-
-    /* --- data-read 偽陽性クラス (反証データ) --- */
-    debug_log("[P92-EXCSIG] dataread total=%u (frame 無し $FF05E4 vec read = "
-              "P91 偽陽性クラス)\n", (unsigned)s_p92_dr_total);
-    {
-        uint32_t cnt = (s_p92_dr_total < P92_DR_RING)
-                       ? s_p92_dr_total : P92_DR_RING;
-        for (uint32_t i = 0; i < cnt; ++i) {
-            uint32_t idx;
-            if (s_p92_dr_total < P92_DR_RING) idx = i;
-            else idx = (s_p92_dr_total + i) & (P92_DR_RING - 1u);
-            debug_log("[P92-EXCSIG]   dr[%u] slot=$%06x\n",
-                      (unsigned)i, (unsigned)s_p92_dr_addr[idx]);
-        }
-    }
-
-    /* --- 傍証 (b): handler 実行 --- */
-    debug_log("[P92-EXCSIG] (b) handler_seen=%d handler_nn=%u (元ベクタ番号、"
-              "P59G10 strip で 0 公算)\n",
-              s_p92_handler_seen, (unsigned)s_p92_handler_nn);
-
-    /* --- frame raw 3-tuple (PC/SR 組立の生データ) --- */
-    debug_log("[P92-EXCSIG] frame raw: armed=%d token=%u write_ctr=%u | "
-              "a[$%06x,$%06x,$%06x] v[$%04x,$%04x,$%04x] -> pc=$%06x sr=$%04x\n",
-              s_p92_frame_armed, (unsigned)s_p92_frame_token,
-              (unsigned)s_p92_write_ctr,
-              (unsigned)s_p92_sw_ring_a[0], (unsigned)s_p92_sw_ring_a[1],
-              (unsigned)s_p92_sw_ring_a[2],
-              (unsigned)(s_p92_sw_ring_v[0] & 0xFFFFu),
-              (unsigned)(s_p92_sw_ring_v[1] & 0xFFFFu),
-              (unsigned)(s_p92_sw_ring_v[2] & 0xFFFFu),
-              (unsigned)(s_p92_frame_pc & 0x00FFFFFFu),
-              (unsigned)(s_p92_frame_sr & 0xFFFFu));
-
-    /* --- (c): 既存 P47-D PC ring を read-only 再走査 (predecessor 痕跡) --- */
-    {
-        int seen_036e = 0, seen_042a = 0, seen_05e4 = 0, seen_0192 = 0;
-        for (int i = 0; i < P47D_PC_RING_SIZE; ++i) {
-            uint32_t pc = s_p47d_pc_ring[i] & 0x00FFFFFFu;
-            if (pc == 0xFF036Eu) seen_036e = 1;
-            else if (pc == 0xFF042Au) seen_042a = 1;
-            else if (pc == 0xFF05E4u) seen_05e4 = 1;
-            else if (pc == 0xFF0192u) seen_0192 = 1;
-        }
-        debug_log("[P92-EXCSIG] (c) PCring scan: $FF036E=%d $FF042A=%d "
-                  "$FF05E4=%d $FF0192=%d\n",
-                  seen_036e, seen_042a, seen_05e4, seen_0192);
-    }
-
-    /* ---- VERDICT (評価順序: EXC-DISPATCH > HANDLER-VIA-CF > NO-EXC-CF > INCONCLUSIVE) ---- */
-    if (s_p92_exc_seen) {
-        /* 最新 (culprit) exc。 */
-        uint32_t last = (s_p92_exc_total + P92_EXC_RING - 1u) & (P92_EXC_RING - 1u);
-        uint32_t n = s_p92_exc_vec[last];
-        const char* kind;
-        if (n == 8u) kind = "privilege8";
-        else if (n == 11u) kind = "line-F11";
-        else if (n >= 24u && n <= 31u) kind = "autovec24-31";
-        else if (n >= 64u && n <= 255u) kind = "MFP64-255";
-        else kind = "other";
-        debug_log("[P92-EXCSIG] VERDICT=EXC-DISPATCH-CONFIRMED vec=%u(%s) "
-                  "fault_pc=$%06x = panic は真の CPU 例外経由。次サイクルで "
-                  "vec n / faulting PC を disasm 突合 (シナリオ EXC 確定)\n",
-                  (unsigned)n, kind,
-                  (unsigned)(s_p92_exc_pc[last] & 0x00FFFFFFu));
-    } else if (s_p92_handler_seen) {
-        debug_log("[P92-EXCSIG] VERDICT=HANDLER-VIA-CONTROL-FLOW (b $05E6 read あり + "
-                  "STEP2 上流例外なし = computed jmp で handler 域流入確証、nn=%u)。"
-                  "矛盾解消: DefaultExceptionHandler は致命エラー表示の二重用途\n",
-                  (unsigned)s_p92_handler_nn);
-    } else if (s_p92_b8_seen) {
-        debug_log("[P92-EXCSIG] VERDICT=NO-EXC-CONTROL-FLOW ($B8 positive control 合格 "
-                  "(pc_match=%d) + $FF05E4-default-handler 例外 dispatch ゼロ = "
-                  "control-flow 終端、P87/P90 説支持)。blind spot 注記: "
-                  "(i) 上書き済ベクタ経由 (lo24≠$FF05E4) / (ii) $1EF0 未満への frame-push "
-                  "は不可視。frame raw が上端 $200x で途切れていれば INCONCLUSIVE 相当\n",
-                  s_p92_b8_pc_match);
-    } else {
-        debug_log("[P92-EXCSIG] VERDICT=INCONCLUSIVE ($B8 positive control 不発 = probe が "
-                  "dispatch を 1 件も観測できず。WriteW frame 窓 / freshness 閾値 / "
-                  "ゲート再設計を次サイクルで要検討)\n");
-    }
-
-    debug_log("[P92-EXCSIG] ==== end ====\n");
-}
-#endif /* P92_ENABLE */
 
 #if P93_ENABLE
 /* ===================================================================
@@ -11900,6 +11613,7 @@ static void p108_on_writew(uint32_t addr, uint16_t value) {
         }
     }
 
+    /* P92-EXCSIG削除(P1003)により`s_p92_frame_armed`/`s_p92_frame_token`は未定義——P108再有効化時はこの参照(MINOR-2)の対応が別途必要 */
     /* P92 が新規 frame を arm したか (token 変化) を低 A7 帯で検出。 */
     if (s_p92_frame_armed && s_p92_frame_token != s_p108_prev_p92_token) {
         s_p108_prev_p92_token = s_p92_frame_token;
@@ -25500,13 +25214,6 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
      * 内部 (alignment + range)。dump 発火は per-chunk hook 側 (p87a_dump)。 */
     p87a_on_vec_fetch(addr_raw);
 #endif
-#if P92_ENABLE
-    /* P92-EXCSIG (a-2)+(b): vec-fetch 相関 + handler $05E6 検出。P91 と独立フック
-     * (P91 ロジック非改変)。STEP1 ($B8 positive control) と (b) ($05E6) は addr<0x400
-     * 帯の外を見るため callsite では pre-gate せず全 ReadW で呼ぶ (内部で address gate)。
-     * prev ReadW 値の保持も p92_on_readw 内部で行う。dump 発火は panic-terminus 側。 */
-    p92_on_readw(addr_raw & 0x00FFFFFFu);
-#endif
 #if P93_ENABLE
     /* P93-CFENTRY: G1 (窓拡張 handler-pop) + G2 (全ベクタ vec fetch) + G6 (復帰パス
      * live-PC gate)。p92_on_readw と独立フック (P92 ロジック非改変)。内部で address
@@ -28238,12 +27945,6 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
     /* P135 Part3: frame 窓内の $1FF4..$1FF8 word write 通過を audit。READ-ONLY。 */
     p135_write_audit(addr, (uint16_t)(val & 0xFFFFu), 0u);
 #endif
-#if P92_ENABLE
-    /* P92-EXCSIG: GLOBAL word-write カウンタ (毎 WriteW で ++)。frame-push と
-     * vec-fetch の freshness 相関 (write_ctr delta<=2) に使う。ゲート内のみ加算だと
-     * 進まず無関係な後続 vec data-read を偽相関させるため global。 */
-    s_p92_write_ctr++;
-#endif
 #if P82XI_ENABLE
     /* P82-X-I 段階別キャプチャ用の関数スコープ宣言（if ブロック内ではない）。
      * 段階 A/B/C/D の 4 観測点で参照される。read-only — val は改変しない。 */
@@ -28290,15 +27991,6 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
         }
     }
 #endif /* P71_PROBE_ENABLE */
-#if P92_ENABLE
-    /* P92-EXCSIG (a-1): supervisor-stack frame-push latch。ゲート addr∈[0x1EF0,0x2010)
-     * を callsite で inline 判定してから関数呼出 (P91 Minor-4 precedent: 非対象 write で
-     * 関数呼出を省き P67 regression surface 最小化)。ゲート全域 ≥0x400 ゆえ P59G10 strip
-     * 対象外 = 配置は strip 前後で値同一 (任意)。観測専用、val 改変なし。 */
-    if (addr >= 0x1EF0u && addr < 0x2010u) {
-        p92_on_stack_write(addr, val);
-    }
-#endif /* P92_ENABLE */
 #if P93_ENABLE
     /* P93-CFENTRY G5: $A0E word write ring + $FF1E32 jsr push 検出。P92 の
      * [0x1EF0,0x2010) ゲート外 ($A0E はこの窓に入らない) ゆえ ungated 関数スコープに
@@ -31393,14 +31085,6 @@ int32_t m68000_execute(int32_t cycles)
                 p90_emit_dump();
             }
 #endif
-#if P92_ENABLE
-            /* P92-EXCSIG: 同じ panic-terminus PC で独立 one-shot dump。既存 P91 dump
-             * 直後に追記し既存出力非改変。callback でなく chunk hook から呼ぶ
-             * (M2-loc 罠回避、P88/P89/P90/P91 precedent)。 */
-            if ((pc_now_h == 0xff0632u || pc_now_h == 0xff063cu) && !s_p92_dumped) {
-                p92_emit_dump();
-            }
-#endif
 #if P93_ENABLE
             /* P93-CFENTRY: 同じ panic-terminus PC で独立 one-shot dump。既存 P92 dump
              * 直後に追記し既存出力非改変。callback でなく chunk hook から呼ぶ
@@ -33772,35 +33456,6 @@ void m68000_reset_p47d_counters(void)
     s_p90_dumped        = 0;
     s_p90_have_entry_d7 = 0;
     s_p90_entry_d7      = 0;
-#endif
-#if P92_ENABLE
-    /* P92-EXCSIG: reset で全 probe state を初期化 (再実行時もまっさらな状態から開始)。 */
-    s_p92_prev_sw_addr  = 0xFFFFFFFFu;
-    s_p92_sw_seq        = 0;
-    s_p92_sw_ring_a[0]  = s_p92_sw_ring_a[1] = s_p92_sw_ring_a[2] = 0;
-    s_p92_sw_ring_v[0]  = s_p92_sw_ring_v[1] = s_p92_sw_ring_v[2] = 0;
-    s_p92_frame_pc      = 0;
-    s_p92_frame_sr      = 0;
-    s_p92_frame_armed   = 0;
-    s_p92_frame_token   = 0;
-    s_p92_write_ctr     = 0;
-    s_p92_prev_readw_hi = 0;
-    s_p92_b8_seen       = 0;
-    s_p92_b8_pc         = 0;
-    s_p92_b8_sr         = 0;
-    s_p92_b8_handler    = 0;
-    s_p92_b8_pc_match   = 0;
-    s_p92_exc_seen      = 0;
-    s_p92_exc_total     = 0;
-    memset(s_p92_exc_vec,  0, sizeof(s_p92_exc_vec));
-    memset(s_p92_exc_pc,   0, sizeof(s_p92_exc_pc));
-    memset(s_p92_exc_sr,   0, sizeof(s_p92_exc_sr));
-    memset(s_p92_exc_slot, 0, sizeof(s_p92_exc_slot));
-    s_p92_dr_total      = 0;
-    memset(s_p92_dr_addr, 0, sizeof(s_p92_dr_addr));
-    s_p92_handler_seen  = 0;
-    s_p92_handler_nn    = 0;
-    s_p92_dumped        = 0;
 #endif
 #if P93_ENABLE
     /* P93-CFENTRY: reset で全 probe state を初期化 (8×再init で clean slate)。 */

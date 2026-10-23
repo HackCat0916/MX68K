@@ -2312,23 +2312,6 @@ void p82xv_on_chunk_pc(uint32_t pc);  /* チャンクごとの PC: CP-V-3 / CP-V
  *  ブロックが消滅し pre-P90 とバイト等価に戻る。 */
 #define P90_ENABLE    0
 
-/* P92-EXCSIG: 例外 dispatch シグネチャ probe — 「panic は真の CPU 例外経由か /
- *  control-flow 終端か」を frame-push×vec-fetch 相関で確実裁定 (P91 宙吊りを解消)。
- *  主 (a): WriteW で supervisor-stack frame-push (PC long + SR word の 3 連続降順
- *  word write、seq>=3、ゲート addr∈[0x1EF0,0x2010)) を latch → ReadW で
- *  STEP1 positive control (addr==$B8 = TRAP#14 vector を lo24 filter の外で検出、
- *  handler lo24==$FF0632 assert、faulting PC==$FF062A を P67 cross-check) +
- *  STEP2 上流例外 (lo24==$FF05E4 の vec fetch、addr==$00 除外、frame-push と
- *  freshness 相関 write_ctr delta<=2) を弁別。傍証 (b): addr∈[0x1EF0,0x2010) かつ
- *  全 $xxFF05E6 longword read = handler $FF05E8 実行の直接証拠 + 元ベクタ番号 nn。
- *  (c): 既存 P47-D PC ring を terminus で read-only 再走査し computed jmp(a1)
- *  predecessor ($FF036E/$FF042A) を探索。VERDICT 評価順序
- *  EXC-DISPATCH-CONFIRMED > HANDLER-VIA-CONTROL-FLOW > NO-EXC-CONTROL-FLOW >
- *  INCONCLUSIVE。観測専用 (read-only)・emulation 不変・新規 hot-path callback ゼロ
- *  (既存 WriteW/ReadW に address-gated latch を pure addition)。既存
- *  P87/P88/P82XG/P47D/P89/P90/P91/CP-R/CP-T/P67 を1バイトも改変しない。
- *  P92_ENABLE 0 で全 #if ブロックが消滅し pre-P92 とバイト等価に戻る。 */
-#define P92_ENABLE    0
 
 /* P93-CFENTRY: panic 域 ($FF05E4-$FF0628) への control-flow 到達経路を ground-truth
  *  で確定する観測専用 probe。fork 決着対象: 仮説A (例外→$FF05E4 default handler) vs
