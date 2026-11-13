@@ -44,6 +44,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
 - **ドラッグ&ドロップマウント** — ディスクイメージをウィンドウにドロップしてFDDマウント（**FD のみ** — HDD/SCSI/CD-ROM/MOイメージは各設定画面の該当行へD&D可）
 - **フロッピードライブ最大4台** — FD0/FD1に加え、設定画面「Hardware」タブの「外付けFDDユニット」を有効にするとFD2/FD3も使用可能（FD2/FD3の挿入・イジェクトはmacOS版のFileメニューのみ）
+- **ふろっぴU君対応（実験的、macOS版のみ）** — TNB製作所製「ふろっぴU君」をUSB接続し、実機の5インチFDDに入れた本物のフロッピーディスクを読み書き・FORMAT（書込み・FORMATは既定オフ）。**専用ハードウェアが必要**（[詳細](#ふろっぴu君実機fdd接続--floppyu-real-floppy-drive-connection)）
 - **キーボード入力** — X68000のJISキーボードレイアウトに対応、キーリマップ設定・ソフトウェアキーボード対応
 - **クロック設定** — 10〜25MHz（実機・改造機相当の8段階）と50/100/200MHz（実験的）の固定選択肢、または1〜64,000MHzの任意値（カスタム入力）。ハードリセット不要で反映
 - **ターボ / ノーウェイト** — 2x〜5x固定倍率、または上限無しの専用スレッド駆動ノーウェイトモード
@@ -73,6 +74,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP** (FD, single/multi-image archives)
 - **Drag & Drop Mounting** — drop a disk image onto the window to mount it as FDD (**FD only** — HDD/SCSI/CD-ROM/MO images can be dropped onto the corresponding row in each settings tab)
 - **Up to 4 Floppy Drives** — in addition to FD0/FD1, enabling "External FDD Unit" in the "Hardware" settings tab adds FD2/FD3 (inserting/ejecting FD2/FD3 is available only from the File menu on macOS)
+- **FloppyU Support (experimental, macOS only)** — connect TNB製作所's "FloppyU" (ふろっぴU君) over USB to read, write, and FORMAT real floppy disks in real 5.25-inch drives (writing and FORMAT are off by default). **Requires the dedicated hardware** ([details](#ふろっぴu君実機fdd接続--floppyu-real-floppy-drive-connection))
 - **Keyboard Input** — X68000 JIS keyboard layout support, key remapping, on-screen software keyboard
 - **Clock Speed** — fixed choices of 10–25 MHz (8 steps matching real and modified machines) and 50/100/200 MHz (experimental), or any value from 1 to 64,000 MHz (custom input). Applies without a hard reset
 - **Turbo / No-Wait** — fixed 2x–5x multipliers, or an uncapped dedicated-thread no-wait mode
@@ -137,6 +139,7 @@ iOS版（iPhone/iPad）はmacOS版と同じエミュレーションコア・設�
 - FD2/FD3の挿入・イジェクト
 - Mercury Unit（macOS版のみ）
 - 電源ボタン・ゲストソフトからの電源OFF要求の検出（現状macOS版のみ）
+- ふろっぴU君（実機FDD接続、macOS版のみ）
 
 **English:**
 
@@ -168,6 +171,7 @@ The iOS version (iPhone/iPad) shares the same emulation core and settings screen
 - Inserting/ejecting FD2/FD3
 - Mercury Unit (macOS only)
 - The power button and detection of guest power-off requests (currently macOS only)
+- FloppyU (real floppy drive connection, macOS only)
 
 ---
 
@@ -264,6 +268,38 @@ The emulator requires original X68000 BIOS ROM files, obtained from a real machi
 | `.iso` | CD-ROM image (ISO, Mode1) | Mount from the SCSI settings tab (fixed ID6); CD-DA and CD-boot are not supported |
 | `.img` | Generic image | |
 | `.zip` | Compressed FD image | FD only; a selection sheet appears for multi-image archives |
+
+### ふろっぴU君（実機FDD接続） / FloppyU (Real Floppy Drive Connection)
+
+ディスクイメージの代わりに、**本物のフロッピーディスク**をMX68Kから直接扱う機能です（実験的機能・macOS版のみ）。
+
+- **必要なもの:** TNB製作所製の「ふろっぴU君」本体（実機の5インチFDDをUSB経由でホストPCに接続する専用ユニット）と、それに接続した実機の5インチFDD、USBケーブル。**エミュレータ単体では使えません。** 対応するのはTNB製作所製のふろっぴU君のみです。
+- **他のエミュレータとの関係:** TNB製作所は専用の改造版エミュレータ（XM6t ver2.0.6.37 / XEiJ+t ver t23）でふろっぴU君に対応しています（XM6本家・XEiJ本家は非対応）。MX68Kの対応はこれらとは別に、MX68K自身が独自に実装したものです。
+- **できること:** 読み取り（ふろっぴU君のドライブからのHuman68k起動を含む）、書き込み、FORMAT。書き込みとFORMATは**既定でオフ**で、設定画面で個別に許可します。
+- **主な制限:**
+  - 書き込みは通常のHuman68kのファイル操作（COPY等の1セクタ単位の書き込み）が対象です。マルチセクタ書き込みなど一部の書き込み要求は「書込み禁止」エラーで拒否します（XM6t/XEiJ+tはこれらも中継するため、動作に差があります）。
+  - 実ディスクを守るため、MX68K独自の安全柵（ディスク交換後はそのドライブを一度読むまで書き込みを拒否、同じセクタへの異常な連続書き込みの検知、書き込み結果の読み戻し照合など）があります。異常を検知すると、MX68Kを再起動するまで書き込みを停止します（読み取りは継続できます）。
+  - FORMATは、すでに標準2HD（1024バイト×8セクタ）で物理フォーマット済みのディスクの再フォーマットのみ対応します。未フォーマットのディスクや他の物理形式のディスクはFORMATできません。同じディスクへのFORMATは続けて2回までです（ディスクを入れ直すと再びFORMATできます）。
+  - 物理シリンダ77（C77）はFORMATしません（XEiJ・XM6と同じ。Human68kの2HDはシリンダ0〜76のみを使います）。
+  - 書き込み・FORMATの対象には、ゲーム原盤などのディスクも含まれ得ます。大切なディスクは**書込み保護タブ**で保護してください。
+
+設定方法は [USAGE.md](USAGE.md) の「ふろっぴU君」の項を参照してください。
+
+**English:**
+
+This feature lets MX68K work with **real floppy disks** directly, instead of disk images (experimental, macOS only).
+
+- **Requirements:** a "FloppyU" (ふろっぴU君) unit made by TNB製作所 — a dedicated unit that connects real 5.25-inch floppy drives to a host computer over USB — plus the real 5.25-inch drives attached to it and a USB cable. **This feature cannot be used with the emulator alone.** Only TNB製作所's FloppyU is supported.
+- **Relation to other emulators:** TNB製作所 supports FloppyU in its own modified emulator builds (XM6t ver2.0.6.37 / XEiJ+t ver t23); mainline XM6 and XEiJ do not support it. MX68K's support is a separate, independent implementation of its own.
+- **What it can do:** read (including booting Human68k from a FloppyU drive), write, and FORMAT. Writing and FORMAT are **off by default** and are enabled separately in the settings.
+- **Main limitations:**
+  - Writing covers ordinary Human68k file operations (single-sector writes such as COPY). Some write requests, such as multi-sector writes, are refused with a "write-protected" error (XM6t/XEiJ+t pass these through, so behavior differs).
+  - To protect real disks, MX68K adds its own safety checks (after a disk swap, writes to that drive are refused until it has been read once; abnormal repeated writes to the same sector are detected; written data is verified by reading it back; and more). When a problem is detected, writing stops until MX68K is restarted (reading continues to work).
+  - FORMAT only re-formats disks that are already physically formatted as standard 2HD (1024 bytes × 8 sectors). Unformatted disks and disks with other physical formats cannot be formatted. The same disk can be formatted at most twice in a row (re-inserting the disk allows formatting again).
+  - Physical cylinder 77 (C77) is not formatted (same as XEiJ and XM6; Human68k 2HD uses only cylinders 0–76).
+  - Writing and FORMAT can also reach disks such as original game disks. Protect important disks with their **write-protect tab**.
+
+See the "FloppyU" section of [USAGE.md](USAGE.md) for setup instructions.
 
 ---
 

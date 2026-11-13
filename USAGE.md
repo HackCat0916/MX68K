@@ -154,6 +154,58 @@ Eject via the toolbar's eject button or the File menu. The padlock icon toggles 
 
 **FD2/FD3 (external FDD unit):** turn on "External FDD Unit (drives 2 and 3)" in the "Hardware" settings tab, press "Apply", then perform a hard reset (⌘R) to add two more drives, FD2/FD3 (this corresponds to attaching an external FDD unit to a real machine; when it is off, Human68k shows no C:/D: drive). FD2/FD3 can be inserted/ejected only from the File menu's "FD Drive (FD2)" / "FD Drive (FD3)" (the toolbar and drag & drop support FD0/FD1 only).
 
+### ふろっぴU君（実機5インチFDD） / FloppyU (Real 5.25-inch Floppy Drives)
+
+TNB製作所製の「ふろっぴU君」をUSBで接続すると、実機の5インチFDDに入れた本物のフロッピーディスクを、ディスクイメージの代わりにMX68Kから読み書きできます（実験的機能・**macOS版のみ**）。ふろっぴU君本体と実機の5インチFDDが必要で、エミュレータ単体では使えません。対応するのはTNB製作所製のふろっぴU君のみです。
+
+**設定手順:**
+
+1. ふろっぴU君（実機FDDを接続済み）をMacにUSBで接続します。
+2. 設定画面（⌘,）の「Hardware」タブを開きます。「機種設定」欄の「ふろっぴU君: 検出済み」の表示で接続を確認できます（未接続なら「ふろっぴU君: 未検出」）。
+3. 「ふろっぴU君を利用する」をオンにします。
+4. 「ふろっぴU君の割当てドライブ」で、ふろっぴU君の2台のドライブをエミュレータのどのドライブとして使うかを選びます。
+   - 「ドライブ0と1」— FD0/FD1として使います。この場合、本物のフロッピーディスクからHuman68kを起動できます。
+   - 「ドライブ2と3」— FD2/FD3として使います。上の「外付け FDD ユニット(ドライブ 2 / 3)」もオンにする必要があります（オフのままではふろっぴU君は動作しません）。
+5. 書き込みも行う場合は「ふろっぴU君のディスクへの書込みを許可する」をオンにします（既定オフ。書き込みは実際のフロッピーディスクに対して行われます）。
+6. FORMATも行う場合は、さらに「ふろっぴU君のディスクのFORMATを許可する」をオンにします（既定オフ。書き込み許可がオンのときだけ選べます）。
+7. 「適用」を押し、ハードリセット（⌘R）すると反映されます。
+
+ふろっぴU君の利用中は、割当てたドライブにマウントしていたディスクイメージの代わりに、ふろっぴU君のドライブが使われます。現在の状態は同じ欄の「書込み: オン/オフ」「FORMAT: オン/オフ」の表示で確認できます。
+
+**使い方と注意:**
+
+- ディスクの読み書きは、通常どおりHuman68kから行います（`DIR`、`COPY`、`FORMAT.X`など）。
+- ディスクを交換した直後は、そのドライブを一度読むまで書き込みが拒否されることがあります。「書込み禁止」エラーが出たら「中止」を選び、そのドライブで`DIR`を実行してから操作をやり直してください。それでも出る場合は、安全のため書き込みが停止しています（表示が「書込み: 再起動まで停止中」）。MX68Kを再起動してください。
+- マルチセクタ書き込みなど一部の書き込み要求は、安全のため「書込み禁止」エラーで拒否します。
+- FORMATは、標準2HD（1024バイト×8セクタ）で物理フォーマット済みのディスクの再フォーマットのみ対応します（未フォーマットのディスクや他の物理形式は不可）。同じディスクへのFORMATは続けて2回まで（ディスクを入れ直すと再びFORMATできます）。物理シリンダ77はFORMATしません（XEiJ・XM6と同じ）。FORMATが途中で止まった場合は「FORMAT: 再起動まで停止中 — ディスクが途中まで初期化されている可能性があります」と表示されるので、MX68Kを再起動してください。
+- 書き込み・FORMATの対象には、ゲーム原盤などのディスクも含まれ得ます。大切なディスクは書込み保護タブで保護してください。また、アクセス中にディスクを取り出さないでください。
+
+**English:**
+
+Connect TNB製作所's "FloppyU" (ふろっぴU君) over USB to read and write real floppy disks in real 5.25-inch drives from MX68K, instead of disk images (experimental, **macOS only**). It requires the FloppyU unit and real 5.25-inch drives — it cannot be used with the emulator alone. Only TNB製作所's FloppyU is supported.
+
+**Setup:**
+
+1. Connect the FloppyU (with its real floppy drives attached) to your Mac over USB.
+2. Open the "Hardware" tab of the settings window (⌘,). In the "Machine Configuration" section, "FloppyU: Detected" confirms the connection ("FloppyU: Not detected" if it is not connected).
+3. Turn on "Use FloppyU".
+4. Under "FloppyU drives", choose which emulator drives the FloppyU's two drives act as:
+   - "Drives 0 and 1" — they act as FD0/FD1. In this case you can boot Human68k from a real floppy disk.
+   - "Drives 2 and 3" — they act as FD2/FD3. "External FDD Unit (drives 2 and 3)" above must also be on (FloppyU stays inactive until it is).
+5. To write as well, turn on "Allow writing to FloppyU disks" (off by default; writes go to the real floppy disk).
+6. To FORMAT as well, also turn on "Allow FORMAT on FloppyU disks" (off by default; available only while writing is allowed).
+7. Press "Apply", then perform a hard reset (⌘R) for the changes to take effect.
+
+While FloppyU is in use, the assigned drives use the FloppyU drives instead of any disk images mounted on them. The "Writing: On/Off" and "Formatting: On/Off" lines in the same section show the current state.
+
+**Usage notes:**
+
+- Read and write disks from Human68k as usual (`DIR`, `COPY`, `FORMAT.X`, etc.).
+- Right after a disk swap, writes to that drive may be refused until the drive has been read once. If Human68k reports a write-protect (書込み禁止) error, choose "中止" (Abort), run `DIR` on that drive, and retry. If the error persists, writing has been stopped for safety (the status shows "Writing: Stopped until restart") — restart MX68K.
+- Some write requests, such as multi-sector writes, are refused with a "write-protected" error for safety.
+- FORMAT only re-formats disks already physically formatted as standard 2HD (1024 bytes × 8 sectors) — unformatted disks and other physical formats are not supported. The same disk can be formatted at most twice in a row (re-inserting the disk allows formatting again). Physical cylinder 77 is not formatted (same as XEiJ and XM6). If FORMAT stops partway, the status shows "Formatting: Stopped until restart — the disk may be partially formatted"; restart MX68K.
+- Writing and FORMAT can also reach disks such as original game disks. Protect important disks with their write-protect tab, and do not eject a disk while it is being accessed.
+
 ### ハードディスク（SASI/SCSI）・MO・CD-ROM / Hard Disks (SASI/SCSI), MO, CD-ROM
 
 これらは設定画面（⌘,）の各タブから設定します。メイン画面へのドラッグ&ドロップは受け付けません（実機の構造上、フロッピーとは別の仕組みのため）が、**各タブ内のディスク行へは直接ドラッグ&ドロップでマウントできます**。
