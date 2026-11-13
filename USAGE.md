@@ -156,7 +156,7 @@ Eject via the toolbar's eject button or the File menu. The padlock icon toggles 
 
 ### ふろっぴU君（実機5インチFDD） / FloppyU (Real 5.25-inch Floppy Drives)
 
-TNB製作所製の「ふろっぴU君」をUSBで接続すると、実機の5インチFDDに入れた本物のフロッピーディスクを、ディスクイメージの代わりにMX68Kから読み書きできます（実験的機能・**macOS版のみ**）。ふろっぴU君本体と実機の5インチFDDが必要で、エミュレータ単体では使えません。対応するのはTNB製作所製のふろっぴU君のみです。
+TNB製作所製の「ふろっぴU君」をUSBで接続すると、実機の5インチFDDに入れた本物のフロッピーディスクを、ディスクイメージの代わりにMX68Kから読み書きできます（**macOS版のみ**）。ふろっぴU君本体と実機の5インチFDDが必要で、エミュレータ単体では使えません。対応するのはTNB製作所製のふろっぴU君のみです。
 
 **設定手順:**
 
@@ -182,7 +182,7 @@ TNB製作所製の「ふろっぴU君」をUSBで接続すると、実機の5イ
 
 **English:**
 
-Connect TNB製作所's "FloppyU" (ふろっぴU君) over USB to read and write real floppy disks in real 5.25-inch drives from MX68K, instead of disk images (experimental, **macOS only**). It requires the FloppyU unit and real 5.25-inch drives — it cannot be used with the emulator alone. Only TNB製作所's FloppyU is supported.
+Connect TNB製作所's "FloppyU" (ふろっぴU君) over USB to read and write real floppy disks in real 5.25-inch drives from MX68K, instead of disk images (**macOS only**). It requires the FloppyU unit and real 5.25-inch drives — it cannot be used with the emulator alone. Only TNB製作所's FloppyU is supported.
 
 **Setup:**
 

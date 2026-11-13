@@ -44,7 +44,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
 - **ドラッグ&ドロップマウント** — ディスクイメージをウィンドウにドロップしてFDDマウント（**FD のみ** — HDD/SCSI/CD-ROM/MOイメージは各設定画面の該当行へD&D可）
 - **フロッピードライブ最大4台** — FD0/FD1に加え、設定画面「Hardware」タブの「外付けFDDユニット」を有効にするとFD2/FD3も使用可能（FD2/FD3の挿入・イジェクトはmacOS版のFileメニューのみ）
-- **ふろっぴU君対応（実験的、macOS版のみ）** — TNB製作所製「ふろっぴU君」をUSB接続し、実機の5インチFDDに入れた本物のフロッピーディスクを読み書き・FORMAT（書込み・FORMATは既定オフ）。**専用ハードウェアが必要**（[詳細](#ふろっぴu君実機fdd接続--floppyu-real-floppy-drive-connection)）
+- **ふろっぴU君対応（macOS版のみ）** — TNB製作所製「ふろっぴU君」をUSB接続し、実機の5インチFDDに入れた本物のフロッピーディスクを読み書き・FORMAT（書込み・FORMATは既定オフ）。**専用ハードウェアが必要**（[詳細](#ふろっぴu君実機fdd接続--floppyu-real-floppy-drive-connection)）
 - **キーボード入力** — X68000のJISキーボードレイアウトに対応、キーリマップ設定・ソフトウェアキーボード対応
 - **クロック設定** — 10〜25MHz（実機・改造機相当の8段階）と50/100/200MHz（実験的）の固定選択肢、または1〜64,000MHzの任意値（カスタム入力）。ハードリセット不要で反映
 - **ターボ / ノーウェイト** — 2x〜5x固定倍率、または上限無しの専用スレッド駆動ノーウェイトモード
@@ -74,7 +74,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP** (FD, single/multi-image archives)
 - **Drag & Drop Mounting** — drop a disk image onto the window to mount it as FDD (**FD only** — HDD/SCSI/CD-ROM/MO images can be dropped onto the corresponding row in each settings tab)
 - **Up to 4 Floppy Drives** — in addition to FD0/FD1, enabling "External FDD Unit" in the "Hardware" settings tab adds FD2/FD3 (inserting/ejecting FD2/FD3 is available only from the File menu on macOS)
-- **FloppyU Support (experimental, macOS only)** — connect TNB製作所's "FloppyU" (ふろっぴU君) over USB to read, write, and FORMAT real floppy disks in real 5.25-inch drives (writing and FORMAT are off by default). **Requires the dedicated hardware** ([details](#ふろっぴu君実機fdd接続--floppyu-real-floppy-drive-connection))
+- **FloppyU Support (macOS only)** — connect TNB製作所's "FloppyU" (ふろっぴU君) over USB to read, write, and FORMAT real floppy disks in real 5.25-inch drives (writing and FORMAT are off by default). **Requires the dedicated hardware** ([details](#ふろっぴu君実機fdd接続--floppyu-real-floppy-drive-connection))
 - **Keyboard Input** — X68000 JIS keyboard layout support, key remapping, on-screen software keyboard
 - **Clock Speed** — fixed choices of 10–25 MHz (8 steps matching real and modified machines) and 50/100/200 MHz (experimental), or any value from 1 to 64,000 MHz (custom input). Applies without a hard reset
 - **Turbo / No-Wait** — fixed 2x–5x multipliers, or an uncapped dedicated-thread no-wait mode
@@ -271,7 +271,7 @@ The emulator requires original X68000 BIOS ROM files, obtained from a real machi
 
 ### ふろっぴU君（実機FDD接続） / FloppyU (Real Floppy Drive Connection)
 
-ディスクイメージの代わりに、**本物のフロッピーディスク**をMX68Kから直接扱う機能です（実験的機能・macOS版のみ）。
+ディスクイメージの代わりに、**本物のフロッピーディスク**をMX68Kから直接扱う機能です（macOS版のみ）。
 
 - **必要なもの:** TNB製作所製の「ふろっぴU君」本体（実機の5インチFDDをUSB経由でホストPCに接続する専用ユニット）と、それに接続した実機の5インチFDD、USBケーブル。**エミュレータ単体では使えません。** 対応するのはTNB製作所製のふろっぴU君のみです。
 - **他のエミュレータとの関係:** TNB製作所は専用の改造版エミュレータ（XM6t ver2.0.6.37 / XEiJ+t ver t23）でふろっぴU君に対応しています（XM6本家・XEiJ本家は非対応）。MX68Kの対応はこれらとは別に、MX68K自身が独自に実装したものです。
@@ -287,7 +287,7 @@ The emulator requires original X68000 BIOS ROM files, obtained from a real machi
 
 **English:**
 
-This feature lets MX68K work with **real floppy disks** directly, instead of disk images (experimental, macOS only).
+This feature lets MX68K work with **real floppy disks** directly, instead of disk images (macOS only).
 
 - **Requirements:** a "FloppyU" (ふろっぴU君) unit made by TNB製作所 — a dedicated unit that connects real 5.25-inch floppy drives to a host computer over USB — plus the real 5.25-inch drives attached to it and a USB cable. **This feature cannot be used with the emulator alone.** Only TNB製作所's FloppyU is supported.
 - **Relation to other emulators:** TNB製作所 supports FloppyU in its own modified emulator builds (XM6t ver2.0.6.37 / XEiJ+t ver t23); mainline XM6 and XEiJ do not support it. MX68K's support is a separate, independent implementation of its own.
