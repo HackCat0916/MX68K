@@ -256,6 +256,11 @@ struct ExtensionsConfig: Codable {
     // ON のときだけ意味を持ち、保存時は書込み許可 OFF なら false へ連動する(SettingsViewModel.apply)。反映はハードリセット(⌘R)。
     // 環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視される。iOS では使わない(常に false)。
     var floppyuFormatEnabled: Bool = false
+    // P1089: ふろっぴU君の書込みモード。false = 安全優先(既定、1セクタずつ書込み完了を確認)、true = 高速(XEiJ+t 方式、
+    // 書込み結果を確認しない)。書込み許可(floppyuWriteEnabled)が ON のときだけ意味を持ち、保存時は書込み許可 OFF なら
+    // false へ連動する(SettingsViewModel.apply)。反映はハードリセット(⌘R)。環境変数 MX68K_FLOPPYU_WRITE が設定されていれば
+    // 無視される。iOS では使わない(常に false)。
+    var floppyuWriteFast: Bool = false
     // P490 (MIDI Stage 2): リセット送信 / 音源種別 / 送信遅延 / 入出力デバイス選択。
     var midiResetOnInit: Bool = true
     var midiResetType: Int = 0       // 0=LA, 1=GM, 2=GS, 3=XG
@@ -380,6 +385,8 @@ struct ExtensionsConfig: Codable {
         floppyuWriteEnabled = try c.decodeIfPresent(Bool.self, forKey: .floppyuWriteEnabled) ?? false
         // P1067: 新キー。旧 config.json には存在しないため decodeIfPresent 必須。
         floppyuFormatEnabled = try c.decodeIfPresent(Bool.self, forKey: .floppyuFormatEnabled) ?? false
+        // P1089: 新キー。旧 config.json には存在しないため decodeIfPresent 必須。
+        floppyuWriteFast = try c.decodeIfPresent(Bool.self, forKey: .floppyuWriteFast) ?? false
         // P490: 新キー。既存 config.json(P488 以前)には存在しないため decodeIfPresent 必須。
         midiResetOnInit    = try c.decodeIfPresent(Bool.self, forKey: .midiResetOnInit) ?? true
         midiResetType      = try c.decodeIfPresent(Int.self, forKey: .midiResetType) ?? 0

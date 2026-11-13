@@ -1681,6 +1681,126 @@
         }
       }
     },
+    "FloppyU write mode": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君の書込みモード"
+          }
+        }
+      }
+    },
+    "Safe (verify each write)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全優先(1セクタずつ書込み完了を確認)"
+          }
+        }
+      }
+    },
+    "Fast (like XEiJ+t, not verified)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高速(XEiJ+t方式、書込み結果を確認しない)"
+          }
+        }
+      }
+    },
+    "Safe waits for each sector to be physically written (about 4 minutes per disk). Fast lets FloppyU report success before the data reaches the disk (about 1 minute per disk).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全優先は1セクタずつ実際にディスクへ書き込まれるのを待ちます(1枚あたり約4分)。高速はデータがディスクに届く前にふろっぴU君が成功を返します(1枚あたり約1分)。"
+          }
+        }
+      }
+    },
+    "⚠ In Fast mode, if FloppyU later fails to write a sector, neither the emulator nor the guest is told, and the disk can be left with missing data. Wait until the drive's access lamp goes off before removing the disk, unplugging FloppyU, or quitting MX68K. Use Safe for disks you cannot afford to lose.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 高速モードでは、ふろっぴU君があとでセクタの書込みに失敗しても、エミュレータにもゲストにも知らされず、ディスクのデータが欠けたまま残ることがあります。ディスクの取出し、ふろっぴU君のUSB取外し、MX68Kの終了は、ドライブのアクセスランプが消えるまで待ってください。失いたくないディスクには安全優先を使ってください。"
+          }
+        }
+      }
+    },
+    "Writing: On (Safe)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書込み: オン(安全優先)"
+          }
+        }
+      }
+    },
+    "Writing: On (Fast)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書込み: オン(高速)"
+          }
+        }
+      }
+    },
+    "Writing: Stopped until restart — FloppyU discarded unwritten data": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書込み: 再起動まで停止中 — ふろっぴU君が未書込みのデータを破棄しました"
+          }
+        }
+      }
+    },
+    "Unwritten data in FloppyU: yes": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君内の未書込みデータ: あり"
+          }
+        }
+      }
+    },
+    "Unwritten data in FloppyU: no": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君内の未書込みデータ: なし"
+          }
+        }
+      }
+    },
+    "Not yet verified by reading back: %lld sectors": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み戻しで未確認: %lld セクタ"
+          }
+        }
+      }
+    },
+    "Read-back mismatches: %lld": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "読み戻し不一致: %lld"
+          }
+        }
+      }
+    },
     "FPU Enabled": {
       "localizations": {
         "ja": {

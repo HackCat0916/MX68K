@@ -155,20 +155,55 @@ struct HardwareSettingsView: View {
         return (mode, latched != 0, envOverride != 0)
     }
 
+    // P1089: 書込みモードの状態(読取り専用)。fast/src は直近の init / ハードリセット(Apply→⌘R)で確定したもの、
+    // dirty・未照合数・不一致数・破棄停止は実行中の値(1秒周期で読む)
+    private func floppyUWriteFastStatus() -> (fast: Bool, dirty: Bool, unverified: Int, mismatches: Int, discarded: Bool) {
+        var fast: Int32 = 0, src: Int32 = 0, dirty: Int32 = 0, unverified: Int32 = 0, mismatches: Int32 = 0, discarded: Int32 = 0
+        mx68k_floppyu_get_write_fast(&fast, &src, &dirty, &unverified, &mismatches, &discarded)
+        return (fast != 0, dirty != 0, Int(unverified), Int(mismatches), discarded != 0)
+    }
+
     @ViewBuilder
     private func floppyUWriteStatusRow() -> some View {
         let st = floppyUWriteStatus()
-        if st.latched {
+        let fs = floppyUWriteFastStatus()
+        if st.latched && fs.discarded {
+            Text("Writing: Stopped until restart — FloppyU discarded unwritten data")
+                .font(.subheadline).foregroundColor(.red)
+        } else if st.latched {
             Text("Writing: Stopped until restart").font(.subheadline).foregroundColor(.red)
         } else if st.envOverride {
             let value = ProcessInfo.processInfo.environment["MX68K_FLOPPYU_WRITE"] ?? ""
             Text("Writing: Set by environment variable (MX68K_FLOPPYU_WRITE=\(value))")
                 .font(.subheadline).foregroundColor(.orange)
         } else if st.mode == 1 {
-            Text("Writing: On").font(.subheadline).foregroundColor(.green)
+            if fs.fast {
+                Text("Writing: On (Fast)").font(.subheadline).foregroundColor(.green)
+            } else {
+                Text("Writing: On (Safe)").font(.subheadline).foregroundColor(.green)
+            }
         } else {
             Text("Writing: Off").font(.subheadline).foregroundColor(.secondary)
         }
+        // P1089(B-12): 高速モードのときだけ、未書込みデータの有無・未照合セクタ数・読み戻し不一致数を出す
+        if fs.fast {
+            if fs.dirty {
+                Text("Unwritten data in FloppyU: yes").font(.subheadline).foregroundColor(.orange)
+            } else {
+                Text("Unwritten data in FloppyU: no").font(.subheadline).foregroundColor(.secondary)
+            }
+            Text("Not yet verified by reading back: \(fs.unverified) sectors")
+                .font(.subheadline).foregroundColor(.secondary)
+            Text("Read-back mismatches: \(fs.mismatches)")
+                .font(.subheadline).foregroundColor(fs.mismatches > 0 ? .red : .secondary)
+        }
+    }
+
+    /// P1089 — 書込みモード Picker のバインディング。書込み許可 OFF の間は表示上 Safe(保存値の連動は SettingsViewModel.apply)。
+    private var floppyUWriteFastBinding: Binding<Bool> {
+        Binding(
+            get: { settingsViewModel.floppyuWriteEnabled && settingsViewModel.floppyuWriteFast },
+            set: { settingsViewModel.floppyuWriteFast = $0 })
     }
 
     // P1067: FORMAT 状態(読取り専用)。値は直近の init / ハードリセット(Apply→⌘R)で確定したもの。
@@ -440,6 +475,23 @@ struct HardwareSettingsView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                // P1089 — 書込みモード(既定 Safe)。書込み許可が ON のときだけ有効。確認アラートは出さない(Step 4 U-5)。
+                // 環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視される(上の状態行に表示)。
+                Picker("FloppyU write mode", selection: floppyUWriteFastBinding) {
+                    Text("Safe (verify each write)").tag(false)
+                    Text("Fast (like XEiJ+t, not verified)").tag(true)
+                }
+                .disabled(!settingsViewModel.floppyuWriteEnabled)
+                Text("Safe waits for each sector to be physically written (about 4 minutes per disk). Fast lets FloppyU report success before the data reaches the disk (about 1 minute per disk).")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if floppyUWriteFastBinding.wrappedValue {
+                    Text("⚠ In Fast mode, if FloppyU later fails to write a sector, neither the emulator nor the guest is told, and the disk can be left with missing data. Wait until the drive's access lamp goes off before removing the disk, unplugging FloppyU, or quitting MX68K. Use Safe for disks you cannot afford to lose.")
+                        .font(.subheadline)
+                        .foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 // P1067 — 実ディスクの FORMAT 許可(既定 OFF)。書込み許可が ON のときだけ有効。Use FloppyU OFF 時も操作可能。
                 // 環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視される(下の状態行に表示)。
                 Toggle("Allow FORMAT on FloppyU disks", isOn: floppyUFormatBinding)

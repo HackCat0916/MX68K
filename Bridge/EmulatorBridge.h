@@ -80,6 +80,16 @@ void mx68k_set_floppyu_format_enabled(bool enabled);
 // tracks_ok: 検証 ok になったトラック数(プロセス通算)/ src: 0=off 1=設定 2=環境変数 MX68K_FLOPPYU_NM_FORMAT
 // 3=設定は ON だが環境変数 MX68K_FLOPPYU_WRITE が優先されて無視
 void mx68k_floppyu_get_format_status(int32_t* on, int32_t* halted, int32_t* tracks_ok, int32_t* src);
+// P1089: ふろっぴU君の書込みモード。false=安全優先(既定、1セクタずつ書込み完了を確認)/ true=高速(XEiJ+t 方式、
+// 装置の遅延書込みを使い書込み結果を確認しない)。設定値のみ保持し、反映は init / ハードリセット。書込み許可が有効な
+// 通常利用モード(設定由来)のときだけ意味を持つ。環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視する。iOS では呼ばない。
+void mx68k_set_floppyu_write_fast(bool fast);
+// P1089: 書込みモードの状態取得(設定画面の1秒周期表示用、読取りのみ)。実装は Bridge/floppyu_fdc_passthrough_probe.c。
+// fast: 1=高速モードが有効 / src: 0=off 1=設定 3=設定は高速だが環境変数 MX68K_FLOPPYU_WRITE が優先されて無視 /
+// dirty: 1=ふろっぴU君に未書込みのデータが残っている可能性 / cached_unverified: 高速で受理し読み戻しで未照合のセクタ数 /
+// v_mismatch_cached: 高速で受理したセクタの読み戻し不一致数 / discarded: 1=ふろっぴU君が未書込みデータを破棄したため停止中
+void mx68k_floppyu_get_write_fast(int32_t* fast, int32_t* src, int32_t* dirty, int32_t* cached_unverified,
+                                  int32_t* v_mismatch_cached, int32_t* discarded);
 // P957: ふろっぴU君 USB存在検出(読取り専用、ポートを開かない)。実装は Bridge/floppyu_usb_transport.c。
 // >=0 = VID/PID一致のUSBデバイス数 / -1 = IOKit照会失敗 / -2 = 非対応(iOS)。
 // 環境変数・通信状態とは無関係に動作する。設定画面の1秒周期表示用で、エミュレーションには影響しない。

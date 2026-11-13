@@ -716,6 +716,9 @@ class EmulatorViewModel: ObservableObject {
         // P1067: ふろっぴU君の FORMAT 許可。設定値のみ push し、反映は init / ハードリセットの install で確定する
         // (normal・設定由来のときだけ有効。環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視)。
         mx68k_set_floppyu_format_enabled(config.extensions.floppyuFormatEnabled)
+        // P1089: ふろっぴU君の書込みモード(安全優先/高速)。設定値のみ push し、反映は init / ハードリセットの install で確定する
+        // (normal・設定由来のときだけ有効。環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視)。
+        mx68k_set_floppyu_write_fast(config.extensions.floppyuWriteFast)
         // P488: MIDI ボード(CZ-6BM1 / $EAE000)の装着設定。Mercury と同じく
         // 値は Bridge 側で「設定値」として保持され、配線はハードリセット（⌘R）で確定する。
         mx68k_set_midi_enabled(config.extensions.midiEnabled)
