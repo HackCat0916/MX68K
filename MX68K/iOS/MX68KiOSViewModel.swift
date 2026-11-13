@@ -78,11 +78,13 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// `onStatusUpdate` ポーリングまで最悪約1秒 Eject の有効化が遅延する。
     @Published var fddMountGeneration: Int = 0
     /// P937 — FDD書込み禁止トグルの状態(macOS版`EmulatorViewModel.fdd0WriteProtect`/
-    /// `fdd1WriteProtect`と同型)。iOSはFDD0/FDD1の2台のみUIを持つ(P712/P713のスコープ)。
+    /// `fdd1WriteProtect`と同型)。P1047でFDD2/FDD3を追加し4台分を持つ。
     /// `start(config:)`でconfigから無条件に初期化し、変更時は
     /// `onFDDWriteProtectChanged`経由でルートビュー側がconfigへ永続化する。
     @Published var fdd0WriteProtect: Bool = false
     @Published var fdd1WriteProtect: Bool = false
+    @Published var fdd2WriteProtect: Bool = false
+    @Published var fdd3WriteProtect: Bool = false
     /// P937 — 書込み禁止トグルの変更通知(macOS版`EmulatorViewModel.swift:214`と同型)。
     /// config永続化はこのクロージャを登録したルートビュー側の一箇所に集約する
     /// (トグル操作・Eject・ZIP強制保護・ゲスト起点イジェクト追従のすべてがここを通る)。
@@ -91,6 +93,8 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// エッジトリガ判定用。在席→非在席の遷移でのみトグルをOFFへ戻す)。
     private var fdd0MediaPresent = false
     private var fdd1MediaPresent = false
+    private var fdd2MediaPresent = false
+    private var fdd3MediaPresent = false
     /// Metal 初期化に失敗したときの理由(EmulatorMetalView_iOS が設定する)。
     /// ★iOS では metallib の同梱漏れが現実的な失敗モードなので、macOS 側の
     /// `fatalError` とは違い、クラッシュさせずに画面へ出す(P703 計画 §D-2)。
@@ -262,6 +266,9 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         // 同一のクランプ付きで Bridge 関数を直接呼ぶ。
         mx68k_set_adpcm_volume(Int32(max(0, min(16, config.audio.adpcmVolume))))
         mx68k_set_opm_volume(Int32(max(0, min(16, config.audio.opmVolume))))
+        // P1006: 内蔵 MT-32/SC-55 の出力音量も同じ方針で Bridge 関数を直接呼ぶ。
+        mx68k_set_mt32_output_gain(Float(max(0, min(300, config.extensions.mt32OutputGainPercent))) / 100.0)
+        mx68k_set_sc55_output_gain(Float(max(0, min(300, config.extensions.sc55OutputGainPercent))) / 100.0)
         audio.start()
 
         // P706 §D-3: ブートディスクは config 由来。空でも**起動は止めない** ——
@@ -273,6 +280,8 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         fdd1WriteProtect = config.fdd.fdd1WriteProtect
         fdd0MediaPresent = false
         fdd1MediaPresent = false
+        fdd2MediaPresent = false
+        fdd3MediaPresent = false
         let bootDisk = config.fdd.lastFDD0Path
         if !bootDisk.isEmpty, fm.fileExists(atPath: bootDisk) {
             let inserted = bootDisk.withCString { mx68k_fdd_insert(0, $0) }
@@ -283,6 +292,38 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             }
         } else {
             mx68k_log("[Swift][iOS] no boot disk in config (fdd.lastFDD0Path=\"\(bootDisk)\")")
+        }
+        // P1047 — FD1も起動時に自動復元する(macOS版`EmulatorViewModel`のFD0〜FD3復元と対称)。
+        let fdd1Disk = config.fdd.lastFDD1Path
+        if !fdd1Disk.isEmpty, fm.fileExists(atPath: fdd1Disk) {
+            let inserted = fdd1Disk.withCString { mx68k_fdd_insert(1, $0) }
+            mx68k_log("[Swift][iOS] mx68k_fdd_insert(1) -> \(inserted)")
+            if inserted == 0 && fdd1WriteProtect {
+                mx68k_fdd_set_write_protect(1, 1)
+            }
+        }
+        // P1047: FD2/FD3の自動復元は外付けFDDユニット有効時のみ(D-115再発防止——
+        // 外付けOFFのままFD2/3にメディアがあるとCore側SenseDeviceStatusが接続台数を
+        // 見ず、IPLROM起動試行ループ[白帯点滅]が再現し得る)。
+        fdd2WriteProtect = config.fdd.fdd2WriteProtect
+        fdd3WriteProtect = config.fdd.fdd3WriteProtect
+        if config.extensions.externalFDDUnit {
+            let fdd2Disk = config.fdd.lastFDD2Path
+            if !fdd2Disk.isEmpty, fm.fileExists(atPath: fdd2Disk) {
+                let inserted = fdd2Disk.withCString { mx68k_fdd_insert(2, $0) }
+                mx68k_log("[Swift][iOS] mx68k_fdd_insert(2) -> \(inserted)")
+                if inserted == 0 && fdd2WriteProtect {
+                    mx68k_fdd_set_write_protect(2, 1)
+                }
+            }
+            let fdd3Disk = config.fdd.lastFDD3Path
+            if !fdd3Disk.isEmpty, fm.fileExists(atPath: fdd3Disk) {
+                let inserted = fdd3Disk.withCString { mx68k_fdd_insert(3, $0) }
+                mx68k_log("[Swift][iOS] mx68k_fdd_insert(3) -> \(inserted)")
+                if inserted == 0 && fdd3WriteProtect {
+                    mx68k_fdd_set_write_protect(3, 1)
+                }
+            }
         }
 
         /* ★登録するコールバックはこの 2 本だけ(P723 で onSpeedUpdate を追加)。
@@ -319,6 +360,11 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
                                 writeProtected: self.fdd0WriteProtect),
                 StatusLampField(label: "FD1: ", present: status.fdd1_inserted, active: status.fdd1_active,
                                 writeProtected: self.fdd1WriteProtect),
+                // P1047 — FD2/FD3は外付けFDDユニット設定と無関係に常時表示(未使用ならグレー)。
+                StatusLampField(label: "FD2: ", present: status.fdd2_media_present, active: status.fdd2_active,
+                                writeProtected: self.fdd2WriteProtect),
+                StatusLampField(label: "FD3: ", present: status.fdd3_media_present, active: status.fdd3_active,
+                                writeProtected: self.fdd3WriteProtect),
                 StatusLampField(label: "HDD: ", present: status.hdd0_inserted || status.hdd1_inserted, active: status.hdd_busy),
             ]
         }
@@ -364,6 +410,9 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     func setVolume(_ v: Double)      { audio.volume = Float(max(0.0, min(1.0, v))) }
     func setAdpcmVolume(_ v: Int) { mx68k_set_adpcm_volume(Int32(max(0, min(16, v)))) }
     func setOpmVolume(_ v: Int)   { mx68k_set_opm_volume(Int32(max(0, min(16, v)))) }
+    // P1006: 内蔵 MT-32/SC-55 の出力音量(%、0〜300。100 = 既定)。
+    func setMt32OutputGain(_ percent: Int) { mx68k_set_mt32_output_gain(Float(max(0, min(300, percent))) / 100.0) }
+    func setSc55OutputGain(_ percent: Int) { mx68k_set_sc55_output_gain(Float(max(0, min(300, percent))) / 100.0) }
 
     // MARK: - ターボ / 高速化(P762)
 
@@ -1017,20 +1066,25 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
 
     // MARK: - 書込み禁止トグル(P937)
 
-    /// macOS版`EmulatorViewModel.fddWriteProtect`(:1517-1525)相当。iOSはFDD0/FDD1のみ。
-    private func fddWriteProtect(_ drive: Int) -> Bool {
+    /// macOS版`EmulatorViewModel.fddWriteProtect`(:1517-1525)相当。
+    /// P1047 — FDD0〜FDD3の4台分。FDDメニューのトグル表示から参照するためinternal公開。
+    func fddWriteProtect(_ drive: Int) -> Bool {
         switch drive {
         case 0: return fdd0WriteProtect
         case 1: return fdd1WriteProtect
+        case 2: return fdd2WriteProtect
+        case 3: return fdd3WriteProtect
         default: return false
         }
     }
 
-    /// macOS版`EmulatorViewModel.setFddWriteProtect`(:1527-1535)相当。iOSはFDD0/FDD1のみ。
+    /// macOS版`EmulatorViewModel.setFddWriteProtect`(:1527-1535)相当。P1047でFDD0〜FDD3の4台分。
     private func setFddWriteProtect(_ drive: Int, _ v: Bool) {
         switch drive {
         case 0: fdd0WriteProtect = v
         case 1: fdd1WriteProtect = v
+        case 2: fdd2WriteProtect = v
+        case 3: fdd3WriteProtect = v
         default: break
         }
     }
@@ -1063,6 +1117,16 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
             onFDDWriteProtectChanged?(1, false)
         }
         fdd1MediaPresent = status.fdd1_media_present
+        if fdd2MediaPresent && !status.fdd2_media_present {
+            setFddWriteProtect(2, false)
+            onFDDWriteProtectChanged?(2, false)
+        }
+        fdd2MediaPresent = status.fdd2_media_present
+        if fdd3MediaPresent && !status.fdd3_media_present {
+            setFddWriteProtect(3, false)
+            onFDDWriteProtectChanged?(3, false)
+        }
+        fdd3MediaPresent = status.fdd3_media_present
     }
 
     // MARK: - ディスク(ZIP圧縮イメージ、P729)
@@ -1074,17 +1138,31 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     private var archivePickerTempDir: URL?
     private var archivePickerDrive: Int = 0
 
-    /// FDD0/FDD1それぞれのzip展開用一時ディレクトリ(macOS版
-    /// `fdd0ArchiveTempDir`/`fdd1ArchiveTempDir`に相当。iOSはFDD0/FDD1のみ
-    /// UIを持つため2台分のみ——P712/P713のiOS FDD UIスコープに合わせる)。
+    /// FDD0〜FDD3それぞれのzip展開用一時ディレクトリ(macOS版
+    /// `fdd0ArchiveTempDir`〜`fdd3ArchiveTempDir`に相当)。P1047で4台分へ拡張——
+    /// 旧来の`drive == 0 ? fdd0 : fdd1`三項演算のままではdrive=2/3がFD1と混線していた。
     private var fdd0ArchiveTempDir: URL?
     private var fdd1ArchiveTempDir: URL?
+    private var fdd2ArchiveTempDir: URL?
+    private var fdd3ArchiveTempDir: URL?
 
     private func archiveTempDir(_ drive: Int) -> URL? {
-        drive == 0 ? fdd0ArchiveTempDir : fdd1ArchiveTempDir
+        switch drive {
+        case 0: return fdd0ArchiveTempDir
+        case 1: return fdd1ArchiveTempDir
+        case 2: return fdd2ArchiveTempDir
+        case 3: return fdd3ArchiveTempDir
+        default: return nil
+        }
     }
     private func setArchiveTempDir(_ drive: Int, _ v: URL?) {
-        if drive == 0 { fdd0ArchiveTempDir = v } else { fdd1ArchiveTempDir = v }
+        switch drive {
+        case 0: fdd0ArchiveTempDir = v
+        case 1: fdd1ArchiveTempDir = v
+        case 2: fdd2ArchiveTempDir = v
+        case 3: fdd3ArchiveTempDir = v
+        default: break
+        }
     }
 
     /// macOS `EmulatorViewModel.handleArchiveSelection`(:1424-1455)のうち、

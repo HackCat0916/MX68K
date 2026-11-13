@@ -26,6 +26,7 @@
 #include "fd_latency_experiment.h" /* P940: FDC/DMA 人為的遅延実験(既定 OFF、macOS 限定) */
 #include "floppyu_usb_transport.h" /* P945: ふろっぴU君 USB通信基盤(既定 OFF、macOS 限定) */
 #include "floppyu_fdc_passthrough_probe.h" /* P949: FDC テーブル差替え素通しプローブ(既定 OFF) */
+#include "floppyu_vslice.h"                 /* P1004: ふろっぴU君 最小垂直スライス(既定 OFF、診断専用) */
 
 /* P509 (D-48): m68000_bridge.c 定義の診断プローブ。本サイクルの変更を
  * Bridge の 2 ファイルに閉じるため、宣言をヘッダではなくここに置く。
@@ -127,6 +128,11 @@ static _Atomic(int) s_debug_log_enabled =
 #else
     0;
 #endif
+/* P1004: mx68k_debug_log_force_on() が立てる強制ONフラグ。立っている間は
+ * mx68k_set_debug_log_enabled(0) を無視する(Swift の startEmulation が
+ * config.json の既定 false で上書きしてもスライスのログを消さないため)。
+ * 書き手(mx68k_init 側)と Swift メインスレッドの双方から触れうるため _Atomic。 */
+static _Atomic(int) s_debug_log_force = 0;
 /* P754: debug.log の起動時サイズ上限。超過していれば debug.log.old へ
  * 退避してから新規ファイルを開く(単一ファイルへの無制限追記による肥大を
  * 防ぐ——固定パスのまま運用することで Scripts/smoke_test.sh の rm -f +
@@ -723,6 +729,11 @@ int         g_ext_fdd_wired   = 0;
  * g_floppyu_assigned_base は 0(ドライブ0/1)または 2(ドライブ2/3)。 */
 static bool    g_floppyu_enabled       = false;
 static int32_t g_floppyu_assigned_base = 0;
+/* P1054: ふろっぴU君の書込み許可(設定値のみ)。init / ハードリセットの install 直前に振り分け器へ渡し、
+ * そこで環境変数 MX68K_FLOPPYU_WRITE(優先)と合わせてモードを確定する。 */
+static bool    g_floppyu_write_enabled = false;
+/* P1067: ふろっぴU君の FORMAT 許可(設定値のみ)。install 直前に振り分け器へ渡す(normal・設定由来のときだけ有効)。 */
+static bool    g_floppyu_format_enabled = false;
 /* P634 (D-43): Mercury の LR クロックを観測経路のみ自走化する機構
  * (実体・状態変数はすべて m68000_bridge.c 側 — 読出フックと同一翻訳単位に
  *  まとめ、状態定義を分散させない。feedback_instrumentation_layout_adjacency_corruption
@@ -1728,11 +1739,15 @@ int mx68k_init(void) {
                             s_scsi_ext_rom_loaded ? 1 : 0,
                             g_wired_machine_type);
     mx68k_fdlat_init(g_fd_fast_access);   /* P940: 配線行を無条件1行(既定 OFF) */
-    mx68k_floppyu_usb_init();             /* P945: 配線行を無条件1行(既定 OFF) */
+    mx68k_floppyu_vslice_start(g_floppyu_enabled ? 1 : 0); /* P1004: 両環境変数 ON 時のみ。通信層の配線ログも残すため init より前 */
+    /* P945/P1054: 配線行を無条件1行。有効条件は環境変数 MX68K_FLOPPYU_USB(1/0)>設定「Use FloppyU」 */
+    mx68k_floppyu_usb_init(g_floppyu_enabled ? 1 : 0);
     DMA_Init();
     mx68k_fdlat_note_dma_init("init");    /* P940: dmainit_gen++(install とは独立) */
     mx68k_fdlat_install("init");          /* P940: ON 時のみ DMA_SetReadyCB(0, ...) */
     /* P958: 設定値から配線を確定(ON でテーブル0x4A/ReadyCB(0)を振り分け器へ、OFF は元値のまま) */
+    mx68k_floppyu_fdcpt_set_write_config(g_floppyu_write_enabled ? 1 : 0);   /* P1054: install で解析する設定値 */
+    mx68k_floppyu_fdcpt_set_format_config(g_floppyu_format_enabled ? 1 : 0); /* P1067 */
     mx68k_floppyu_fdcpt_install("init", g_floppyu_enabled ? 1 : 0, g_floppyu_assigned_base, g_ext_fdd_wired);
     ADPCM_Init(g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
     ADPCM_SetVolume(15);   /* P210: 移植時にこの呼出しが漏れていた。ADPCM_VolumeShift が
@@ -2010,6 +2025,8 @@ void mx68k_shutdown(void) {
     }
     s_p53_shutdown_done = 1;
 #endif
+    mx68k_floppyu_fdcpt_shutdown();  /* P1054: 開いている観測窓を閉じ、[P1054-E5P] 累積要約を出す(未使用時はログ0行) */
+    mx68k_floppyu_vslice_shutdown(); /* P1004: スライススレッドを通信層より先に止める(冪等、OFF 時はログ0行) */
     mx68k_floppyu_usb_shutdown();   /* P945: ON 時のみ受信スレッド停止・通知解除・sum 行(冪等) */
 
 #if P51B_ENABLE
@@ -2753,7 +2770,13 @@ void mx68k_reset_hard(void) {
     DMA_Init();
     mx68k_fdlat_note_dma_init("hardreset");   /* P940: dmainit_gen++(install とは独立) */
     mx68k_fdlat_install("hardreset");         /* P940: ON 時のみ再登録(DMA_Init が FDC_IsDataReady へ戻すため) */
+    /* P1054: USB通信層の遅延起動(設定「Use FloppyU」を ON にして Apply→⌘R でアプリ再起動なしに立ち上げる)。
+     * 稼働中なら通信層側で即 return(冪等)。呼出し元はすべてエミュレーションスレッド上で直列
+     * (init 内 / pending ハードリセット / ソフトリセット / ステート復元)なので init との並行実行は無い。 */
+    mx68k_floppyu_usb_init(g_floppyu_enabled ? 1 : 0);
     /* P958: 設定値から再計算(ON で再登録、ON→OFF なら保存済み元値へ復元) */
+    mx68k_floppyu_fdcpt_set_write_config(g_floppyu_write_enabled ? 1 : 0);   /* P1054 */
+    mx68k_floppyu_fdcpt_set_format_config(g_floppyu_format_enabled ? 1 : 0); /* P1067 */
     mx68k_floppyu_fdcpt_install("hardreset", g_floppyu_enabled ? 1 : 0, g_floppyu_assigned_base, g_ext_fdd_wired);
     debug_log("[MX68K] Step 17: ADPCM_Init(%d)\n", g_audio_sample_rate_hz);
     ADPCM_Init(g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
@@ -3866,6 +3889,104 @@ static void p918_test_reset_maybe_arm(void) {
     s_p918_test_reset_fired = 1;
     debug_log("[P918-TESTRESET] fired frame=%d kind=%s\n",
               g_mx68k_frame_num, s_p918_test_reset_soft ? "soft" : "hard");
+}
+
+/* P1041 (D-115): 白帯点滅の診断専用プローブ。環境変数 MX68K_DEBUG_VRAM_BLINK=1 のときのみ有効
+ * (既定 OFF)。TVRAM/GVRAM を読み取るだけで書込みは一切行わない。
+ * mx68k_render_end() 直後・GVRAM_FastClear() 判定前に呼ぶ(高速クリア後のGVRAMを見ないため)。 */
+#define P1041_LOG_LIMIT 4000
+static int s_p1041_enabled = -1;
+
+static int p1041_is_enabled(void) {
+    if (s_p1041_enabled < 0) {
+        const char *env = getenv("MX68K_DEBUG_VRAM_BLINK");
+        s_p1041_enabled = (env != NULL && strcmp(env, "1") == 0) ? 1 : 0;
+    }
+    return s_p1041_enabled;
+}
+
+static uint32_t p1041_fnv(const uint8_t* buf, size_t n)
+{
+    uint32_t h = 2166136261u;   /* FNV-1a 32bit(rl_fnv と同じ定数) */
+    for (size_t i = 0; i < n; i++) h = (h ^ buf[i]) * 16777619u;
+    return h;
+}
+
+static long long p1041_now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000LL + (long long)(ts.tv_nsec / 1000000L);
+}
+
+static void p1041_vram_blink_probe(int frame_num)
+{
+    static int s_first = 1;
+    static long long s_base_ms = 0;
+    static uint32_t s_tv_prev = 0, s_gv_prev = 0;
+    static unsigned s_tv_changes = 0, s_gv_changes = 0;
+    static unsigned s_lines = 0;
+    static int s_sum_counter = 0;
+
+    uint32_t tv = p1041_fnv(TVRAM, sizeof(TVRAM));
+    uint32_t gv = p1041_fnv(GVRAM, sizeof(GVRAM));
+    uint32_t pc = C68k_Get_PC(&C68K);
+    /* P1042 (D-115): 割込み状態を VRAM ハッシュ・PC と同一時点で読む(読取りのみ) */
+    uint8_t ipra = (uint8_t)MFP[MFP_IPRA];
+    uint8_t iprb = (uint8_t)MFP[MFP_IPRB];
+    uint8_t isra = (uint8_t)MFP[MFP_ISRA];
+    uint8_t isrb = (uint8_t)MFP[MFP_ISRB];
+    uint8_t imra = (uint8_t)MFP[MFP_IMRA];
+    uint8_t imrb = (uint8_t)MFP[MFP_IMRB];
+    uint8_t ioc_intstat = (uint8_t)IOC_IntStat;
+    uint32_t vsync_vec = 0;
+    if (MEM) {
+        uint16_t vec_hi = *(uint16_t*)&MEM[0x118];
+        uint16_t vec_lo = *(uint16_t*)&MEM[0x11A];
+        vsync_vec = ((uint32_t)vec_hi << 16) | vec_lo;
+    }
+
+    if (s_first) {
+        /* 実時間の基準は初回呼出し時点(=プローブ有効化後の最初のフレーム) */
+        s_first = 0;
+        s_base_ms = p1041_now_ms();
+        s_tv_prev = tv;
+        s_gv_prev = gv;
+        debug_log("[P1041-VRAMBLINK] start frame=%d tvram_bytes=%u gvram_bytes=%u"
+                  " tvram_fnv=0x%08x gvram_fnv=0x%08x pc=0x%08x log_limit=%d\n",
+                  frame_num, (unsigned)sizeof(TVRAM), (unsigned)sizeof(GVRAM),
+                  tv, gv, pc, P1041_LOG_LIMIT);
+    } else {
+        int tv_changed = (tv != s_tv_prev) ? 1 : 0;
+        int gv_changed = (gv != s_gv_prev) ? 1 : 0;
+        if (tv_changed) s_tv_changes++;
+        if (gv_changed) s_gv_changes++;
+        if ((tv_changed || gv_changed) && s_lines < P1041_LOG_LIMIT) {
+            s_lines++;
+            debug_log("[P1041-VRAMBLINK] frame=%d tvram_fnv=0x%08x tvram_prev=0x%08x tvram_changed=%d"
+                      " gvram_fnv=0x%08x gvram_prev=0x%08x gvram_changed=%d pc=0x%08x"
+                      " ipra=0x%02x iprb=0x%02x isra=0x%02x isrb=0x%02x imra=0x%02x imrb=0x%02x"
+                      " ioc_intstat=0x%02x vsync_vec=0x%08x\n",
+                      frame_num, tv, s_tv_prev, tv_changed, gv, s_gv_prev, gv_changed, pc,
+                      ipra, iprb, isra, isrb, imra, imrb, ioc_intstat, vsync_vec);
+            if (s_lines == P1041_LOG_LIMIT) {
+                debug_log("[P1041-VRAMBLINK] log_limit reached frame=%d (以後はサマリ行のみ)\n",
+                          frame_num);
+            }
+        }
+        s_tv_prev = tv;
+        s_gv_prev = gv;
+    }
+
+    if (++s_sum_counter >= 60) {
+        s_sum_counter = 0;
+        debug_log("[P1041-VRAMBLINK] sum frame=%d real_elapsed_ms=%lld tvram_changes=%u"
+                  " gvram_changes=%u pc=0x%08x"
+                  " ipra=0x%02x iprb=0x%02x isra=0x%02x isrb=0x%02x imra=0x%02x imrb=0x%02x"
+                  " ioc_intstat=0x%02x vsync_vec=0x%08x\n",
+                  frame_num, p1041_now_ms() - s_base_ms, s_tv_changes, s_gv_changes, pc,
+                  ipra, iprb, isra, isrb, imra, imrb, ioc_intstat, vsync_vec);
+    }
 }
 
 void mx68k_run_frame(void) {
@@ -6041,7 +6162,14 @@ void mx68k_run_frame(void) {
 #else
             int read_fdc  = is_stuck;
 #endif
-            /* FDC_Read はログ量抑制のため固着確定後/P69窓内のみ呼ぶ */
+            /* P1077 (D-124診断): PC $FF937C-$FF9388 の待ちループ内でMSRを毎回実測する(副作用無し、上限付き)。
+             * P69_PROBE_ENABLE の値に関わらず常に有効な独立軸。 */
+            static int s_p1077_wrfail_cnt = 0;
+            int in_wrfail_window = (cur_pc >= 0xff937c && cur_pc <= 0xff9388 &&
+                                    s_p1077_wrfail_cnt < 30);
+            if (in_wrfail_window) s_p1077_wrfail_cnt++;
+            read_fdc |= in_wrfail_window;
+            /* FDC_Read はログ量抑制のため固着確定後/P69窓内/P1077窓内のみ呼ぶ */
             uint8_t fdc_status     = read_fdc ? FDC_Read(0xe94001) : 0;
             int     fdc_data_ready = read_fdc ? FDC_IsDataReady()  : 0;
             int do_diag = (frame_num % 5 == 0) ||
@@ -6062,6 +6190,12 @@ void mx68k_run_frame(void) {
                           (unsigned)IOC_IntStat, (unsigned)IOC_IntVect,
                           (unsigned)DMA[0].CSR, (unsigned)DMA[0].CCR,
                           (unsigned)DMA[0].MTC);
+            }
+
+            if (in_wrfail_window) {
+                debug_log("[P1077-WRFAIL-MSR] frame=%d PC=0x%06x stuck=%d FDC_ST=0x%02x IOC_IntStat=0x%02x\n",
+                          frame_num, cur_pc, s_p41_stuck_count,
+                          (unsigned)fdc_status, (unsigned)IOC_IntStat);
             }
 
             if (is_stuck && !s_p41_mfp_dumped) {
@@ -6134,6 +6268,10 @@ void mx68k_run_frame(void) {
      * per-scanline 描画は exec ループ内の draw_display_line で既に完了している。
      * P173: emulation スレッドで実行 — cross-thread VLINE race 無し。 */
     mx68k_render_end();
+
+#if 1  /* P1041: 環境変数ゲート、既定OFF */
+    if (p1041_is_enabled()) p1041_vram_blink_probe(frame_num);
+#endif
 
     /* P276: D-3是正 — GVRAMをサンプル(render_frame)した後にクリアする
      * (サンプル→クリア。px68k本家/MPX68K実装と同じ順序)。
@@ -7954,6 +8092,19 @@ void mx68k_set_floppyu_config(bool enabled, int32_t assigned_base) {
     g_floppyu_assigned_base = assigned_base;
 }
 
+/* P1054: ふろっぴU君の書込み許可。設定値のみを更新し、反映は init / ハードリセットの install で確定する
+ * (環境変数 MX68K_FLOPPYU_WRITE が設定されていればそちらが優先)。状態の取得は
+ * mx68k_floppyu_get_write_status()(Bridge/floppyu_fdc_passthrough_probe.c)。 */
+void mx68k_set_floppyu_write_enabled(bool enabled) {
+    g_floppyu_write_enabled = enabled;
+}
+
+/* P1067: ふろっぴU君の FORMAT 許可。設定値のみを更新し、反映は init / ハードリセットの install で確定する。
+ * 状態の取得は mx68k_floppyu_get_format_status()(Bridge/floppyu_fdc_passthrough_probe.c)。 */
+void mx68k_set_floppyu_format_enabled(bool enabled) {
+    g_floppyu_format_enabled = enabled;
+}
+
 /* P488: MIDI ボード(CZ-6BM1)の装着設定。設定値のみを更新し、配線は init /
  * ハードリセットのラッチで確定する(Mercury と同型)。 */
 void mx68k_set_midi_enabled(bool enabled) { g_midi_enabled = enabled; }
@@ -8230,6 +8381,11 @@ void mx68k_set_turbo_audio_rate(int ratio_q16) {
     if (ratio_q16 < 0) ratio_q16 = MX68K_TURBO_AUDIO_RATE_UNITY;
     atomic_store_explicit(&g_turbo_audio_ratio_q16, ratio_q16, memory_order_release);
     atomic_fetch_add_explicit(&g_turbo_audio_reset_gen, 1, memory_order_release);
+}
+
+/* P1064: ターボ状態の代理値の読取り専用アクセサ(ふろっぴU君 fmt1 のログ記録用。書込み側・既存の読取りは不変) */
+int mx68k_turbo_audio_ratio_q16_get(void) {
+    return atomic_load_explicit(&g_turbo_audio_ratio_q16, memory_order_acquire);
 }
 
 /* P557: FD アクセス高速化(XM6 の Config::floppy_speed 相当の ON/OFF)。
@@ -11540,7 +11696,20 @@ void mx68k_set_clock(int mhz)      { mx68k_set_clock_mhz(mhz); }
 
 // ---- デバッグ用ヘルパ ----
 void mx68k_set_debug_log_enabled(int enabled) {
-    atomic_store_explicit(&s_debug_log_enabled, enabled ? 1 : 0, memory_order_relaxed);
+    if (!enabled && atomic_load_explicit(&s_debug_log_force, memory_order_seq_cst)) {
+        return;
+    }
+    atomic_store_explicit(&s_debug_log_enabled, enabled ? 1 : 0, memory_order_seq_cst);
+    /* P1004: 上の判定と force_on() が別スレッドで交差した場合に OFF が勝たないよう再確認する */
+    if (!enabled && atomic_load_explicit(&s_debug_log_force, memory_order_seq_cst)) {
+        atomic_store_explicit(&s_debug_log_enabled, 1, memory_order_seq_cst);
+    }
+}
+
+/* P1004: 内部用(floppyu_vslice.c からのみ呼ぶ)。Release ビルドでも debug.log を強制ONにする。 */
+void mx68k_debug_log_force_on(void) {
+    atomic_store_explicit(&s_debug_log_force, 1, memory_order_seq_cst);
+    atomic_store_explicit(&s_debug_log_enabled, 1, memory_order_seq_cst);
 }
 
 int mx68k_get_debug_log_enabled(void) {

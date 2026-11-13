@@ -50,6 +50,26 @@ static uint8_t *s_himem;
 
 static inline int himem_hit(uint32_t a) { return s_himem && (uint32_t)(a - s_himem_base) < s_himem_bytes; }
 
+/* P1016(D-110): [P1016-UNALIGN]/[P1016-ODDPC] 用の計数(プロセス内の累計、リセットではクリアしない)。
+ * unalign_r/w = 020以降で奇数アドレスのワード/ロングをバイト分割した回数(read/write別)。
+ * oddpc = 奇数アドレスの読出しが命令フェッチ由来(address == ADDRESS_68K(REG_PC-2/-4))だった回数。
+ * first_* は採取後に「本当に命令フェッチ由来か/どの番地か」を検証するための生の値。 */
+static uint32_t s_p1016_unalign_r, s_p1016_unalign_w, s_p1016_oddpc;
+static uint32_t s_p1016_first_r_addr, s_p1016_first_w_addr;
+static uint32_t s_p1016_first_oddpc_addr, s_p1016_first_oddpc_pc;
+
+/* P1017(D-111): 奇数PCへの命令フェッチをアドレスエラー例外(ベクタ3)にする。
+ * pending = このタイムスライスで奇数PCを検出し、m68k_execute() から戻った直後に例外を注入する予定。
+ * armed   = 注入した直後から、次にpending無しでタイムスライスが終わるまでの間(二重フォルト判定用)。
+ * fault_addr = 分岐先(奇数)アドレス。fault_pc = フレームのPC欄(030=分岐先、040/060=分岐命令自身)。
+ * last_fetch_pc = 040/060限定、直近の正常な(偶数番地の)命令語フェッチのPC。 */
+static int s_p1017_pending, s_p1017_armed;
+static uint32_t s_p1017_fault_addr, s_p1017_fault_pc, s_p1017_last_fetch_pc;
+static uint32_t s_p1017_halt_count;
+/* [P1017-ADRERR-INJECT] 用の注入回数(プロセス内の累計、リセットではクリアしない) */
+static uint32_t s_p1017_inject_count, s_p1017_inject_ec030, s_p1017_inject_040, s_p1017_inject_060;
+static uint32_t s_p1017_first_fault_addr;
+
 static inline unsigned int bus_read8(uint32_t a)
 {
     if (!s_himem) return s_bus.read8(a) & 0xffu;
@@ -58,6 +78,15 @@ static inline unsigned int bus_read8(uint32_t a)
 }
 static inline unsigned int bus_read16(uint32_t a)
 {
+    if ((a & 1u) != 0u && !CPU_TYPE_IS_010_LESS(CPU_TYPE)) {
+        /* P1016/D-110: 020以降はデータアクセスの非整列が正規動作(MC68030 UM §7.2.2)。
+         * ビッグエンディアン・アドレス昇順でバイト分割する(XEiJ busRws/MAME read_word_unaligned と同じ設計)。
+         * himem/24bitミラー境界の判定は bus_read8 にそのまま委譲される。 */
+        unsigned int hi = bus_read8(a);
+        unsigned int lo = bus_read8(a + 1);
+        if (s_p1016_unalign_r++ == 0u) s_p1016_first_r_addr = a;
+        return (hi << 8) | lo;
+    }
     if (!s_himem) return s_bus.read16(a) & 0xffffu;
     if (himem_hit(a)) {
         uint32_t o = a - s_himem_base;
@@ -75,6 +104,13 @@ static inline void bus_write8(uint32_t a, unsigned int v)
 }
 static inline void bus_write16(uint32_t a, unsigned int v)
 {
+    if ((a & 1u) != 0u && !CPU_TYPE_IS_010_LESS(CPU_TYPE)) {
+        /* P1016/D-110: bus_read16 と同じく、上位バイトを a・下位バイトを a+1 へ分割して書く */
+        bus_write8(a, (v >> 8) & 0xffu);
+        bus_write8(a + 1, v & 0xffu);
+        if (s_p1016_unalign_w++ == 0u) s_p1016_first_w_addr = a;
+        return;
+    }
     if (!s_himem) { s_bus.write16(a, v & 0xffffu); return; }
     if (himem_hit(a)) {
         uint32_t o = a - s_himem_base;
@@ -91,21 +127,78 @@ unsigned int m68k_read_memory_8(unsigned int address)  { return bus_read8(addres
 unsigned int m68k_read_memory_16(unsigned int address)
 {
     unsigned int v = bus_read16(address);   /* バス読み出しは従来どおり1回だけ */
-    if (s_p869_on && !(s_himem && himem_hit(address))) p869_on_read16(address, v);
+    unsigned int raw = v;   /* P1017: p869 には NOP 差し替え前の実際の読み出し値を渡す */
+    /* P1016: プリフェッチOFFでは m68ki_read_imm_16 が REG_PC += 2 の後に REG_PC-2 を読むので、
+     * これと一致する奇数番地は命令フェッチ由来とみなす(D-111の観測用。Musashiは ADDRESS_68K 済みの
+     * 番地を渡すので比較側も同じマスクを通す)。奇数判定を先に短絡させる構造を維持する。 */
+    if ((address & 1u) == 0u) {
+        /* P1017: 040turbo/060turboのみ、命令語フェッチ(拡張語は対象外)のPCを追跡する。
+         * 実行ループは命令語フェッチ直前にだけ REG_PPC = REG_PC とするので、REG_PPC 一致は命令語に限られる。
+         * 030/68000はこの比較自体を評価しない(短絡評価によりコストゼロ)。
+         * 040/060では全16bit読み出し(データ含む)にCPU_TYPE比較+REG_PPC比較が乗る(R5参照)。 */
+        if (CPU_TYPE == CPU_TYPE_040 && address == ADDRESS_68K(REG_PPC)) {
+            s_p1017_last_fetch_pc = REG_PPC;   /* マスク前の32bit値を保持 */
+        }
+    } else if (address == ADDRESS_68K(REG_PC - 2)) {
+        if (s_p1016_oddpc++ == 0u) { s_p1016_first_oddpc_addr = address; s_p1016_first_oddpc_pc = REG_PC; }
+        if (s_in_execute && !CPU_TYPE_IS_010_LESS(CPU_TYPE)) {
+            if (s_p1017_armed) {
+                /* 二重フォルト: 前回の注入から、一度も正常な(偶数番地の)命令フェッチが
+                 * 成立しないまま再び奇数PCへ到達した(=注入したベクタ3ハンドラの先頭が
+                 * 奇数、またはハンドラが実行を始める前に再フォールトした) */
+                CPU_STOPPED |= STOP_LEVEL_HALT;
+                s_p1017_halt_count++;
+                s_p1017_pending = 0;   /* 注入は行わない、ハルト状態を維持 */
+            } else {
+                s_p1017_pending = 1;
+                s_p1017_fault_addr = address;   /* 分岐先(奇数)アドレス。030のPC・040/060のアドレス欄
+                                                  * (-1)に使う */
+                s_p1017_fault_pc = (CPU_TYPE == CPU_TYPE_EC030) ? address : s_p1017_last_fetch_pc;
+                /* 030: PC=分岐先(ゼロコスト) / 040/060: PC=分岐命令自身(追跡値) */
+            }
+            m68k_end_timeslice();
+            v = 0x4E71u;   /* NOP。実際の読み出し値は破棄、誤った命令は実行されない */
+        }
+    }
+    if (s_p869_on && !(s_himem && himem_hit(address))) p869_on_read16(address, raw);
     return v;
 }
 unsigned int m68k_read_memory_32(unsigned int address)
 {
-    uint32_t hi = bus_read16(address);
-    uint32_t lo = bus_read16(address + 2);
+    uint32_t v;
+    if ((address & 1u) != 0u && !CPU_TYPE_IS_010_LESS(CPU_TYPE)) {
+        /* P1016/D-110: 奇数ロングは byte(a)→word(a+1)→byte(a+3) の3アクセス
+         * (MC68030 UM 図7-9・表7-6の16bitポート3バスサイクルと同じ分割)。a+1 は偶数なので通常経路を通る */
+        unsigned int b0 = bus_read8(address);
+        unsigned int w1 = bus_read16(address + 1);
+        unsigned int b3 = bus_read8(address + 3);
+        v = ((uint32_t)b0 << 24) | ((uint32_t)w1 << 8) | (uint32_t)b3;
+        if (s_p1016_unalign_r++ == 0u) s_p1016_first_r_addr = address;
+    } else {
+        uint32_t hi = bus_read16(address);
+        uint32_t lo = bus_read16(address + 2);
+        v = (hi << 16) | lo;
+    }
+    /* P1016: 32bit即値(m68ki_read_imm_32)は REG_PC += 4 の後に REG_PC-4 を読む */
+    if ((address & 1u) != 0u && address == ADDRESS_68K(REG_PC - 4)) {
+        if (s_p1016_oddpc++ == 0u) { s_p1016_first_oddpc_addr = address; s_p1016_first_oddpc_pc = REG_PC; }
+    }
     if (s_p869_on && !(s_himem && himem_hit(address))) p869_on_read32(address);
     if (CPU_TYPE != CPU_TYPE_000) p938_on_vecfetch32(address);
-    return (hi << 16) | lo;
+    return v;
 }
 void m68k_write_memory_8(unsigned int address, unsigned int value)  { bus_write8(address, value); }
 void m68k_write_memory_16(unsigned int address, unsigned int value) { bus_write16(address, value); }
 void m68k_write_memory_32(unsigned int address, unsigned int value)
 {
+    if ((address & 1u) != 0u && !CPU_TYPE_IS_010_LESS(CPU_TYPE)) {
+        /* P1016/D-110: 読出しと同じ byte/word/byte の3アクセスで書く */
+        bus_write8(address, (value >> 24) & 0xffu);
+        bus_write16(address + 1, (value >> 8) & 0xffffu);
+        bus_write8(address + 3, value & 0xffu);
+        if (s_p1016_unalign_w++ == 0u) s_p1016_first_w_addr = address;
+        return;
+    }
     bus_write16(address, (value >> 16) & 0xffffu);
     bus_write16(address + 2, value & 0xffffu);
 }
@@ -805,6 +898,24 @@ void mx_cpu_musashi_p984_tick(int frame, mx_cpu_musashi_logf logf)
     s_p984_cyc_vec64plus = 0;
 }
 
+void mx_cpu_musashi_p1016_tick(int frame, mx_cpu_musashi_logf logf)
+{
+    if (logf == NULL) return;
+    logf("[P1016-UNALIGN] f=%d r=%u w=%u first_r_addr=%08X first_w_addr=%08X cpu_type=%u\n",
+         frame, s_p1016_unalign_r, s_p1016_unalign_w, s_p1016_first_r_addr, s_p1016_first_w_addr,
+         (unsigned)CPU_TYPE);
+    logf("[P1016-ODDPC] f=%d count=%u first_addr=%08X first_pc=%08X\n",
+         frame, s_p1016_oddpc, s_p1016_first_oddpc_addr, s_p1016_first_oddpc_pc);
+}
+
+void mx_cpu_musashi_p1017_tick(int frame, mx_cpu_musashi_logf logf)
+{
+    if (logf == NULL) return;
+    logf("[P1017-ADRERR-INJECT] f=%d count=%u halt=%u first_fault_addr=%08X cpu_type=%u ec030=%u m040=%u m060=%u\n",
+         frame, s_p1017_inject_count, s_p1017_halt_count, s_p1017_first_fault_addr, (unsigned)CPU_TYPE,
+         s_p1017_inject_ec030, s_p1017_inject_040, s_p1017_inject_060);
+}
+
 /* --- 初期化・リセット --- */
 void mx_cpu_musashi_init(const mx_cpu_bus *bus)
 {
@@ -874,6 +985,10 @@ void mx_cpu_musashi_p897_tick(int frame, mx_cpu_musashi_logf logf)
 void mx_cpu_musashi_reset(void)
 {
     s_p917_reset_seq++;
+    /* P1017: リセット後に古いpending/armed状態・追跡値が残らないようにする */
+    s_p1017_pending = 0;
+    s_p1017_armed = 0;
+    s_p1017_last_fetch_pc = 0;
     m68k_pulse_reset();
     mx68k_m68kfpu_reset();
     s_060_pcr_w = 0;
@@ -887,6 +1002,57 @@ int32_t mx_cpu_musashi_execute(int32_t cycles)
     s_in_execute = 1;
     r = (int32_t)m68k_execute((unsigned int)cycles);
     s_in_execute = 0;
+    if (s_p1017_pending) {
+        /* P1017(D-111): 奇数PCへの命令フェッチ → アドレスエラー例外(ベクタ3)を注入する。
+         * フレームは降順に積むので、最後に積んだSRが先頭(+$00)になる。 */
+        unsigned int sr_before = m68ki_init_exception();
+        if (CPU_TYPE == CPU_TYPE_EC030) {
+            /* format $A(16ワード、MC68030UM 表8-7 その2 + Harman §11.4.3) */
+            m68ki_push_16(0);                          /* +$1E 内部 */
+            m68ki_push_16(0);                          /* +$1C 内部 */
+            m68ki_push_32(0);                          /* +$18 DOB(2W、データ出力バッファ、該当なし) */
+            m68ki_push_16(0);                          /* +$16 内部 */
+            m68ki_push_16(0);                          /* +$14 内部 */
+            m68ki_push_32(0);                          /* +$10 データサイクルフォールトアドレス(2W、
+                                                         * データアクセスのフォールトではないため0) */
+            m68ki_push_16(0);                          /* +$0E ステージB(命令語の内容、不定のため0。
+                                                         * アドレス値ではない) */
+            m68ki_push_16(0);                          /* +$0C ステージC(同上) */
+            m68ki_push_16(0x1000u);                    /* +$0A SSW(RB=bit12=1、他は0。MC68030UM §8.2
+                                                         * 「アドレスエラーではフォールトビットFC/FBは
+                                                         * 立たず、RBのみ、またはRB+RCが立つ」——RCは
+                                                         * 実機のパイプライン状態依存で再現不可のため
+                                                         * 0固定、残留リスクR1) */
+            m68ki_push_16(0);                          /* +$08 内部 */
+            m68ki_push_16(0xA00Cu);                    /* +$06 フォーマット$A(上位4bit)+ベクタ3の
+                                                         * オフセット$00C */
+            m68ki_push_32(s_p1017_fault_pc);           /* +$02 PC(2W)。MC68030UM「$A: 積むPC=次の命令」
+                                                         * =本シナリオでは分岐先(奇数)アドレス
+                                                         * (030は s_p1017_fault_pc == s_p1017_fault_addr) */
+            m68ki_push_16(sr_before);                  /* +$00 SR */
+            /* 合計: 1+1+2+1+1+2+1+1+1+1+1+2+1 = 16ワード(format $A) */
+            s_p1017_inject_ec030++;
+        } else {
+            /* 040turbo/060turbo: format $2(6ワード、MC68040UM §8.4.3・MC68060UM §8.2.2) */
+            m68ki_push_32(s_p1017_fault_addr - 1u);    /* +$08 アドレス(1LW)。奇数アドレスに対しては
+                                                         * & 0xFFFFFFFE と数学的に同値。PCとは別の値 */
+            m68ki_push_16(0x200Cu);                    /* +$06 フォーマット$2+ベクタオフセット$00C */
+            m68ki_push_32(s_p1017_fault_pc);           /* +$02 PC(2W)。分岐命令自身のアドレス
+                                                         * (s_p1017_last_fetch_pc の追跡値)——一次資料が
+                                                         * PC欄とアドレス欄[+$08]を別々に定義していることと整合 */
+            m68ki_push_16(sr_before);                  /* +$00 SR */
+            /* 合計: 2+1+2+1 = 6ワード(Six-Word Stack Frame) */
+            if (s_is_060) s_p1017_inject_060++; else s_p1017_inject_040++;
+        }
+        m68ki_jump_vector(3);
+        r += (int32_t)CYC_EXCEPTION[3];   /* NOP自体のサイクルとは別に、例外処理のサイクルを加える */
+        if (s_p1017_inject_count++ == 0u) s_p1017_first_fault_addr = s_p1017_fault_addr;
+        s_p1017_armed = 1;
+        s_p1017_pending = 0;
+    } else {
+        /* このタイムスライスで奇数PC検出が無かった=正常な命令フェッチが成立した。armed クリアの唯一の経路 */
+        s_p1017_armed = 0;
+    }
     return r;
 }
 

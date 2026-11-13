@@ -37,7 +37,7 @@ component here is misattributed or mislicensed, please open an issue.
 - **XM6 SASI/SCSI/MO/CD-ROM port** — `Bridge/scsi_disk.cpp/h`,
   `scsi_spc.cpp/h`, ported from XM6 `vm/disk.cpp/h`, `vm/scsi.cpp/h`.
   Copyright (C) 2001-2006 ＰＩ．The original author granted MX68K
-  permission to treat these four files as GPL2-licensed — see
+  permission to treat these four files as licensed under GPL-2.0-or-later — see
   `NOTICE-THIRD-PARTY.md` for details.
 
 - **MPX68K** — <https://github.com/YosAwed/MPX68K>, by GOROman, YosAwed and

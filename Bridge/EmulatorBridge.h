@@ -60,8 +60,26 @@ void mx68k_set_mercury_enabled(bool enabled);
 void mx68k_set_ext_fdd_enabled(bool enabled);
 // P958: ふろっぴU君の利用設定。既定 OFF。設定値のみ保持し、配線は init / ハードリセットで確定する。
 // assigned_base は 0(ドライブ0/1)または 2(ドライブ2/3)。2 は外付けFDDユニット配線時のみ有効
-// (未配線なら振り分け器は無効のまま)。USB通信は未実装のため、割当てドライブは常に「FDなし」を返す。
+// (未配線なら振り分け器は無効のまま)。P1054: USB通信の開始条件は環境変数 MX68K_FLOPPYU_USB が
+// "1"=強制ON / "0"=強制OFF / 未設定=この設定に従う(ハードリセットで遅延起動)。ユニットが接続済みなら
+// 割当てドライブは実フロッピーを読み、通信できない間は「FDなし」を返す。
 void mx68k_set_floppyu_config(bool enabled, int32_t assigned_base);
+// P1054: ふろっぴU君の実ディスクへの書込み許可。既定 false。設定値のみ保持し、反映は init / ハードリセット。
+// 環境変数 MX68K_FLOPPYU_WRITE が設定されていればそちらが優先する(設定は無視)。iOS では呼ばない(常に false)。
+void mx68k_set_floppyu_write_enabled(bool enabled);
+// P1054: 書込み状態の取得(設定画面の1秒周期表示用、読取りのみ)。実装は Bridge/floppyu_fdc_passthrough_probe.c。
+// mode: 0=書込みOFF(振り分け器が無効の場合を含む) 1=ON(通常利用) 2=診断モード(dryrun/wponly/1/armed、環境変数のみ)
+// latched: 1=安全のため再起動まで停止中 / env_override: 1=環境変数 MX68K_FLOPPYU_WRITE で上書き中
+void mx68k_floppyu_get_write_status(int32_t* mode, int32_t* latched, int32_t* env_override);
+// P1067: ふろっぴU君の実ディスクへの FORMAT 許可。既定 false。設定値のみ保持し、反映は init / ハードリセット。
+// 書込み許可(上の mx68k_set_floppyu_write_enabled)が有効な通常利用モードのときだけ意味を持つ。環境変数
+// MX68K_FLOPPYU_WRITE が設定されていれば無視する。iOS では呼ばない(常に false)。
+void mx68k_set_floppyu_format_enabled(bool enabled);
+// P1067: FORMAT 状態の取得(設定画面の1秒周期表示用、読取りのみ)。実装は Bridge/floppyu_fdc_passthrough_probe.c。
+// on: 1=FORMAT 許可が有効 / halted: 1=再起動まで停止中(ディスクが途中まで初期化されている可能性)/
+// tracks_ok: 検証 ok になったトラック数(プロセス通算)/ src: 0=off 1=設定 2=環境変数 MX68K_FLOPPYU_NM_FORMAT
+// 3=設定は ON だが環境変数 MX68K_FLOPPYU_WRITE が優先されて無視
+void mx68k_floppyu_get_format_status(int32_t* on, int32_t* halted, int32_t* tracks_ok, int32_t* src);
 // P957: ふろっぴU君 USB存在検出(読取り専用、ポートを開かない)。実装は Bridge/floppyu_usb_transport.c。
 // >=0 = VID/PID一致のUSBデバイス数 / -1 = IOKit照会失敗 / -2 = 非対応(iOS)。
 // 環境変数・通信状態とは無関係に動作する。設定画面の1秒周期表示用で、エミュレーションには影響しない。
@@ -145,6 +163,9 @@ void mx68k_mt32_render_mix(int16_t* stereo_buf, int32_t frames);
 /* 設定画面向けの状態。0 = 無効, 1 = 動作中, 2 = 要求の適用待ち,
  * 負値 = 直近の適用失敗コード(mt32emu の MT32EMU_RC_*、例: -2 ファイル無し, -4 ROM 不足)。 */
 int32_t mx68k_mt32_get_status(void);
+/* P1006: 内蔵 MT-32 の出力ゲイン(1.0 = 既定、mt32emu 既定値と同一出力レベル)。
+ * 0.0〜4.0 にクランプ。即時反映(context がまだ無い場合は次回 open 時に反映)。 */
+void mx68k_set_mt32_output_gain(float gain);
 
 /* ---- P826: 内蔵 MIDI 音源(SC-55 / Nuked-SC55)。実装は Bridge/sc55_bridge.c ----
  * ★スレッド規約: Nuked-SC55 コアは全呼び出しの直列化を要求するため、下の「ワーカー専用」
@@ -170,6 +191,9 @@ bool mx68k_sc55_render(float* left, float* right, int frames);
 int  mx68k_sc55_output_push(const int16_t* stereo, int frames);
 /* [ワーカー専用] 出力リングの空きフレーム数(push 前の事前チェック・占有率計算用)。 */
 int  mx68k_sc55_output_free_frames(void);
+/* P1006: 内蔵 SC-55 の出力ゲイン(1.0 = 既定、Nuked-SC55 の素の出力と同一レベル)。
+ * 0.0〜4.0 にクランプ。mx68k_sc55_render_mix 内で即時反映。任意スレッドから呼んでよい。 */
+void mx68k_set_sc55_output_gain(float gain);
 /* [ワーカー専用] 読込直後のファームウェア起動待ち(64kHz で 4 秒分を空回し)。完了で status=1、
  * 入力受付を開始する。読込に成功していなければ何もしない。 */
 void mx68k_sc55_warmup(void);
@@ -612,6 +636,8 @@ void mx68k_set_adpcm_volume(int vol);
 #define MX68K_TURBO_AUDIO_RATE_MUTE  0
 #define MX68K_TURBO_AUDIO_RATE_AUTO  1
 void mx68k_set_turbo_audio_rate(int ratio_q16);
+/* P1064: 現在のターボ音声レート(Q16、読取り専用)。等倍以外ならターボ中の可能性(No-Wait は反映されない場合がある) */
+int mx68k_turbo_audio_ratio_q16_get(void);
 
 /* ---- P698: 動画録画への音声同梱(録画専用リングバッファ) ----
  *

@@ -1551,12 +1551,132 @@
         }
       }
     },
-    "Shows whether a FloppyU unit is connected by USB. While FloppyU is in use, the assigned drives are handed to it instead of the disk images mounted in the emulator. USB communication is not implemented yet, so those drives currently always report that no disk is inserted.": {
+    "Shows whether a FloppyU unit is connected by USB. While FloppyU is in use, the assigned drives are handed to it instead of the disk images mounted in the emulator. While FloppyU is in use and the unit is connected, the assigned drives read the real floppy disks in the unit.": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ふろっぴU君がUSBで接続されているかを表示します。ふろっぴU君の利用中は、割当てドライブがエミュレータでマウントしたディスクイメージの代わりにふろっぴU君へ渡されます。USB通信は未実装のため、現在そのドライブは常に「ディスクが入っていません」となります。"
+            "value": "ふろっぴU君がUSBで接続されているかを表示します。ふろっぴU君の利用中は、割当てドライブがエミュレータでマウントしたディスクイメージの代わりにふろっぴU君へ渡されます。ふろっぴU君の利用中にユニットが接続されていれば、割当てドライブはユニット内の実フロッピーディスクを読みます。"
+          }
+        }
+      }
+    },
+    "Allow writing to FloppyU disks": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君のディスクへの書込みを許可する"
+          }
+        }
+      }
+    },
+    "Writing: Off": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書込み: オフ"
+          }
+        }
+      }
+    },
+    "Writing: On": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書込み: オン"
+          }
+        }
+      }
+    },
+    "Writing: Set by environment variable (MX68K_FLOPPYU_WRITE=%@)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書込み: 環境変数で指定中(MX68K_FLOPPYU_WRITE=%@)"
+          }
+        }
+      }
+    },
+    "Writing: Stopped until restart": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書込み: 再起動まで停止中"
+          }
+        }
+      }
+    },
+    "⚠ Writes go to the real floppy disk in the FloppyU drive.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ 書込みはふろっぴU君のドライブに入っている実際のフロッピーディスクに対して行われます。"
+          }
+        }
+      }
+    },
+    "Allow FORMAT on FloppyU disks": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君のディスクのFORMATを許可する"
+          }
+        }
+      }
+    },
+    "Formatting: Off": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FORMAT: オフ"
+          }
+        }
+      }
+    },
+    "Formatting: On": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FORMAT: オン"
+          }
+        }
+      }
+    },
+    "Formatting: Set by environment variable": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FORMAT: 環境変数で指定中"
+          }
+        }
+      }
+    },
+    "Formatting: Ignored (MX68K_FLOPPYU_WRITE is set)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FORMAT: 無視(MX68K_FLOPPYU_WRITEが設定されています)"
+          }
+        }
+      }
+    },
+    "Formatting: Stopped until restart — the disk may be partially formatted": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FORMAT: 再起動まで停止中 — ディスクが途中まで初期化されている可能性があります"
           }
         }
       }
@@ -1987,6 +2107,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "一時停止"
+          }
+        }
+      }
+    },
+    "Pause While Settings Window Is Open": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "設定画面を開いている間は一時停止する"
           }
         }
       }
@@ -7053,6 +7183,36 @@
         }
       }
     },
+    "FD2…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD2…"
+          }
+        }
+      }
+    },
+    "FD2/3…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD2/3…"
+          }
+        }
+      }
+    },
+    "FD3…": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FD3…"
+          }
+        }
+      }
+    },
     "Not started": {
       "localizations": {
         "ja": {
@@ -7691,6 +7851,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "※ 表示範囲はノート 0〜95(C-1〜B6、ノート 60 = C4)です。ノート 96〜127 が ON のときは行末に ▶件数 を表示します"
+          }
+        }
+      }
+    },
+    "⚠ When this is off, FORMAT requests to the real floppy disk in the FloppyU drive are refused.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ オフのときは、ふろっぴU君のドライブに入っている実際のフロッピーディスクへのFORMATは拒否されます。"
           }
         }
       }

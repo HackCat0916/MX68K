@@ -83,20 +83,21 @@ struct IOSSettingsBarButtons: View {
     /// 2 箇所に書かない)。**トグルボタンの無効化条件と自動非表示条件は同一の値**。
     var canToggleVirtualPad: Bool
 
-    /// P708 §C-3 — 軸だけを差し替える。spacing は水平/垂直で共通(14)。
+    /// P708 §C-3 — 軸だけを差し替える。spacing は水平14・垂直10
+    /// (P1047: 側方帯の高さ溢れ対策で垂直のみ縮小)。
     private var layout: AnyLayout {
-        axis == .vertical ? AnyLayout(VStackLayout(spacing: 14))
+        axis == .vertical ? AnyLayout(VStackLayout(spacing: 10))
                           : AnyLayout(HStackLayout(spacing: 14))
     }
 
     /// P708 §C-3-1 — 歯車を視覚的に分離する区切り。
     /// 水平軸では貪欲な `Spacer` が歯車を右端へ押し出す(P706 の意図どおり)。
     /// **垂直軸で同じ `Spacer` を使うと歯車を余白の最下端まで押し出してしまう**ため、
-    /// 固定間隔(20pt)へ差し替える。「視覚的に分離する」意図は保ったまま、
+    /// 固定間隔(12pt、P1047で20→12へ縮小)へ差し替える。「視覚的に分離する」意図は保ったまま、
     /// 列が内容にフィットして上寄せに収まる。
     @ViewBuilder private var gearSeparator: some View {
         if axis == .vertical {
-            Color.clear.frame(height: 20)
+            Color.clear.frame(height: 12)
         } else {
             Spacer(minLength: 0)
         }
@@ -171,6 +172,15 @@ struct IOSSettingsBarButtons: View {
             // 1 つの `Menu`(タップで Select… / Eject を出す)へまとめる。
             fddMenu(drive: 0, titleKey: "FD0…")
             fddMenu(drive: 1, titleKey: "FD1…")
+            // P1047 — FD2/FD3は外付けFDDユニット有効時のみ表示(D-115再発防止、macOS版P1044/P1046と同じ安全設計)。
+            // 側方帯の高さ溢れ回避のため、FD2/FD3は1つの入れ子Menuへまとめる(帯の項目数を+1に抑える)。
+            if configManager.config.extensions.externalFDDUnit {
+                Menu("FD2/3…") {
+                    fddMenu(drive: 2, titleKey: "FD2…")
+                    fddMenu(drive: 3, titleKey: "FD3…")
+                }
+                .modifier(IOSBarTouchTarget(active: axis == .vertical))
+            }
 
             // P725 — セーブステート。FDD0/1 と同じ `Menu` パターン(隣接 Button 同時
             // 発火回避、P712f)。Save State は即実行、Load State… は一覧シートを開く。
@@ -365,7 +375,7 @@ struct IOSSettingsBarButtons: View {
             }
             .disabled(!mx68k_fdd_is_inserted(Int32(drive)))
             Toggle("Write Protect", isOn: Binding(
-                get: { drive == 0 ? viewModel.fdd0WriteProtect : viewModel.fdd1WriteProtect },
+                get: { viewModel.fddWriteProtect(drive) },
                 set: { viewModel.setWriteProtect(drive: drive, protect: $0) }
             ))
         }

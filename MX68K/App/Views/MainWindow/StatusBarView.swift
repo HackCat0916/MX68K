@@ -31,7 +31,7 @@ struct StatusBarView: View {
         // .poweringOff 中はまだ電源ON扱い = フェード完了で .off になるまで点灯。
         let lampsLive = viewModel.powerState != .off
         return HStack(spacing: 16) {
-            // P691: 常設の主要7項目(CPU/MEM/Speed/FDD0/FDD1/HDD/TIMER)は優先度1で死守し、
+            // P691: 常設の主要6項目(CPU/MEM/Speed/FDD/HDD/TIMER、P1046でFDD0/FDD1を統合)は優先度1で死守し、
             // 幅不足時は機種名(-1)/一時メッセージ(-1)から先に切り詰められるようにする。
             Text("CPU: \(Int(viewModel.status.clock_mhz))MHz")
                 .font(.caption)
@@ -63,23 +63,24 @@ struct StatusBarView: View {
             }
             .layoutPriority(1)
 
+            // P1046: FD0〜FD3を1つの統合表示にまとめる。FD2/FD3は外付けユニット設定と
+            // 無関係に常時表示(未使用ならグレーのまま)。FD2/FD3は_media_presentを使うが、
+            // _insertedとの差は挿入時のSetDelay猶予(約1フレーム)のみ。
+            // 固定長4要素なのでid: \.offsetで同値タプルの衝突を避ける。
             HStack(spacing: 4) {
-                Text("FDD0:")
+                Text("FDD:")
                     .font(.caption)
-                let fdd0Show = lampsLive && viewModel.status.fdd0_inserted
-                Text(fdd0Show ? "●" : "○")
-                    .font(.caption)
-                    .foregroundColor(!fdd0Show ? .gray : (viewModel.status.fdd0_active ? .red : .green))
-            }
-            .layoutPriority(1)
-
-            HStack(spacing: 4) {
-                Text("FDD1:")
-                    .font(.caption)
-                let fdd1Show = lampsLive && viewModel.status.fdd1_inserted
-                Text(fdd1Show ? "●" : "○")
-                    .font(.caption)
-                    .foregroundColor(!fdd1Show ? .gray : (viewModel.status.fdd1_active ? .red : .green))
+                let drives: [(present: Bool, active: Bool)] = [
+                    (lampsLive && viewModel.status.fdd0_inserted, viewModel.status.fdd0_active),
+                    (lampsLive && viewModel.status.fdd1_inserted, viewModel.status.fdd1_active),
+                    (lampsLive && viewModel.status.fdd2_media_present, viewModel.status.fdd2_active),
+                    (lampsLive && viewModel.status.fdd3_media_present, viewModel.status.fdd3_active),
+                ]
+                ForEach(Array(drives.enumerated()), id: \.offset) { _, d in
+                    Text(d.present ? "●" : "○")
+                        .font(.caption)
+                        .foregroundColor(!d.present ? .gray : (d.active ? .red : .green))
+                }
             }
             .layoutPriority(1)
 

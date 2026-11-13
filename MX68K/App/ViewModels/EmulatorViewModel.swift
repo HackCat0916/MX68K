@@ -308,12 +308,16 @@ class EmulatorViewModel: ObservableObject {
         if !fdd1.isEmpty && FileManager.default.fileExists(atPath: fdd1) {
             mountFDD(drive: 1, path: fdd1, writeProtect: config.fdd.fdd1WriteProtect)
         }
-        // P684: FD2/FD3 も同様に、config.json の保存済みパスから独立に再マウントする。
-        if !fdd2.isEmpty && FileManager.default.fileExists(atPath: fdd2) {
-            mountFDD(drive: 2, path: fdd2, writeProtect: config.fdd.fdd2WriteProtect)
-        }
-        if !fdd3.isEmpty && FileManager.default.fileExists(atPath: fdd3) {
-            mountFDD(drive: 3, path: fdd3, writeProtect: config.fdd.fdd3WriteProtect)
+        // P684(外付けユニット設定と無関係に復元していた不備をP1044で修正):
+        // FD2/FD3 は外付け FDD ユニットが有効な場合のみ、config.json の保存済みパスから
+        // 独立に再マウントする。
+        if config.extensions.externalFDDUnit {
+            if !fdd2.isEmpty && FileManager.default.fileExists(atPath: fdd2) {
+                mountFDD(drive: 2, path: fdd2, writeProtect: config.fdd.fdd2WriteProtect)
+            }
+            if !fdd3.isEmpty && FileManager.default.fileExists(atPath: fdd3) {
+                mountFDD(drive: 3, path: fdd3, writeProtect: config.fdd.fdd3WriteProtect)
+            }
         }
 
         // P200: 保存済み SASI HDD(.hdf)イメージを復元。mx68k_hdd_insert が
@@ -353,6 +357,10 @@ class EmulatorViewModel: ObservableObject {
         // ユーザー設定値で上書きする形になる。既定値は固定初期化値と一致。
         setAdpcmVolume(config.audio.adpcmVolume)
         setOpmVolume(config.audio.opmVolume)
+        // P1006: 内蔵 MT-32/SC-55 の出力音量。MT-32 の context がまだ無くても値は保存され、
+        // 次回 open 時に反映される。
+        setMt32OutputGain(config.extensions.mt32OutputGainPercent)
+        setSc55OutputGain(config.extensions.sc55OutputGainPercent)
         mx68k_log("[Swift] audio.start()")
         audio.start()
 
@@ -698,9 +706,16 @@ class EmulatorViewModel: ObservableObject {
         // P686 (D-70): 外付け FDD ユニット。設定値のみ push し、配線は
         // init / ハードリセットで確定する(Mercury と同型)。
         mx68k_set_ext_fdd_enabled(config.extensions.externalFDDUnit)
+        EmulatorRunState.shared.externalFDDUnitEnabled = config.extensions.externalFDDUnit   // P1046: FD2/FD3メニューゲート用ミラー
         // P958: ふろっぴU君の利用設定。設定値のみ push し、配線は init / ハードリセットで確定する。
         mx68k_set_floppyu_config(config.extensions.floppyuEnabled,
                                  Int32(config.extensions.floppyuAssignedBase))
+        // P1054: ふろっぴU君の書込み許可。設定値のみ push し、反映は init / ハードリセットの install で確定する
+        // (環境変数 MX68K_FLOPPYU_WRITE が設定されていればそちらが優先)。
+        mx68k_set_floppyu_write_enabled(config.extensions.floppyuWriteEnabled)
+        // P1067: ふろっぴU君の FORMAT 許可。設定値のみ push し、反映は init / ハードリセットの install で確定する
+        // (normal・設定由来のときだけ有効。環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視)。
+        mx68k_set_floppyu_format_enabled(config.extensions.floppyuFormatEnabled)
         // P488: MIDI ボード(CZ-6BM1 / $EAE000)の装着設定。Mercury と同じく
         // 値は Bridge 側で「設定値」として保持され、配線はハードリセット（⌘R）で確定する。
         mx68k_set_midi_enabled(config.extensions.midiEnabled)
@@ -840,6 +855,9 @@ class EmulatorViewModel: ObservableObject {
     // (ADPCM_VolumeShift / fmvolume)を直接書き換える別レイヤー。
     func setAdpcmVolume(_ v: Int) { mx68k_set_adpcm_volume(Int32(max(0, min(16, v)))) }
     func setOpmVolume(_ v: Int)   { mx68k_set_opm_volume(Int32(max(0, min(16, v)))) }
+    // P1006: 内蔵 MT-32/SC-55 の出力音量(%、0〜300。100 = 既定)。
+    func setMt32OutputGain(_ percent: Int) { mx68k_set_mt32_output_gain(Float(max(0, min(300, percent))) / 100.0) }
+    func setSc55OutputGain(_ percent: Int) { mx68k_set_sc55_output_gain(Float(max(0, min(300, percent))) / 100.0) }
 
     func hardReset() {
         // P628: サンプルレート設定はCore側チップ(ADPCM/OPM/Mercury)だけでなく

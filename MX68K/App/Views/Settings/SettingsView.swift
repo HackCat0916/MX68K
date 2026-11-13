@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 struct SettingsView: View {
     @EnvironmentObject var settingsViewModel: SettingsViewModel
@@ -21,6 +24,15 @@ struct SettingsView: View {
     /// P229 — 独立提示の文脈では「Close」ボタンを出す(既定)。BIOS 未設定
     /// フォールバック(メイン画面としての表示)では戻り先がないため false。
     var showCloseButton: Bool
+    #if os(macOS)
+    /// P1007 — GeneralSettingsView と同じキーを独立宣言(displayFilter/scanlineEffect と
+    /// 同型)。既定値も GeneralSettingsView 側と一致させる(false)。
+    @AppStorage("pauseWhileSettingsOpen") private var pauseWhileSettingsOpen: Bool = false
+    /// P1007 — onAppear で requestAutoPause() を実際に呼んだかの記録。設定画面を
+    /// 開いたままトグルを変更されても、onDisappear はこのフラグで対称に解除する
+    /// (参照カウントのリーク/誤解除を防ぐため、トグルの現在値は見ない)。
+    @State private var didRequestPauseOnAppear = false
+    #endif
 
     /// P682 — BIOS未設定時の自動表示(`showCloseButton == false`、`RootView`経由)では
     /// 既定タブを「BIOS」(tag 0)にする。通常の設定ウィンドウ(⌘,、`showCloseButton == true`)
@@ -60,34 +72,8 @@ struct SettingsView: View {
 
     private var settingsBody: some View {
         VStack {
-            Picker("Tab", selection: $selectedTab) {
-                #if os(macOS)
-                Text("General").tag(-1)
-                Text("BIOS").tag(0)
-                Text("Hardware").tag(1)
-                Text("Audio").tag(2)
-                Text("Input").tag(3)   // P194
-                Text("SASI").tag(4)    // P273
-                Text("SCSI").tag(5)    // P273
-                Text("Windrv").tag(6)  // P642
-                #else
-                // P706 §0-4 提案(3): 未移植のタブは **表示しない**。Browse… が死んだ
-                // タブを見せるより、動く数枚だけを出す方が完成品である。
-                // P712: SASI / SCSI を移植したので追加(タグ番号は macOS と共通)。
-                // P761: Audio を追加(Mercury / MIDI は View 内で `#if os(macOS)` 除外)。
-                Text("BIOS").tag(0)
-                Text("Hardware").tag(1)
-                Text("Audio").tag(2)
-                Text("SASI").tag(4)
-                Text("SCSI").tag(5)
-                #endif
-            }
-            .pickerStyle(.segmented)
-            // P583: セグメント帯の左に「Tab」というラベルが描画されていたため隠す。
-            // アクセシビリティラベルとしては "Tab" 文字列が残るため、xcstrings には
-            // `Tab` キーを ja 訳付きで登録してある(孤児化回避)。
-            .labelsHidden()
-            .padding()
+            SettingsTabBar(selectedTab: $selectedTab)
+                .padding()
 
             // P580 — P579 で追加した外側 `ScrollView` を撤去。`Form` を `ScrollView` へ
             // 入れ子にすると、`ScrollView` の水平クリップ境界と `Form` 内 `Text` の
@@ -173,7 +159,11 @@ struct SettingsView: View {
         .onAppear {
             settingsViewModel.load(from: configManager.config)
             #if os(macOS)
-            emulatorViewModel.requestAutoPause()   // P229: 設定表示中は自動一時停止。
+            // P229/P1007: 設定表示中の自動一時停止(既定OFF、General タブで切替)。
+            if pauseWhileSettingsOpen {
+                emulatorViewModel.requestAutoPause()
+                didRequestPauseOnAppear = true
+            }
             #endif
             // P706 §C-2: iOS では自動一時停止しない。macOS の自動一時停止は
             // `NSOpenPanel.runModal()` 中も CVDisplayLink が回り続けることへの対処で
@@ -183,8 +173,91 @@ struct SettingsView: View {
         }
         .onDisappear {
             #if os(macOS)
-            emulatorViewModel.releaseAutoPause()    // P229: 閉じたら再開(手動停止中なら維持)。
+            // P229/P1007: 閉じたら再開(手動停止中なら維持)。onAppear で要求した場合のみ解除。
+            if didRequestPauseOnAppear {
+                emulatorViewModel.releaseAutoPause()
+                didRequestPauseOnAppear = false
+            }
             #endif
         }
     }
 }
+
+private struct SettingsTabBar: View {
+    @Binding var selectedTab: Int
+    var body: some View {
+        #if os(macOS)
+        SettingsTabBarMac(selectedTab: $selectedTab)
+        #else
+        Picker("Tab", selection: $selectedTab) {
+            // P706 §0-4 提案(3): 未移植のタブは **表示しない**。Browse… が死んだ
+            // タブを見せるより、動く数枚だけを出す方が完成品である。
+            // P712: SASI / SCSI を移植したので追加(タグ番号は macOS と共通)。
+            // P761: Audio を追加(Mercury / MIDI は View 内で `#if os(macOS)` 除外)。
+            Text("BIOS").tag(0)
+            Text("Hardware").tag(1)
+            Text("Audio").tag(2)
+            Text("SASI").tag(4)
+            Text("SCSI").tag(5)
+        }
+        .pickerStyle(.segmented)
+        // P583: セグメント帯の左に「Tab」というラベルが描画されていたため隠す。
+        // アクセシビリティラベルとしては "Tab" 文字列が残るため、xcstrings には
+        // `Tab` キーを ja 訳付きで登録してある(孤児化回避)。
+        .labelsHidden()
+        #endif
+    }
+}
+
+#if os(macOS)
+// P1021(D-113): SwiftUIのPicker(.segmented)は日本語ラベル時のintrinsic幅が提案幅を
+// 上回り、AppKit側に押し広げられていた。自前のNSSegmentedControlで提案幅に従わせる。
+private struct SettingsTabBarMac: NSViewRepresentable {
+    @Binding var selectedTab: Int
+
+    // 各キーは既存のLocalizable.xcstringsエントリを引く(動的参照のため静的抽出で
+    // 未使用扱いされ得るが、削除しないこと)。
+    fileprivate static let items: [(key: String, tag: Int)] = [
+        ("General", -1),
+        ("BIOS", 0),
+        ("Hardware", 1),
+        ("Audio", 2),
+        ("Input", 3),   // P194
+        ("SASI", 4),    // P273
+        ("SCSI", 5),    // P273
+        ("Windrv", 6),  // P642
+    ]
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let labels = Self.items.map { String(localized: String.LocalizationValue($0.key)) }
+        let control = NSSegmentedControl(
+            labels: labels, trackingMode: .selectOne,
+            target: context.coordinator, action: #selector(Coordinator.selectionChanged(_:)))
+        control.segmentDistribution = .fillEqually
+        // 圧縮耐性を下げ、intrinsic幅が提案幅を上回っても提案幅へ従わせる。
+        control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        control.setAccessibilityLabel(String(localized: String.LocalizationValue("Tab")))
+        return control
+    }
+
+    func updateNSView(_ nsView: NSSegmentedControl, context: Context) {
+        if let idx = Self.items.firstIndex(where: { $0.tag == selectedTab }) {
+            nsView.selectedSegment = idx
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(selectedTab: $selectedTab) }
+
+    final class Coordinator: NSObject {
+        let selectedTab: Binding<Int>
+        init(selectedTab: Binding<Int>) { self.selectedTab = selectedTab }
+        @objc func selectionChanged(_ sender: NSSegmentedControl) {
+            let idx = sender.selectedSegment
+            if idx >= 0 && idx < SettingsTabBarMac.items.count {
+                selectedTab.wrappedValue = SettingsTabBarMac.items[idx].tag
+            }
+        }
+    }
+}
+#endif

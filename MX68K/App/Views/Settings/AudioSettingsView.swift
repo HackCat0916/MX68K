@@ -322,6 +322,27 @@ struct AudioSettingsView: View {
         Text("⚠ Takes effect after pressing Apply. 32 (the default) matches the real MT-32 hardware. Increasing it can reduce notes cutting off when too many partials play at once, but no longer matches real hardware behavior.")
             .font(.subheadline).foregroundColor(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+        // P1006: 内蔵 MT-32 専用の出力音量(mt32emu_set_output_gain)。Max Partials と異なり
+        // context 再作成を要しないため、ADPCM/OPM Volume と同じくドラッグ中に即時反映する
+        // (config.json への永続化はこのタブ既存の流儀どおり Apply ボタンで行う)。
+        LabeledContent("MT-32 Volume") {
+            HStack {
+                Slider(value: Binding(
+                    get: { Double(settingsViewModel.mt32OutputGainPercent) },
+                    set: { newValue in
+                        settingsViewModel.mt32OutputGainPercent = Int(newValue.rounded())
+                        #if os(macOS)
+                        emulatorViewModel.setMt32OutputGain(settingsViewModel.mt32OutputGainPercent)
+                        #else
+                        iosViewModel.setMt32OutputGain(settingsViewModel.mt32OutputGainPercent)
+                        #endif
+                    }
+                ), in: 0...300)
+                Text("\(settingsViewModel.mt32OutputGainPercent)%")
+                    .frame(width: 52, alignment: .trailing)
+                    .monospacedDigit()
+            }
+        }
         mt32RomInfoRow(path: settingsViewModel.mt32ControlRomPath,
                        expected: mt32ControlRomSizes, name: String(localized: "Control ROM"))
         mt32RomInfoRow(path: settingsViewModel.mt32PcmRomPath,
@@ -426,6 +447,26 @@ struct AudioSettingsView: View {
             TextField("", text: $settingsViewModel.sc55WaveRom3Path)
             FilePickerButton(titleKey: "Browse...", destination: .sc55WaveRom3) { path in
                 settingsViewModel.sc55WaveRom3Path = path
+            }
+        }
+        // P1006: 内蔵 SC-55 専用の出力音量。Nuked-SC55 にはゲイン API が無いため
+        // Bridge 側(mx68k_sc55_render_mix)でサンプルへ乗算する。即時反映(永続化は Apply)。
+        LabeledContent("SC-55 Volume") {
+            HStack {
+                Slider(value: Binding(
+                    get: { Double(settingsViewModel.sc55OutputGainPercent) },
+                    set: { newValue in
+                        settingsViewModel.sc55OutputGainPercent = Int(newValue.rounded())
+                        #if os(macOS)
+                        emulatorViewModel.setSc55OutputGain(settingsViewModel.sc55OutputGainPercent)
+                        #else
+                        iosViewModel.setSc55OutputGain(settingsViewModel.sc55OutputGainPercent)
+                        #endif
+                    }
+                ), in: 0...300)
+                Text("\(settingsViewModel.sc55OutputGainPercent)%")
+                    .frame(width: 52, alignment: .trailing)
+                    .monospacedDigit()
             }
         }
         sc55RomInfoRow(path: settingsViewModel.sc55Rom1Path,

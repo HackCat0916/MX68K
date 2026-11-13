@@ -1,0 +1,193 @@
+# P1083: XDF_WriteID で WRITE ID の D パラメータ(埋め草)によりトラックのデータ領域を充填する(D-123)
+#
+# 分類: A(独立2参照実装[XM6・XEiJ]で実証済みの「構造」の移植。逐語移植ではない——P977/P982/P1075/P1079 の前例に倣う)
+# 出典リポジトリ: XM6 2.06(mainline、/Volumes/WD 8TB HDD/Develop/xm6)・XEiJ 0.26.10.08(/Users/toshinari/Desktop/XEiJ_0261008)の独立2者一致
+# 参照コミットハッシュ: XM6/XEiJ はどちらも git 管理外のため sha256 で版を固定する(下記「版固定」に生出力)。
+#   fdi.cpp・FDC.java の sha256 は P982/P1075/P1079/P1080 パッチヘッダ記載値と同一=同一版。
+#   (XM6 は mainline 2.06 のソースを読んだもので、ユーザーが使う XM6 TypeG[クローズドソース]の挙動は未確認)
+# 同じ欠陥の共有先(修正無し、本パッチの対象外。px68k 系統で共有された欠陥、上流 xkeropi d92ab3d 由来):
+#   px68k本家 74ddbb3 x68k/disk_xdf.c:134 / px68k-libretro 617574f x68k/disk_xdf.c:134 / MPX68K 42fc340 X68000 Shared/px68k/x68k/disk_xdf.c:149
+#   いずれも XDF_WriteID は ID 表検査の後 `XDFTrk[drv] = trk;` のみで、XDFImg へは何も書かない(下記「参照実装調査」に生出力)。
+#   MPX68K GitHub 版(ls-remote HEAD 4fc9e8538e94f7930dc26e60721a1ec016ad0178)も同一(P1083 Code Investigation で gh api 取得、:139-151)。
+# 移植した構造: WRITE ID の C-Phase パラメータ D(データ部初期値、fdc.c が buf[num<<2] に置く)で、
+#   対象トラックの全セクタのデータ領域を一括充填する(XM6 FDITrack::WriteID の「全セクタ Fill」)。
+#   埋め草は ID 表検査ループ(buf を 4 ずつ進める)より前に buf[num<<2] で取得する(D88_WriteID と同じ取得式)。
+# 移植しない点(意図的):
+#   (a) XEiJ の ID 表エントリ単位の充填(C/H/R/N で決まるオフセットに 128<<N バイト)。MX の既存検査は R1-8・N=3 を全件確認済みで、
+#       FORMAT.X が送る ID 表は R1-8 の順列(P1063 ids_chrn=0/1/1/3..0/1/8/3)なので通常経路では XM6 方式と同結果。
+#       ID 表に R 重複がある異常系でのみ差が出る(既存検査ロジックは変えない、P1083 Fix Plan 残留リスク R3 としてユーザー承認事項)。
+#   (b) XM6 FDISector::Fill の「内容が D と同じなら書かない」最適化(結果のバイト列は同じ)。
+#   (c) XEiJ の fduWritten(dirty フラグ)。MX の XDF_Eject は ReadOnly でなければ全イメージを無条件に書き戻すため不要。
+#   (d) trk=154(C77H0)の吸収(P1075)は従来どおり何も書かない——充填は `if ( trk==154 ) return TRUE;` の後ろに置く。
+# 範囲の安全性: XDFImg の確保は 1261568 = 154*8*1024 バイト(Core/px68k/x68k/disk_xdf.c:38)。冒頭の範囲検査(trk<=154)と
+#   trk==154 の早期 return により充填時は trk<=153、末尾は 153*8192+8192 = 1261568 でちょうど境界内。
+#   ReadOnly ディスクは fdc.c 側で WRITE ID 実行前に弾かれる(P1083 Code Investigation §3)。
+# 実測根拠: FORMAT.X が送る D=0xE5 は [runtime log](P1063 の [P1009-ROUTER] 行 prm_dev=4D00030874E5、ふろっぴU君経路)。
+#   内蔵 FDC 経路での D 値・充填の有無は P1083 T-1/T-2 の .xdf 直接ダンプ(p1083_xdfdump.py)で確認済み:
+#   T-1(修正前、2026-11-13、.mx68k_cycles/P1083_handson_t1.md): 合成 .xdf(全バイト 0x3C)へ FORMAT B: 実行後、
+#     データ領域(1,250,304 バイト)が 1 件残らず 0x3C のまま=区分(B)(充填なし)を [runtime dump] で確定。
+#   T-2(修正後、2026-11-13、main=550619f、.mx68k_cycles/P1083_handson_t2.md): 新規合成した別の合成 .xdf へ
+#     同手順を実行、データ領域が 1 件残らず 0xE5(予測した D 値)へ反転=区分(A)(充填成功)を [runtime dump] で確定。
+#   T-1→T-2 の対称反転によりパッチ効果を単独 hands-on 確認(Core File Modification Policy 条件 4 充足)。main=2966a29。
+# 経緯: P1075 Code Investigation で副産物として発見(D-123 起票)→ P1083 Code Investigation・Fix Plan(本パッチ)。
+# 対象ファイル:行範囲: Core/px68k/x68k/disk_xdf.c:124-140(XDF_WriteID、適用前。ファイル最終変更 6d54eb3 = P1075)
+# 理由(1行): XDF_WriteID が WRITE ID の埋め草(D)を無視しデータ領域を一切上書きしないため、FORMAT 後も
+#   ブート・FAT・ルートディレクトリ以外の領域に FORMAT 前の旧データがそのまま残っていた(D-123)
+# 由来サイクル: P1083
+# 適用方法: git apply Patches/Core/p1083_xdf_writeid_fill.patch
+#           撤回:  git apply -R Patches/Core/p1083_xdf_writeid_fill.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+#           前提: p1075_xdf_writeid_c77_absorb.patch 適用済み(本パッチの文脈行に P1075 のコメントと trk==154 行を含む)。
+# 環境変数: なし(既定 OFF のフラグは導入しない——CLAUDE.md「既定OFF放置パターン」規律は非該当)。
+# 併用が必須の Bridge 側変更: なし(No stacking 非該当。置き換え対象の Bridge 近似は無い)。
+# 挙動の変化: XDF 形式(拡張子が D88/88D/DIM 以外の全イメージ)への WRITE ID(FORMAT)成功時のみ、対象トラック(trk 0〜153)の
+#   8 セクタ×1024 バイト=8192 バイトが D の値で上書きされる。ID 表検査・XDFTrk 更新・戻り値は不変。trk=154 は従来どおり無変更。
+#   D88(D-121 で対応済み)・DIM(D-122 凍結中)・通常の READ/WRITE DATA は別関数のため不変
+#   (既定スモーク経路の human302.xdf 起動はこの関数を通らない)。ステートセーブ形式は不変。
+# 生成方法: 使い捨て git リポジトリへ現行 Core/px68k/x68k/disk_xdf.c(blob fcac942)を取り込み、3 箇所を編集して git diff で生成。
+#   編集後ファイルは実リポジトリの COMPILER_FLAGS 相当(-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing
+#   -include Bridge/px68k_compat.h -include Bridge/GamePad.h)で clang -fsyntax-only -Wall を通し、警告・エラー 0 件(適用前も 0 件)。
+#
+# 版固定(本パッチ作成時に実行した生出力):
+#   $ shasum -a 256 "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.h" /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   | fa84af130e95bf819c314c03afcb0cef47b114e91ba2c628c2ce602af27a2946  /Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp
+#   | 6687a1e361ef4971aa3dfb913519f5094ff11b46716c18c96dd2002faa46ee2d  /Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.h
+#   | 7c240af5ab8f0310f88ee4e0a39dbab411027d74b4a894ad1e5f4a6b7d98fdf3  /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k" rev-parse HEAD
+#   | 74ddbb37b4e12b77362a4e12f28ceb5aaa593684
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k" log -1 --oneline -- x68k/disk_xdf.c
+#   | d92ab3d original xkeropi-20101107
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k-libretro" rev-parse HEAD
+#   | 617574fc65892421dd8be92270f8241c96a1a594
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k-libretro" log -1 --oneline -- x68k/disk_xdf.c
+#   | d92ab3d original xkeropi-20101107
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K" rev-parse HEAD
+#   | 42fc3401b5a3449a3b758ae67edba3c4a19682b8
+#   $ grep -n "XDFTrk\[drv\] = trk\|trk>153\|memset" "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K/X68000 Shared/px68k/x68k/disk_xdf.c"
+#   | 47:	memset(XDFImg[drv], 0xe5, 1261568);
+#   | 100:	if ( (trk<0)||(trk>153) ) return FALSE;
+#   | 107:	XDFTrk[drv] = trk;
+#   | 143:	if ( (trk<0)||(trk>153) ) return FALSE;
+#   | 149:	XDFTrk[drv] = trk;
+#   $ grep -n "XDFTrk\[drv\] = trk\|trk>153\|memset" "/Volumes/WD 8TB HDD/Develop/px68k/x68k/disk_xdf.c"
+#   | 40:	memset(XDFImg[drv], 0xe5, 1261568);
+#   | 85:	if ( (trk<0)||(trk>153) ) return FALSE;
+#   | 92:	XDFTrk[drv] = trk;
+#   | 128:	if ( (trk<0)||(trk>153) ) return FALSE;
+#   | 134:	XDFTrk[drv] = trk;
+#   $ grep -n "XDFTrk\[drv\] = trk\|trk>153\|memset" "/Volumes/WD 8TB HDD/Develop/px68k-libretro/x68k/disk_xdf.c"
+#   | 40:	memset(XDFImg[drv], 0xe5, 1261568);
+#   | 85:	if ( (trk<0)||(trk>153) ) return FALSE;
+#   | 92:	XDFTrk[drv] = trk;
+#   | 128:	if ( (trk<0)||(trk>153) ) return FALSE;
+#   | 134:	XDFTrk[drv] = trk;
+#   $ grep -a -n "WriteID" "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.h" | expand -t 4 | tr -d '\r'
+#   | 177:    virtual int FASTCALL WriteID(const BYTE *buf, DWORD d, int sc, BOOL mfm, int gpl);
+#   | 337:    int FASTCALL WriteID(const BYTE *buf, DWORD d, int sc, BOOL mfm, int hd, int gpl);
+#   | 477:    int FASTCALL WriteID(const BYTE *buf, DWORD d, int sc, BOOL mfm, int hd, int gpl);
+#   | 628:    int FASTCALL WriteID(const BYTE *buf, DWORD d, int sc, BOOL mfm, int gpl);
+#   $ grep -a -n "^class FDITrack2HD" "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.h" | tr -d '\r'
+#   | 26:class FDITrack2HD;
+#   | 514:class FDITrack2HD : public FDITrack
+#   (XM6 fdi.h で WriteID を宣言するトラッククラスは FDITrack[:177 virtual] と FDITrackD68[:628] のみ。:337/:477 は
+#    FDIDisk 系の別シグネチャ[hd 引数あり]。XDF 相当の FDITrack2HD[:514]は WriteID を上書きせず基底 FDITrack::WriteID を使う。
+#    XM6 のソースは CRLF 改行のため tr -d '\r' で CR を除いた)
+#
+# 逐語抜粋: 以下は本パッチ作成時に下記コマンドで取得した出力そのもの。
+#   XM6 は Shift_JIS のため iconv で UTF-8 へ変換し、タブを expand -t 4 で空白へ展開し、CRLF の CR を tr -d '\r' で除いた
+#   (それ以外は無加工)。XEiJ・MX はタブを expand -t 4 で展開した(それ以外は無加工)。各行頭の「#   | 」はヘッダ用の接頭辞。
+#
+# --- XM6 vm/fdi.cpp:1472-1479(FDITrack::WriteID 末尾: ID 照合成功後にトラックの全セクタを D で Fill)
+#   $ sed -n 1472,1479p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4 | tr -d '\r'
+#   |     // 書き込みループ(全セクタを埋める)
+#   |     sector = GetFirst();
+#   |     while (sector) {
+#   |         sector->Fill(d);
+#   |         sector = sector->GetNext();
+#   |     }
+#   |
+#   |     return FDD_NOERROR;
+#
+# --- XM6 vm/fdi.cpp:213-232(FDISector::Fill: 内容が D と異なればセクタ全体を memset)
+#   $ sed -n 213,232p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4 | tr -d '\r'
+#   | int FASTCALL FDISector::Fill(DWORD d)
+#   | {
+#   |     int i;
+#   |     BOOL changed;
+#   |
+#   |     ASSERT(this);
+#   |
+#   |     // セクタバッファがなければ何もしない
+#   |     if (!sec.buffer) {
+#   |         return sec.error;
+#   |     }
+#   |
+#   |     // 比較しながら書き込み
+#   |     changed = FALSE;
+#   |     for (i=0; i<sec.length; i++) {
+#   |         if (sec.buffer[i] != (BYTE)d) {
+#   |             // 1回でも違ったら、フィルしてbreak
+#   |             memset(sec.buffer, d, sec.length);
+#   |             changed = TRUE;
+#   |             break;
+#
+# --- XEiJ xeij/FDC.java:3220-3232(WRITE ID の C-Phase 定義: [5] D = データ部に書き込むデータ)/ :3381-3384(エントリ単位の充填)
+#   $ sed -n 3220,3232p /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java | expand -t 4
+#   |     //fduCommandWriteId ()
+#   |     //  0x0d  WRITE ID
+#   |     //    1トラックフォーマットする。別名Format Write
+#   |     //  C-Phase
+#   |     //    [0]  bit6    MF    MFM Mode         0=FM,1=MFM
+#   |     //         bit4-0  CMD   Command          0x0d=WRITE ID
+#   |     //    [1]  bit2    HD    Head Address     サイド
+#   |     //         bit1-0  US    Unit Select      ユニット
+#   |     //    [2]          N     Record Length    セクタ長=128<<N
+#   |     //    [3]          SC    Sector           1トラックあたりのセクタ数
+#   |     //    [4]          GPL   Gap Length       Gap3に書き込む長さ
+#   |     //    [5]          D     Data             データ部に書き込むデータ
+#   |     //  E-Phase
+#   $ sed -n 3381,3384p /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java | expand -t 4
+#   |         } else {  //セクタが存在する
+#   |           Arrays.fill (fduImage, o, o + (128 << fduPNN), fdcCommandBuffer[5]);  //初期化データで充填する
+#   |           fduWritten = true;
+#   |         }
+#
+# --- MX(適用前)Core/px68k/x68k/fdc.c:408-410(D を DataBuf[sc*4] へ置いて FDD_WriteID へ渡す)/ disk_xdf.c:38-40(確保サイズ)
+#   $ sed -n 408,410p Core/px68k/x68k/fdc.c | expand -t 4
+#   |     case 13:    // WriteID
+#   |         fdc.DataBuf[fdc.wrptr] = prm2->d;
+#   |         if ( !FDD_WriteID(fdc.drv, (fdc.cyl<<1)+HD(prm2), fdc.DataBuf, prm2->sc) ) {
+#   $ sed -n 38,40p Core/px68k/x68k/disk_xdf.c | expand -t 4
+#   |     XDFImg[drv] = (unsigned char*)malloc(1261568);
+#   |     if ( !XDFImg[drv] ) return FALSE;
+#   |     memset(XDFImg[drv], 0xe5, 1261568);
+#
+diff --git a/Core/px68k/x68k/disk_xdf.c b/Core/px68k/x68k/disk_xdf.c
+index fcac942..9c30de5 100644
+--- a/Core/px68k/x68k/disk_xdf.c
++++ b/Core/px68k/x68k/disk_xdf.c
+@@ -124,10 +124,12 @@ int32_t XDF_ReadID(int32_t drv, FDCID* id)
+ int32_t XDF_WriteID(int32_t drv, int32_t trk, uint8_t* buf, int32_t num)
+ {
+ 	int_fast16_t i;
++	uint8_t fill;
+ 	if ( (drv<0)||(drv>3) ) return FALSE;
+ 	if ( (trk<0)||(trk>154) ) return FALSE;
+ 	if ( !XDFImg[drv] ) return FALSE;
+ 	if ( num!=8 ) return FALSE;
++	fill = buf[num<<2];
+ 	for (i=0; i<8; i++, buf+=4) {
+ 		if ( (((buf[0]<<1)+buf[1])!=trk)||(buf[2]<1)||(buf[2]>8)||(buf[3]!=3) ) return FALSE;
+ 	}
+@@ -135,6 +137,11 @@ int32_t XDF_WriteID(int32_t drv, int32_t trk, uint8_t* buf, int32_t num)
+ 	 * 何も書かず正常終了で吸収する(XEiJ FDC.java:3364-3386 / XM6 vm/fdi.cpp:3739-3742 と同じ構造)。
+ 	 * XDFTrk は更新しない(XDF_GetCurrentID が 153 超を拒否し、リザルトの C/H/R/N が未初期化になるため) */
+ 	if ( trk==154 ) return TRUE;
++	/* P1083 (D-123): WRITE ID の D パラメータ(fdc.c が buf[num<<2] に置く埋め草バイト)で
++	 * トラックの全セクタ領域を充填する(XM6 vm/fdi.cpp:1473-1477 FDITrack::WriteID の
++	 * 全セクタFillと同じ構造。trk<=153 の保証はこの関数冒頭の範囲検査と上のtrk==154
++	 * 早期returnにより確定しているため、154*8*1024=1261568バイトのXDFImg確保サイズ内に収まる)。 */
++	memset(XDFImg[drv]+(trk<<13), fill, 8192);
+ 	XDFTrk[drv] = trk;
+ 	return TRUE;
+ }

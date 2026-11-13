@@ -124,13 +124,24 @@ int32_t XDF_ReadID(int32_t drv, FDCID* id)
 int32_t XDF_WriteID(int32_t drv, int32_t trk, uint8_t* buf, int32_t num)
 {
 	int_fast16_t i;
+	uint8_t fill;
 	if ( (drv<0)||(drv>3) ) return FALSE;
-	if ( (trk<0)||(trk>153) ) return FALSE;
+	if ( (trk<0)||(trk>154) ) return FALSE;
 	if ( !XDFImg[drv] ) return FALSE;
 	if ( num!=8 ) return FALSE;
+	fill = buf[num<<2];
 	for (i=0; i<8; i++, buf+=4) {
 		if ( (((buf[0]<<1)+buf[1])!=trk)||(buf[2]<1)||(buf[2]>8)||(buf[3]!=3) ) return FALSE;
 	}
+	/* P1075 (D-119): FORMAT.X は 2HD に対し存在しないシリンダ77(C77H0、trk=154)へも WRITE ID を1回余分に出す。
+	 * 何も書かず正常終了で吸収する(XEiJ FDC.java:3364-3386 / XM6 vm/fdi.cpp:3739-3742 と同じ構造)。
+	 * XDFTrk は更新しない(XDF_GetCurrentID が 153 超を拒否し、リザルトの C/H/R/N が未初期化になるため) */
+	if ( trk==154 ) return TRUE;
+	/* P1083 (D-123): WRITE ID の D パラメータ(fdc.c が buf[num<<2] に置く埋め草バイト)で
+	 * トラックの全セクタ領域を充填する(XM6 vm/fdi.cpp:1473-1477 FDITrack::WriteID の
+	 * 全セクタFillと同じ構造。trk<=153 の保証はこの関数冒頭の範囲検査と上のtrk==154
+	 * 早期returnにより確定しているため、154*8*1024=1261568バイトのXDFImg確保サイズ内に収まる)。 */
+	memset(XDFImg[drv]+(trk<<13), fill, 8192);
 	XDFTrk[drv] = trk;
 	return TRUE;
 }

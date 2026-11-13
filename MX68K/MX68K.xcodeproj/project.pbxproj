@@ -97,7 +97,7 @@
 		3D97BEC13189BE762D610A87 /* HardwareSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A815A9BB54341EE45E01EF9 /* HardwareSettingsView.swift */; };
 		3DF736E98E0AF3A67FC3A739 /* c68k_ini.inc in Resources */ = {isa = PBXBuildFile; fileRef = DF2B90B4F9CAC940CDF384AC /* c68k_ini.inc */; };
 		3F394E94DC66015E7F6A3CCB /* keyboard.c in Sources */ = {isa = PBXBuildFile; fileRef = D5C76925705E073A6FD84BBA /* keyboard.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
-		3F715C65FC6B930F92F6446A /* mem_wrap.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AB2F9B5DE8A513334CCB427 /* mem_wrap.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		3F715C65FC6B930F92F6446A /* mem_wrap.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AB2F9B5DE8A513334CCB427 /* mem_wrap.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h -include $(SRCROOT)/../Bridge/floppyu_regprobe_shim.h"; }; };
 		40A8E60D4F99A3CF0A50C045 /* IOSKeyboardInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72E46E651688042FF6BFC44C /* IOSKeyboardInput.swift */; };
 		40B492758BF7C02DAB7165BC /* SincResampler.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 606CD03D7413752F4B44B3A8 /* SincResampler.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
 		41DFDDEB6418F5ED850F6A46 /* ppi.c in Sources */ = {isa = PBXBuildFile; fileRef = 4C2011B27976E189DEE8BB0D /* ppi.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
@@ -254,6 +254,12 @@
 		A697C01D0000000000000001 /* VideoRecordingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A697C01D0000000000000002 /* VideoRecordingService.swift */; };
 		A701C01D0000000000000001 /* AboutPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A701C01D0000000000000002 /* AboutPanel.swift */; };
 		A761B01D0000000000000003 /* AudioSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A183B01D0000000000000002 /* AudioSettingsView.swift */; };
+		F939A0000000000000000003 /* floppyu_regprobe.c in Sources */ = {isa = PBXBuildFile; fileRef = F939A0000000000000000001 /* floppyu_regprobe.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F940A0000000000000000003 /* fd_latency_experiment.c in Sources */ = {isa = PBXBuildFile; fileRef = F940A0000000000000000001 /* fd_latency_experiment.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F945A0000000000000000003 /* floppyu_usb_transport.c in Sources */ = {isa = PBXBuildFile; fileRef = F945A0000000000000000001 /* floppyu_usb_transport.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F1004A000000000000000003 /* floppyu_vslice.c in Sources */ = {isa = PBXBuildFile; fileRef = F1004A000000000000000001 /* floppyu_vslice.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F949A0000000000000000003 /* floppyu_fdc_passthrough_probe.c in Sources */ = {isa = PBXBuildFile; fileRef = F949A0000000000000000001 /* floppyu_fdc_passthrough_probe.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F945A0000000000000000006 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F945A0000000000000000005 /* IOKit.framework */; };
 		A7B8C9D0E1F2A3B4C5D6E7F8 /* sasi_io_cache.c in Sources */ = {isa = PBXBuildFile; fileRef = B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		A7D1F2E4C8B3906574AE1B25 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE4C39CF44B8C2F975EF16C8 /* AudioEngine.swift */; };
 		A918D5EB183C5E3D0CCAE1CD /* LA32FloatWaveGenerator.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 0D58D0F2D4E49B69DBB55F60 /* LA32FloatWaveGenerator.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
@@ -281,6 +287,11 @@
 		BD609930B81948A2E73AED13 /* status_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = 730804EB85BF182326A8F27A /* status_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		BD63382557EC7266AD9E9327 /* scsi_in_bridge.c in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* scsi_in_bridge.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		BDB286676734A7ED2C6C6735 /* TVF.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AD9AAA32EEE56B7F65670D31 /* TVF.cpp */; settings = {COMPILER_FLAGS = "-DMT32EMU_WITH_INTERNAL_RESAMPLER -DMT32EMU_WITH_STD_SNPRINTF"; }; };
+		F939A0000000000000000004 /* floppyu_regprobe.c in Sources */ = {isa = PBXBuildFile; fileRef = F939A0000000000000000001 /* floppyu_regprobe.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F940A0000000000000000004 /* fd_latency_experiment.c in Sources */ = {isa = PBXBuildFile; fileRef = F940A0000000000000000001 /* fd_latency_experiment.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F945A0000000000000000004 /* floppyu_usb_transport.c in Sources */ = {isa = PBXBuildFile; fileRef = F945A0000000000000000001 /* floppyu_usb_transport.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F1004A000000000000000004 /* floppyu_vslice.c in Sources */ = {isa = PBXBuildFile; fileRef = F1004A000000000000000001 /* floppyu_vslice.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		F949A0000000000000000004 /* floppyu_fdc_passthrough_probe.c in Sources */ = {isa = PBXBuildFile; fileRef = F949A0000000000000000001 /* floppyu_fdc_passthrough_probe.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		BE937DDEF6064406A90FBAEB /* sasi_io_cache.c in Sources */ = {isa = PBXBuildFile; fileRef = B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		BF23348EC8212BE88E073460 /* scsi_spc_bridge.cpp in Sources */ = {isa = PBXBuildFile; fileRef = A4B5C6D7E8F9A0B1C2D3E4F5 /* scsi_spc_bridge.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		BF5255F847E78A0DB4A07FF7 /* c68kexec.c in Sources */ = {isa = PBXBuildFile; fileRef = 1E938B4E2DD3596E167A5CF0 /* c68kexec.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing"; }; };
@@ -325,7 +336,7 @@
 		E160D83BB7D308A79BCC5EF6 /* opm.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 6BA8B82A7F9059AFF50EE464 /* opm.cpp */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		E17C30E5B5C387AB00CCA9F0 /* c68k_op6.inc in Resources */ = {isa = PBXBuildFile; fileRef = 9AFBEAF51569BA67DF9BFE4E /* c68k_op6.inc */; };
 		E31A3CEDCF54DE5AA4C3304E /* EmulatorConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 181ECF4E20A2900281A6249C /* EmulatorConfig.swift */; };
-		E4648BEBE84FF50528B9451D /* mem_wrap.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AB2F9B5DE8A513334CCB427 /* mem_wrap.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
+		E4648BEBE84FF50528B9451D /* mem_wrap.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AB2F9B5DE8A513334CCB427 /* mem_wrap.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h -include $(SRCROOT)/../Bridge/floppyu_regprobe_shim.h"; }; };
 		E4EDA90278D19F7A6EC2ADB6 /* GamePad.c in Sources */ = {isa = PBXBuildFile; fileRef = 5CB59F91E21133EA180AE38C /* GamePad.c */; };
 		E565F96E78BA111F371017B9 /* tvram.c in Sources */ = {isa = PBXBuildFile; fileRef = 8ED7A17DFD1B59E8E250BA43 /* tvram.c */; settings = {COMPILER_FLAGS = "-DX68K_IOS=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
 		E59DE89EEDF2AC4536123130 /* scc.c in Sources */ = {isa = PBXBuildFile; fileRef = 2ABDB27DF802DEC2204B67FB /* scc.c */; settings = {COMPILER_FLAGS = "-DX68K_MACOS=1 -DTARGET_OS_MAC=1 -fno-strict-aliasing -include $(SRCROOT)/../Bridge/px68k_compat.h -include $(SRCROOT)/../Bridge/GamePad.h"; }; };
@@ -643,6 +654,17 @@
 		B3A44EE972685B55B9C551D8 /* internals.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = internals.h; sourceTree = "<group>"; };
 		B4EF857ED0FF30E751C69497 /* MX68KApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MX68KApp.swift; sourceTree = "<group>"; };
 		B529C1E952A6B67A0D79A724 /* fmgen.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fmgen.h; sourceTree = "<group>"; };
+		F939A0000000000000000001 /* floppyu_regprobe.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = floppyu_regprobe.c; sourceTree = "<group>"; };
+		F939A0000000000000000002 /* floppyu_regprobe_shim.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = floppyu_regprobe_shim.h; sourceTree = "<group>"; };
+		F940A0000000000000000001 /* fd_latency_experiment.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = fd_latency_experiment.c; sourceTree = "<group>"; };
+		F940A0000000000000000002 /* fd_latency_experiment.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = fd_latency_experiment.h; sourceTree = "<group>"; };
+		F945A0000000000000000001 /* floppyu_usb_transport.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = floppyu_usb_transport.c; sourceTree = "<group>"; };
+		F949A0000000000000000001 /* floppyu_fdc_passthrough_probe.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = floppyu_fdc_passthrough_probe.c; sourceTree = "<group>"; };
+		F945A0000000000000000002 /* floppyu_usb_transport.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = floppyu_usb_transport.h; sourceTree = "<group>"; };
+		F1004A000000000000000001 /* floppyu_vslice.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = floppyu_vslice.c; sourceTree = "<group>"; };
+		F1004A000000000000000002 /* floppyu_vslice.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = floppyu_vslice.h; sourceTree = "<group>"; };
+		F949A0000000000000000002 /* floppyu_fdc_passthrough_probe.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = floppyu_fdc_passthrough_probe.h; sourceTree = "<group>"; };
+		F945A0000000000000000005 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sasi_io_cache.c; sourceTree = "<group>"; };
 		BA084257C0081147B425E5DC /* dmac.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = dmac.h; sourceTree = "<group>"; };
 		BB44F0E3F0A78C77BDFF2F2F /* SC55Worker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SC55Worker.swift; sourceTree = "<group>"; };
@@ -763,6 +785,7 @@
 				5F0F676A8733BA6C8AD14D1A /* AudioToolbox.framework in Frameworks */,
 				E7D97868C0C0C7A01C180811 /* libstdc++.tbd in Frameworks */,
 				F642A1B2C3D4E5F600000005 /* libiconv.tbd in Frameworks */,
+				F945A0000000000000000006 /* IOKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -903,6 +926,16 @@
 				60E8EDA276E6C7575C1F9510 /* px68k_compat.h */,
 				730804EB85BF182326A8F27A /* status_bridge.c */,
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* sasi_bridge.c */,
+				F939A0000000000000000001 /* floppyu_regprobe.c */,
+				F939A0000000000000000002 /* floppyu_regprobe_shim.h */,
+				F940A0000000000000000001 /* fd_latency_experiment.c */,
+				F940A0000000000000000002 /* fd_latency_experiment.h */,
+				F945A0000000000000000001 /* floppyu_usb_transport.c */,
+				F945A0000000000000000002 /* floppyu_usb_transport.h */,
+				F1004A000000000000000001 /* floppyu_vslice.c */,
+				F1004A000000000000000002 /* floppyu_vslice.h */,
+				F949A0000000000000000001 /* floppyu_fdc_passthrough_probe.c */,
+				F949A0000000000000000002 /* floppyu_fdc_passthrough_probe.h */,
 				B8C9D0E1F2A3B4C5D6E7F8A9 /* sasi_io_cache.c */,
 				C9D0E1F2A3B4C5D6E7F8A9B0 /* sasi_io_cache.h */,
 				C3D4E5F6A7B8C9D0E1F2A3B4 /* scsi_in_bridge.c */,
@@ -957,6 +990,7 @@
 				DC75D0DAD4C788F94930E1F5 /* Carbon.framework */,
 				43B8A84464B213F5E4BDA46F /* CoreAudio.framework */,
 				C65450E2E624F120B2211A64 /* GameController.framework */,
+				F945A0000000000000000005 /* IOKit.framework */,
 				02BD74F4A557D6B9C63B15F8 /* libstdc++.tbd */,
 				F642A1B2C3D4E5F600000006 /* libiconv.tbd */,
 				346654C849A99E40853F04C4 /* Metal.framework */,
@@ -1677,6 +1711,11 @@
 				BD609930B81948A2E73AED13 /* status_bridge.c in Sources */,
 				B2C3D4E5F6A7B8C9D0E1F2A3 /* sasi_bridge.c in Sources */,
 				A7B8C9D0E1F2A3B4C5D6E7F8 /* sasi_io_cache.c in Sources */,
+				F939A0000000000000000003 /* floppyu_regprobe.c in Sources */,
+				F940A0000000000000000003 /* fd_latency_experiment.c in Sources */,
+				F945A0000000000000000003 /* floppyu_usb_transport.c in Sources */,
+				F1004A000000000000000003 /* floppyu_vslice.c in Sources */,
+				F949A0000000000000000003 /* floppyu_fdc_passthrough_probe.c in Sources */,
 				D4E5F6A7B8C9D0E1F2A3B4C5 /* scsi_in_bridge.c in Sources */,
 				F6A7B8C9D0E1F2A3B4C5D6E7 /* scsi_ext_bridge.c in Sources */,
 				D6E7F8A9B0C1D2E3F4A5B6C7 /* sram_ext_bridge.c in Sources */,
@@ -1792,6 +1831,11 @@
 				0738427F0576AA42C24DD998 /* status_bridge.c in Sources */,
 				842C39341A9366C6FEF45E1E /* sasi_bridge.c in Sources */,
 				BE937DDEF6064406A90FBAEB /* sasi_io_cache.c in Sources */,
+				F939A0000000000000000004 /* floppyu_regprobe.c in Sources */,
+				F940A0000000000000000004 /* fd_latency_experiment.c in Sources */,
+				F945A0000000000000000004 /* floppyu_usb_transport.c in Sources */,
+				F1004A000000000000000004 /* floppyu_vslice.c in Sources */,
+				F949A0000000000000000004 /* floppyu_fdc_passthrough_probe.c in Sources */,
 				BD63382557EC7266AD9E9327 /* scsi_in_bridge.c in Sources */,
 				48BDD6A136FC53B860F3898E /* scsi_ext_bridge.c in Sources */,
 				660D210660FF3A2B0AB1E81B /* sram_ext_bridge.c in Sources */,

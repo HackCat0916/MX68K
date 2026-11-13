@@ -249,6 +249,13 @@ struct ExtensionsConfig: Codable {
     var floppyuEnabled: Bool = false
     // P958: ふろっぴU君の割当てドライブ。0 = ドライブ0/1、2 = ドライブ2/3(外付けFDDユニットが必要)。
     var floppyuAssignedBase: Int = 0
+    // P1054: ふろっぴU君の実ディスクへの書込み許可。既定 false(書込みは全て拒否)。反映はハードリセット(⌘R)。
+    // 環境変数 MX68K_FLOPPYU_WRITE が設定されていればそちらが優先する。iOS では使わない(常に false)。
+    var floppyuWriteEnabled: Bool = false
+    // P1067: ふろっぴU君の実ディスクへの FORMAT 許可。既定 false(FORMAT は拒否)。書込み許可(floppyuWriteEnabled)が
+    // ON のときだけ意味を持ち、保存時は書込み許可 OFF なら false へ連動する(SettingsViewModel.apply)。反映はハードリセット(⌘R)。
+    // 環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視される。iOS では使わない(常に false)。
+    var floppyuFormatEnabled: Bool = false
     // P490 (MIDI Stage 2): リセット送信 / 音源種別 / 送信遅延 / 入出力デバイス選択。
     var midiResetOnInit: Bool = true
     var midiResetType: Int = 0       // 0=LA, 1=GM, 2=GS, 3=XG
@@ -275,6 +282,10 @@ struct ExtensionsConfig: Codable {
     // P827: 内蔵 MT-32 の最大パーシャル数(mt32emu_set_partial_count)。既定 32 = 実機 MT-32 と同じ上限。
     // 増やすと発音数超過による音切れを軽減できる場合があるが実機とは異なる挙動になる。UI 範囲 1〜256。
     var mt32PartialCount: Int = 32
+    // P1006: 内蔵 MT-32/SC-55 専用の出力音量(%)。100 = 既定(mt32emu/Nuked-SC55 の
+    // 素の出力レベル、変更前と同一)。Master Volume とは独立な追加スライダー。UI 範囲 0〜300、即時反映。
+    var mt32OutputGainPercent: Int = 100
+    var sc55OutputGainPercent: Int = 100
     // P826: 内蔵 SC-55(Nuked-SC55)の ROM パス 5 種。空 = 未選択。
     var sc55Rom1Path: String = ""
     var sc55Rom2Path: String = ""
@@ -365,6 +376,10 @@ struct ExtensionsConfig: Codable {
         // P958: 新キー。旧 config.json には存在しないため decodeIfPresent 必須。
         floppyuEnabled      = try c.decodeIfPresent(Bool.self, forKey: .floppyuEnabled) ?? false
         floppyuAssignedBase = try c.decodeIfPresent(Int.self, forKey: .floppyuAssignedBase) ?? 0
+        // P1054: 新キー。旧 config.json には存在しないため decodeIfPresent 必須。
+        floppyuWriteEnabled = try c.decodeIfPresent(Bool.self, forKey: .floppyuWriteEnabled) ?? false
+        // P1067: 新キー。旧 config.json には存在しないため decodeIfPresent 必須。
+        floppyuFormatEnabled = try c.decodeIfPresent(Bool.self, forKey: .floppyuFormatEnabled) ?? false
         // P490: 新キー。既存 config.json(P488 以前)には存在しないため decodeIfPresent 必須。
         midiResetOnInit    = try c.decodeIfPresent(Bool.self, forKey: .midiResetOnInit) ?? true
         midiResetType      = try c.decodeIfPresent(Int.self, forKey: .midiResetType) ?? 0
@@ -390,6 +405,9 @@ struct ExtensionsConfig: Codable {
         mt32PcmRomPath     = try c.decodeIfPresent(String.self, forKey: .mt32PcmRomPath) ?? ""
         // P827: 新キー。手編集で範囲外(0 以下など)になった値は mt32emu へ渡さないよう 1〜256 に丸める。
         mt32PartialCount   = min(max(try c.decodeIfPresent(Int.self, forKey: .mt32PartialCount) ?? 32, 1), 256)
+        // P1006: 新キー。手編集で範囲外になった値は 0〜300 に丸める。
+        mt32OutputGainPercent = min(max(try c.decodeIfPresent(Int.self, forKey: .mt32OutputGainPercent) ?? 100, 0), 300)
+        sc55OutputGainPercent = min(max(try c.decodeIfPresent(Int.self, forKey: .sc55OutputGainPercent) ?? 100, 0), 300)
         // P826: 新キー。既存 config.json には存在しないため decodeIfPresent 必須。
         sc55Rom1Path     = try c.decodeIfPresent(String.self, forKey: .sc55Rom1Path) ?? ""
         sc55Rom2Path     = try c.decodeIfPresent(String.self, forKey: .sc55Rom2Path) ?? ""

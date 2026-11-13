@@ -133,6 +133,75 @@ struct HardwareSettingsView: View {
         #endif
     }
 
+    #if os(macOS)
+    // mx68k_floppyu_usb_device_present(): >0=検出, 0=未検出, 負値=照会失敗(-1)/非対応(-2)。
+    @ViewBuilder
+    private func floppyUStatusRow(_ status: Int32) -> some View {
+        if status > 0 {
+            Text("FloppyU: Detected").font(.subheadline).foregroundColor(.green)
+        } else if status == 0 {
+            Text("FloppyU: Not detected").font(.subheadline).foregroundColor(.secondary)
+        } else {
+            Text("FloppyU: Detection error (code \(status))").font(.subheadline).foregroundColor(.red)
+        }
+    }
+
+    // P1054: 書込み状態(読取り専用)。値は直近の init / ハードリセット(Apply→⌘R)で確定したもの。
+    private func floppyUWriteStatus() -> (mode: Int32, latched: Bool, envOverride: Bool) {
+        var mode: Int32 = 0
+        var latched: Int32 = 0
+        var envOverride: Int32 = 0
+        mx68k_floppyu_get_write_status(&mode, &latched, &envOverride)
+        return (mode, latched != 0, envOverride != 0)
+    }
+
+    @ViewBuilder
+    private func floppyUWriteStatusRow() -> some View {
+        let st = floppyUWriteStatus()
+        if st.latched {
+            Text("Writing: Stopped until restart").font(.subheadline).foregroundColor(.red)
+        } else if st.envOverride {
+            let value = ProcessInfo.processInfo.environment["MX68K_FLOPPYU_WRITE"] ?? ""
+            Text("Writing: Set by environment variable (MX68K_FLOPPYU_WRITE=\(value))")
+                .font(.subheadline).foregroundColor(.orange)
+        } else if st.mode == 1 {
+            Text("Writing: On").font(.subheadline).foregroundColor(.green)
+        } else {
+            Text("Writing: Off").font(.subheadline).foregroundColor(.secondary)
+        }
+    }
+
+    // P1067: FORMAT 状態(読取り専用)。値は直近の init / ハードリセット(Apply→⌘R)で確定したもの。
+    // src: 0=off 1=設定 2=環境変数 MX68K_FLOPPYU_NM_FORMAT 3=設定 ON だが MX68K_FLOPPYU_WRITE 優先で無視
+    @ViewBuilder
+    private func floppyUFormatStatusRow() -> some View {
+        let st: (on: Bool, halted: Bool, src: Int32) = {
+            var on: Int32 = 0, halted: Int32 = 0, tracks: Int32 = 0, src: Int32 = 0
+            mx68k_floppyu_get_format_status(&on, &halted, &tracks, &src)
+            return (on != 0, halted != 0, src)
+        }()
+        if st.halted {
+            Text("Formatting: Stopped until restart — the disk may be partially formatted")
+                .font(.subheadline).foregroundColor(.red)
+        } else if st.src == 2 {
+            Text("Formatting: Set by environment variable").font(.subheadline).foregroundColor(.orange)
+        } else if st.src == 3 {
+            Text("Formatting: Ignored (MX68K_FLOPPYU_WRITE is set)").font(.subheadline).foregroundColor(.orange)
+        } else if st.on {
+            Text("Formatting: On").font(.subheadline).foregroundColor(.green)
+        } else {
+            Text("Formatting: Off").font(.subheadline).foregroundColor(.secondary)
+        }
+    }
+
+    /// P1067 — FORMAT 許可トグルのバインディング。書込み許可 OFF の間は表示上 OFF(保存値の連動は SettingsViewModel.apply)。
+    private var floppyUFormatBinding: Binding<Bool> {
+        Binding(
+            get: { settingsViewModel.floppyuWriteEnabled && settingsViewModel.floppyuFormatEnabled },
+            set: { settingsViewModel.floppyuFormatEnabled = $0 })
+    }
+    #endif
+
     var body: some View {
         Form {
             Section(header: Text("Machine Configuration")) {
@@ -332,6 +401,57 @@ struct HardwareSettingsView: View {
                 // ★P706改訂1(2026-08-30): Applyの自動ハードリセットは廃止し、iOSにも
                 //   明示的なHard Resetボタンを追加した(macOSの⌘Rと同じ意味論)。
                 Text("⚠ Takes effect after pressing Apply and then tapping Hard Reset.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                #endif
+
+                #if os(macOS)
+                // P957 — ふろっぴU君の USB 存在表示(読取り専用)。ポートは開かず、エミュレーションに影響しない。
+                // TimelineView はこのタブの表示中だけ評価されるため、IOKit 列挙は表示中に 1 秒 1 回のみ走る。
+                TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                    floppyUStatusRow(mx68k_floppyu_usb_device_present())
+                }
+                // P958 — 利用トグル。接続有無に関わらず常に操作可能(接続状態は上の状態行で別表示)。
+                Toggle("Use FloppyU", isOn: $settingsViewModel.floppyuEnabled)
+                // P958 — 割当てドライブ(ペア)。トグル OFF 時も操作可能のまま。
+                Picker("FloppyU drives", selection: $settingsViewModel.floppyuAssignedBase) {
+                    Text("Drives 0 and 1").tag(0)
+                    Text("Drives 2 and 3").tag(2)
+                }
+                // 2/3 は外付け FDD ユニットが必要。選択は許し、Bridge 側でも無効化する(二重化)。
+                if settingsViewModel.floppyuAssignedBase == 2 && !settingsViewModel.externalFDDUnit {
+                    Text("⚠ Drives 2 and 3 require the External FDD Unit above. FloppyU stays inactive until it is turned on.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Shows whether a FloppyU unit is connected by USB. While FloppyU is in use, the assigned drives are handed to it instead of the disk images mounted in the emulator. While FloppyU is in use and the unit is connected, the assigned drives read the real floppy disks in the unit.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // P1054 — 実ディスクへの書込み許可(既定 OFF)。Use FloppyU OFF 時も操作可能(P958 と同じ)。
+                // 環境変数 MX68K_FLOPPYU_WRITE が設定されていればそちらが優先する(下の状態行に表示)。
+                Toggle("Allow writing to FloppyU disks", isOn: $settingsViewModel.floppyuWriteEnabled)
+                TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                    floppyUWriteStatusRow()
+                }
+                Text("⚠ Writes go to the real floppy disk in the FloppyU drive.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // P1067 — 実ディスクの FORMAT 許可(既定 OFF)。書込み許可が ON のときだけ有効。Use FloppyU OFF 時も操作可能。
+                // 環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視される(下の状態行に表示)。
+                Toggle("Allow FORMAT on FloppyU disks", isOn: floppyUFormatBinding)
+                    .disabled(!settingsViewModel.floppyuWriteEnabled)
+                TimelineView(.periodic(from: .now, by: 1.0)) { _ in
+                    floppyUFormatStatusRow()
+                }
+                Text("⚠ When this is off, FORMAT requests to the real floppy disk in the FloppyU drive are refused.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("⚠ Takes effect after pressing Apply and then performing a hard reset (⌘R).")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

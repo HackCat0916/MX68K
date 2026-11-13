@@ -1,0 +1,286 @@
+# P1079: FDC WRITE DATA の書込み失敗(ND)時もリザルトフェーズへ移る(D-124、FDCハング解消)
+#
+# 分類: A(独立2参照実装[XM6・XEiJ]で実証済みの「構造」の移植。逐語移植ではない——P977/P982/P1075 の前例に倣う)
+# 出典リポジトリ: XM6 2.06(mainline、/Volumes/WD 8TB HDD/Develop/xm6)・XEiJ 0.26.10.08(/Users/toshinari/Desktop/XEiJ_0261008)の独立2者一致
+# 参照コミットハッシュ: XM6/XEiJ はどちらも git 管理外のため sha256 で版を固定する。生出力(本パッチ作成時に実行):
+#   $ shasum -a 256 "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdd.h" /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   71bf9da88553a2119aa7797c1b4e8590d7daf18abb409f5a30bb33c7439fe1a4  /Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp
+#   fa84af130e95bf819c314c03afcb0cef47b114e91ba2c628c2ce602af27a2946  /Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp
+#   a6d29244252db13a8b476c62a441c454817724f7a723a018ac886128acb009cb  /Volumes/WD 8TB HDD/Develop/xm6/vm/fdd.h
+#   7c240af5ab8f0310f88ee4e0a39dbab411027d74b4a894ad1e5f4a6b7d98fdf3  /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   (fdc.cpp・fdi.cpp・FDC.java は P982/P1075 パッチヘッダ記載の sha256 と同一=同一版。
+#    ※XM6 は mainline 2.06 のソースを読んだもので、ユーザーが使う XM6 TypeG[クローズドソース]の挙動は未確認)
+# 同じ欠陥の共有先(修正無し、本パッチの対象外。px68k 系統で共有された欠陥):
+#   px68k本家 74ddbb3 x68k/fdc.c:387-393 / px68k-libretro 617574f x68k/fdc.c:387-393 /
+#   MPX68K 42fc340 X68000 Shared/px68k/x68k/fdc.c:428-434(いずれも失敗時 FDC_SetInt() のみ。P1079 Fix Plan「参照diff」に生出力)
+# 対象ファイル:行範囲: Core/px68k/x68k/fdc.c:397-401(FDC_WriteBuffer case 5/9、適用前。最終変更 458ddd2 = P982)
+# 理由(1行): FDD_Write 失敗時に FDC_EPhaseEnd() を呼ばず MSR が 0x90(CB=1)のまま固着し、IPL-ROM の完了待ち($FF937C-$FF9386)が永久ループする
+# 由来サイクル: P1079
+# 移植した構造: (1) WRITE DATA がセクタ不在(ND)で失敗したら、リザルトフェーズ(7バイト、ST0 IC=01)へ移り割込みを上げる
+#   (XM6: WriteData() の事前探索 fdc.cpp:1966 → NODATA なら EventErr fdc.cpp:1998-2001,2306-2320 → Callback の execute 分岐で
+#    Result() fdc.cpp:709-712 → ResultRW fdc.cpp:1739-1779 / XEiJ: fduWriteDataEPhase FDC.java:2769-2772 → fduEPhaseEnd :3707-3724)
+#   MX では既存の FDC_EPhaseEnd()(RspBuf へ ST0/ST1/ST2・CHRN を格納 → bufnum=0, rdptr=0, wexec=0 → FDC_SetInt())を呼ぶ形にした。
+#   成功パス(FDC_NextTrack → R==EOT → FDC_EPhaseEnd())と同じ関数を通る。ST0/ST1 の値(0x40 / 0x04)は既存のまま変えない。
+# 移植しない点: (a) 失敗判定のタイミング(XEiJ・XM6 とも DMA 転送前に判定。MX は全データ受信後に判定する構造のまま——
+#   失敗前に1セクタ分の DMA が走る点が両参照と異なる)/(b) ST1 の MA ビット(XEiJ)/(c) リザルト CHRN(要求値ではなく GetCurrentID の値のまま)
+#   ※XM6 fdc.cpp:1544-1548(WriteBack 後のエラー→Result)は書戻し時エラー用の二次経路で、ND はここへ到達する前に捕捉される
+# 実測根拠: [P1077-WRFAIL-MSR] d124_msr_confirm.log run2 frame=1570〜1598 全行 FDC_ST=0x90(直前 [P1036-COPYSEQ] cmd=W R=2 f=1569)
+#   +[P509-FDCHIST] f=1800〜3600 不変(0x90 単独は通常の実行フェーズでも出るため、持続と凍結の組合せで判断)。
+#   P1077 d121_hang_debug.log でも同一シグネチャ(cmd=W R=2 f=3918 → f=4200〜7800 全カウンタ凍結)を独立に観測(2/2)。
+# 周辺文脈(Class A 条件1。MX の Core は上流のミラーではないため、呼出し先の同一性を確認): 呼び出す FDC_EPhaseEnd() 本体は px68k本家と同一。
+#   $ diff <(sed -n 134,150p "/Volumes/WD 8TB HDD/Develop/px68k/x68k/fdc.c" | tr -d '\r') <(sed -n 148,164p Core/px68k/x68k/fdc.c); echo "diff_exit=$?"
+#   diff_exit=0
+#   (px68k本家 74ddbb3 x68k/fdc.c:134-150 = MX Core/px68k/x68k/fdc.c:148-164、出力なし=一致)
+# 適用方法: git apply Patches/Core/p1079_fdc_writedata_fail_ephaseend.patch
+#           撤回:  git apply -R Patches/Core/p1079_fdc_writedata_fail_ephaseend.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+# 環境変数: なし(既定 OFF のフラグは導入しない——CLAUDE.md「既定OFF放置パターン」規律は非該当)。
+# 併用が必須の Bridge 側変更: なし(No stacking 非該当。置き換え対象の Bridge 近似は無い)。
+# 挙動の変化: 全機種共通。FDD_Write が FALSE を返した場合のみ、永久ハング → ST0 IC=01・ST1 ND の異常終了リザルト+FDC割込みへ変わる。
+#   正常系(書込み成功)のコードパスは不変。ステートセーブ形式は不変。
+# 逐語抜粋: 以下は本パッチ作成時に下記コマンドで取得した出力そのもの。
+#   XM6 は Shift_JIS のため iconv で UTF-8 へ変換し、タブを expand -t 4 で空白へ展開した(それ以外は無加工)。
+#   XM6 のソースは CRLF 改行のため、XM6 抜粋の各行末には CR がそのまま残っている(P982/P1075 の前例と同じ)。
+#   iconv は Shift_JIS の 0x7E(~)を ‾(U+203E)へ写すため、`&= ‾sr_rqm` 等は元ソースでは `&= ~sr_rqm`(ビット反転)である。
+#   各行頭の「#   | 」はヘッダ用の接頭辞。
+#
+# --- XM6 vm/fdc.cpp:1940-2002(FDC::WriteData: WriteSector(NULL,…)の事前探索 → NODATA なら EventErr)
+#   $ sed -n 1940,2002p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   | BOOL FASTCALL FDC::WriteData()
+#   | {
+#   |     int len;
+#   |     DWORD hus;
+#   |     BOOL deleted;
+#   | 
+#   |     ASSERT(this);
+#   |     ASSERT((fdc.cmd == write_data) || (fdc.cmd == write_del_data));
+#   | 
+#   |     // SR設定
+#   |     fdc.sr |= sr_cb;
+#   |     fdc.sr &= ‾sr_dio;
+#   |     fdc.sr &= ‾sr_d3b;
+#   |     fdc.sr &= ‾sr_d2b;
+#   |     fdc.sr &= ‾sr_d1b;
+#   |     fdc.sr &= ‾sr_d0b;
+#   | 
+#   |     // ドライブに任せる。NOTREADY,NOTWRITE,NODATA,MAM,CYL系,IDCRC,DDAM
+#   |     deleted = FALSE;
+#   |     if (fdc.cmd == write_del_data) {
+#   |         deleted = TRUE;
+#   |     }
+#   | #if defined(FDC_LOG)
+#   |     LOG4(Log::Normal, "(C:%02X H:%02X R:%02X N:%02X)",
+#   |         fdc.chrn[0], fdc.chrn[1], fdc.chrn[2], fdc.chrn[3]);
+#   | #endif
+#   |     fdc.err = fdd->WriteSector(NULL, &fdc.len,
+#   |                                     fdc.mfm, fdc.chrn, fdc.hd, deleted);
+#   |     fdc.err &= ‾FDD_DDAM;
+#   | 
+#   |     // IDCRCなら、DATAERRを乗せる
+#   |     if (fdc.err & FDD_IDCRC) {
+#   |         fdc.err &= ‾FDD_IDCRC;
+#   |         fdc.err |= FDD_DATAERR;
+#   |     }
+#   | 
+#   |     // N=0ではNとしてDTLを使う
+#   |     if (fdc.chrn[3] == 0) {
+#   |         len = 1 << (fdc.dtl + 7);
+#   |         if (len < fdc.len) {
+#   |             fdc.len = len;
+#   |         }
+#   |     }
+#   |     else {
+#   |         len = (1 << (fdc.chrn[3] + 7));
+#   |         if (len < fdc.len) {
+#   |             fdc.len = len;
+#   |         }
+#   |     }
+#   | 
+#   |     // Not Ready, Not Writableはリザルトフェーズへ
+#   |     if ((fdc.err & FDD_NOTREADY) || (fdc.err & FDD_NOTWRITE)) {
+#   |         return FALSE;
+#   |     }
+#   | 
+#   |     // 検索時間を計算(ヘッドロードは考えない)
+#   |     hus = fdd->GetSearch();
+#   | 
+#   |     // No Dataは実行後リザルトへ
+#   |     if (fdc.err & FDD_NODATA) {
+#   |         EventErr(hus);
+#   |         return TRUE;
+#   |     }
+#
+# --- XM6 vm/fdc.cpp:2306-2320(FDC::EventErr: phase=execute でイベントを張る)
+#   $ sed -n 2306,2320p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   | void FASTCALL FDC::EventErr(DWORD hus)
+#   | {
+#   |     // SR設定(Non-DMA)
+#   |     if (fdc.ndm) {
+#   |         fdc.sr |= sr_ndm;
+#   |     }
+#   |     else {
+#   |         fdc.sr &= ‾sr_ndm;
+#   |     }
+#   | 
+#   |     // イベントスタート、RQMを落とす
+#   |     event.SetTime(hus);
+#   |     fdc.sr &= ‾sr_rqm;
+#   |     fdc.phase = execute;
+#   | }
+#
+# --- XM6 vm/fdc.cpp:709-716(Callback: execute フェーズ満了で Result())
+#   $ sed -n 709,716p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   |     // 実行フェーズ
+#   |     if (fdc.phase == execute) {
+#   |         // IDもしくはNO DATAを見つけるまでの時間
+#   |         Result();
+#   | 
+#   |         // 単発
+#   |         return FALSE;
+#   |     }
+#
+# --- XM6 vm/fdc.cpp:1716-1728(Result() 内[関数全体は 1650-1727 付近]: write_data は ResultRW へ)
+#   $ sed -n 1716,1728p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   | 
+#   |         // READ,WRITE,SCAN系
+#   |         case read_data:
+#   |         case read_del_data:
+#   |         case write_data:
+#   |         case write_del_data:
+#   |         case scan_eq:
+#   |         case scan_lo_eq:
+#   |         case scan_hi_eq:
+#   |         case read_diag:
+#   |         case write_id:
+#   |             ResultRW();
+#   |             return;
+#
+# --- XM6 vm/fdc.cpp:1739-1779(FDC::ResultRW: ST0 0x40・ST1=err>>8・リザルト7バイト・割込み)
+#   $ sed -n 1739,1779p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdc.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   | void FASTCALL FDC::ResultRW()
+#   | {
+#   |     ASSERT(this);
+#   | 
+#   |     // ST0,ST1,ST2作成
+#   |     if (fdc.err & FDD_NOTREADY) {
+#   |         // Not Ready
+#   |         fdc.st[0] |= 0x08;
+#   |         fdc.st[1] = 0;
+#   |         fdc.st[2] = 0;
+#   |     }
+#   |     else {
+#   |         if ((fdc.err != FDD_NOERROR) && (fdc.err != FDD_SCANEQ)) {
+#   |             // Abnormal Teriminate
+#   |             fdc.st[0] |= 0x40;
+#   |         }
+#   |         fdc.st[1] = fdc.err >> 8;
+#   |         fdc.st[2] = fdc.err & 0xff;
+#   |     }
+#   | 
+#   |     // READ DIAGNOSTICは0x40を出さない
+#   |     if (fdc.cmd == read_diag) {
+#   |         if (fdc.st[0] & 0x40) {
+#   |             fdc.st[0] &= ‾0x40;
+#   |         }
+#   |     }
+#   | 
+#   |     // リザルトパケットを設定
+#   |     fdc.out_pkt[0] = fdc.st[0];
+#   |     fdc.out_pkt[1] = fdc.st[1];
+#   |     fdc.out_pkt[2] = fdc.st[2];
+#   |     fdc.out_pkt[3] = fdc.chrn[0];
+#   |     fdc.out_pkt[4] = fdc.chrn[1];
+#   |     fdc.out_pkt[5] = fdc.chrn[2];
+#   |     fdc.out_pkt[6] = fdc.chrn[3];
+#   |     fdc.out_len = 7;
+#   |     fdc.out_cnt = 0;
+#   | 
+#   |     // 通常はリザルトフェーズ割り込み
+#   |     Interrupt(TRUE);
+#   | }
+#
+# --- XM6 vm/fdi.cpp:1193-1201(FDITrack::WriteSector: セクタ不在で FDD_NODATA)
+#   $ sed -n 1193,1201p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   |     // セクタが見つからなければ、NODATA
+#   |     if (i >= num) {
+#   |         status |= FDD_NODATA;
+#   | 
+#   |         // 検索にかかる時間はインデックスホール２回検出
+#   |         pos = GetDisk()->GetRotationTime();
+#   |         pos = (pos * 2) - GetDisk()->GetRotationPos();
+#   |         GetDisk()->SetSearch(pos);
+#   |         return status;
+#
+# --- XM6 vm/fdd.h:29(FDD_NODATA = 0x0400 → ST1 = err>>8 = 0x04 = ND)
+#   $ grep -n --binary-files=text "define FDD_NODATA" "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdd.h" | iconv -f SHIFT_JIS -t UTF-8
+#   | 29:#define FDD_NODATA			0x0400		// 有効なセクタなし
+#
+# --- XEiJ xeij/FDC.java:2753-2779(fduWriteDataEPhase: セクタ不在なら DMA 前に fduEPhaseEnd)
+#   $ sed -n 2753,2779p /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java | expand -t 4
+#   |     public void fduWriteDataEPhase () {
+#   |       if (FDC_DEBUG_TRACE && fdcDebugLogOn) {
+#   |         System.out.printf ("%08x fduWriteDataEPhase%d()\n", XEiJ.regPC0, abuNumber);
+#   |       }
+#   |       if (fduPCN != fduNCN) {  //シークが中断されたとき
+#   |         fduEPhaseEnd (FDC_ST0_AT | FDC_ST0_NR | ((fduPHN & 1) << 2 | abuNumber) << 24);
+#   |         return;
+#   |       }
+#   |       //E-Phase
+#   |       fduWritten = true;
+#   |       fdcStatus = (FDC_RQM | FDC_MPU_TO_FDC | FDC_CB |
+#   |                    (fdcStatus & (FDC_D3B | FDC_D2B | FDC_D1B | FDC_D0B)));
+#   |       if (FDC_DEBUG_TRACE && fdcDebugLogOn) {
+#   |         System.out.printf ("\tfdcStatus=%s\n", fdcStatusToString (fdcStatus));
+#   |       }
+#   |       //転送
+#   |       int o = fduCalcOffset ();
+#   |       if (o < 0) {  //セクタが存在しない
+#   |         fduEPhaseEnd (FDC_ST0_AT | FDC_ST1_MA | ((fduPHN & 1) << 2 | abuNumber) << 24);
+#   |         return;
+#   |       }
+#   |       fdcReadHandle = null;
+#   |       fdcWriteHandle = fduImage;
+#   |       fdcIndex = fdcStart = o;
+#   |       fdcLimit = o + (128 << fduPNN);
+#   |       HD63450.dmaFallREQ (0);  //DMA転送開始
+#   |     }  //fduWriteDataEPhase()
+#
+# --- XEiJ xeij/FDC.java:3707-3724(fduEPhaseEnd: リザルト7バイト構築 → fdcRPhase(7) → 割込み)
+#   $ sed -n 3707,3724p /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java | expand -t 4
+#   |     public void fduEPhaseEnd (int status) {
+#   |       if (FDC_DEBUG_TRACE && fdcDebugLogOn) {
+#   |         System.out.printf ("%08x fduEPhaseEnd%d(%s)\n", XEiJ.regPC0, abuNumber, fdcResultStatusToString (status));
+#   |       }
+#   |       //READ DATAやWRITE DATAなどの転送コマンドのE-Phase(転送中)が終了したとき
+#   |       //リザルトステータス(ST0,ST1,ST2,C,H,R,N)を作る
+#   |       fdcResultBuffer[0] = (byte) (status >> 24);  //ST0
+#   |       fdcResultBuffer[1] = (byte) (status >> 16);  //ST1
+#   |       fdcResultBuffer[2] = (byte) (status >> 8);  //ST2
+#   |       fdcResultBuffer[3] = (byte) fduPCN;  //C
+#   |       fdcResultBuffer[4] = (byte) fduPHN;  //H
+#   |       fdcResultBuffer[5] = (byte) fduPRN;  //R
+#   |       fdcResultBuffer[6] = (byte) fduPNN;  //N
+#   |       //R-Phase(RQM=1,DIO=1(FDC→MPU))に移行する
+#   |       fdcRPhase (7);
+#   |       //FDC割り込み要求(INT)を1にする
+#   |       IOInterrupt.ioiFdcRise ();
+#   |     }  //fduEPhaseEnd(int)
+#
+diff --git a/Core/px68k/x68k/fdc.c b/Core/px68k/x68k/fdc.c
+index ce9c2eb..e6c33e1 100644
+--- a/Core/px68k/x68k/fdc.c
++++ b/Core/px68k/x68k/fdc.c
+@@ -395,9 +395,12 @@ static void FDC_WriteBuffer(void)
+ 		id.r = prm0->r;
+ 		id.n = prm0->n;
+ 		if ( !FDD_Write(fdc.drv, &id, fdc.DataBuf, (fdc.cmd==9)?1:0) ) {
++			/* P1079 (D-124): 書込み失敗(ND)でもリザルトフェーズへ移る。SetInt だけでは
++			 * bufnum/wexec が残り MSR の CB が落ちず、ゲストの完了待ちが永久に続く
++			 * (XM6 vm/fdc.cpp:1998-2001,709-712 / XEiJ FDC.java:2769-2772 と同じ帰結) */
+ 			fdc.st0 |= 0x40;
+ 			fdc.st1 |= 0x04;
+-			FDC_SetInt();
++			FDC_EPhaseEnd();
+ 		} else {
+ 			FDC_NextTrack();
+ 		}

@@ -395,9 +395,12 @@ static void FDC_WriteBuffer(void)
 		id.r = prm0->r;
 		id.n = prm0->n;
 		if ( !FDD_Write(fdc.drv, &id, fdc.DataBuf, (fdc.cmd==9)?1:0) ) {
+			/* P1079 (D-124): 書込み失敗(ND)でもリザルトフェーズへ移る。SetInt だけでは
+			 * bufnum/wexec が残り MSR の CB が落ちず、ゲストの完了待ちが永久に続く
+			 * (XM6 vm/fdc.cpp:1998-2001,709-712 / XEiJ FDC.java:2769-2772 と同じ帰結) */
 			fdc.st0 |= 0x40;
 			fdc.st1 |= 0x04;
-			FDC_SetInt();
+			FDC_EPhaseEnd();
 		} else {
 			FDC_NextTrack();
 		}

@@ -183,6 +183,39 @@ fi
 # 冪等性を壊さないよう、trapで確実にdetachする(どの経路で終了してもtrapが効く)。
 trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1' EXIT
 
+# ★P1005: hdiutil attach直後にFinderオートメーションを呼ぶと、Finderが
+# ボリュームをまだ認識していないため(-1728)で失敗することがある
+# (レースコンディション、p1004-dmg-buildで再現・特定)。Finderが認識する
+# まで待つが、各回のosascript呼び出し自体がTCC Automation許可ダイアログで
+# ブロックしてハングする可能性があるため(既存の90秒ウォッチドッグが同じ
+# リスクに対処しているのと同種)、1回ごとに短いウォッチドッグで保護する。
+FINDER_CHECK_OUT="$DISTDIR/.mx68k_finder_check.out"
+FINDER_READY=0
+i=0
+while [ "$i" -lt 10 ]; do
+    osascript -e 'tell application "Finder" to exists disk "MX68K"' \
+        > "$FINDER_CHECK_OUT" 2>/dev/null &
+    FINDER_CHECK_PID=$!
+    ( sleep 2; kill -9 "$FINDER_CHECK_PID" 2>/dev/null ) &
+    FINDER_CHECK_WD_PID=$!
+    wait "$FINDER_CHECK_PID" 2>/dev/null
+    kill "$FINDER_CHECK_WD_PID" 2>/dev/null
+    wait "$FINDER_CHECK_WD_PID" 2>/dev/null
+    if [ "$(cat "$FINDER_CHECK_OUT" 2>/dev/null)" = "true" ]; then
+        FINDER_READY=1
+        break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+done
+rm -f "$FINDER_CHECK_OUT"
+if [ "$FINDER_READY" -ne 1 ]; then
+    echo "## MX68K release dmg: FAIL (Finder did not recognize the mounted volume, or osascript was blocked on a TCC/Automation permission dialog — grant Finder automation access once interactively and retry)"
+    rm -rf "$STAGING"
+    rm -f "$RW_DMG"
+    exit 1
+fi
+
 # osascript自体も有限時間でラップする(TCC許可ダイアログがブロックして返って
 # 来ないケースでも、Build & Testエージェントが無期限停止しないようにする)。
 # ★Code Review 2周目REVISE対応: GNU coreutilsの`timeout`コマンドはstock

@@ -848,6 +848,66 @@ void p509_fdc_mirror_reset(void) {
     p686_expect_st0 = 0;
 }
 
+/* ====================================================================
+ *  P1036 (D-8 段階2準備): 通常仮想FDD上での COPY 実行時に Human68k が発行する
+ *  WRITE DATA / READ DATA のパラメータ列を実測するプローブ [P1036-COPYSEQ]。
+ *  上の P509 ミラーを「拡張」する形で実装し、同じ状態機械を 2 つ持たない
+ *  (p509_wrnum / p509_cmd_mirror の更新タイミングには一切手を加えない)。
+ *  ふろっぴU君の割当てとは無関係に $E94003 write を傍受する既存フックに乗るため、
+ *  実機不要・安全柵無変更の純粋な観測追加である。
+ *
+ *  記号の一次情報源(すべて Core ソース。Bridge の既存診断出力は使わない):
+ *    CMD_WRITE_DATA = 5 : Core: fdc.c:225 `case 5: // WriteData`
+ *    CMD_READ_DATA  = 6 : Core: fdc.c:244 `case 6: // ReadData`
+ *    CMD_TABLE[5]=CMD_TABLE[6]=8 : Core: fdc.c:15-16(上の P509_CMD_TABLE に複写済み)
+ *    パラメータ順 US/HD,C,H,R,N,EOT,GPL,DTL : Core: fdc.c:20-31(FDCPRM0 の
+ *                        フィールド順)・fdc.c:527-529(PrmBuf へそのまま詰まる)。
+ *                        PrmBuf[0] はコマンドバイト自身なので、本プローブの 8 バイト
+ *                        捕捉バッファとは 1 ずれるが、位置算出式
+ *                        (CMD_TABLE[cmd] - デクリメント前の wrnum)がこれを吸収する。
+ *
+ *  ★データフェーズ非干渉: セクタ実データは DMAC ch0 経由(Core: dmac.c:398)で
+ *  trace_Memory_WriteB/W を通らないため、捕捉対象はコマンド+8 パラメータのみ。
+ *  IOCS を経由せず CPU でデータフェーズを書き込むソフトでは雑音化しうる(範囲外)。
+ *
+ *  自己反証可能性: 出力 0 件のとき、[P509-FDCHIST] の c5:/c6:(発行総数)を
+ *  分母として併読すれば「COPY が発行していない」と「発行したが捕捉し損ねた」を
+ *  一意に区別できる。各行には生バイト us_hd を派生値 unit/hd と併記し、
+ *  フレーム番号 f= と通し番号 seq= を付ける。READ DATA は起動・ディレクトリ閲覧で
+ *  高頻度に発生するため、WRITE 側の観測が READ に予算を食われないよう、
+ *  cap/emitted/suppressed は WRITE と READ で完全に独立させる(P1033 の教訓)。
+ *  read-only。ゲストメモリ・CPU 状態・読み取り値は一切変更しない。
+ * ==================================================================== */
+#define P1036_COPYSEQ_CAP 4000u           /* WRITE / READ それぞれの出力上限 */
+
+static uint8_t  p1036_prm[8];             /* US/HD,C,H,R,N,EOT,GPL,DTL の捕捉バッファ */
+static uint32_t p1036_seq         = 0;    /* WRITE/READ 共通の通し番号(捕捉順序の復元用) */
+static uint32_t p1036_emitted_w   = 0;
+static uint32_t p1036_suppressed_w = 0;
+static uint32_t p1036_emitted_r   = 0;
+static uint32_t p1036_suppressed_r = 0;
+
+/* パラメータ 8 バイトの捕捉完了時に p509_fdc_write_note から呼ぶ。 */
+static void p1036_copyseq_note(uint8_t cmd) {
+    uint32_t *emitted    = (cmd == 5) ? &p1036_emitted_w    : &p1036_emitted_r;
+    uint32_t *suppressed = (cmd == 5) ? &p1036_suppressed_w : &p1036_suppressed_r;
+    uint8_t us_hd = p1036_prm[0];
+    p1036_seq++;
+    if (*emitted >= P1036_COPYSEQ_CAP) {
+        (*suppressed)++;
+        return;
+    }
+    (*emitted)++;
+    debug_log("[P1036-COPYSEQ] cmd=%s us_hd=0x%02x unit=%u hd=%u C=%u H=%u R=%u N=%u EOT=%u "
+              "GPL=0x%02x DTL=0x%02x f=%u seq=%u\n",
+              (cmd == 5) ? "W" : "R", (unsigned)us_hd,
+              (unsigned)(us_hd & 0x03u), (unsigned)((us_hd >> 2) & 0x01u),
+              (unsigned)p1036_prm[1], (unsigned)p1036_prm[2], (unsigned)p1036_prm[3],
+              (unsigned)p1036_prm[4], (unsigned)p1036_prm[5],
+              (unsigned)p1036_prm[6], (unsigned)p1036_prm[7],
+              (unsigned)g_mx68k_frame_num, p1036_seq);
+}
+
 /* trace_Memory_WriteB/W から無条件に呼ばれる。read-only(val は改変しない)。 */
 static void p509_fdc_write_note(uint32_t addr_raw, uint32_t val, int is_word) {
     uint32_t a;
@@ -873,7 +933,15 @@ static void p509_fdc_write_note(uint32_t addr_raw, uint32_t val, int is_word) {
     if (a != 0xE94003u) return;
     p509_wr_count++;
     if (p509_wrnum) {           /* パラメータバイト(fdc.c:497-499) */
+        /* P1036: WRITE DATA(5)/READ DATA(6)のパラメータをデクリメント前の位置で捕捉する。 */
+        if (p509_cmd_mirror == 5 || p509_cmd_mirror == 6) {
+            int32_t idx = (int32_t)P509_CMD_TABLE[p509_cmd_mirror] - p509_wrnum;
+            if (idx >= 0 && idx < (int32_t)sizeof(p1036_prm)) p1036_prm[idx] = v;
+        }
         p509_wrnum--;
+        if (p509_wrnum == 0 && (p509_cmd_mirror == 5 || p509_cmd_mirror == 6)) {
+            p1036_copyseq_note(p509_cmd_mirror);
+        }
     } else {                    /* コマンド開始(fdc.c:500-506) */
         p509_cmd_mirror = v & 0x1F;
         p509_wrnum = (int32_t)P509_CMD_TABLE[p509_cmd_mirror];
@@ -1015,6 +1083,12 @@ void p509_fdc_hist_dump(void) {
                   p686_e94005_wr, p686_e94005_rd, cbuf,
                   g_ext_fdd_wired, g_ext_fdd_wired ? 4 : 2);
     }
+    /* P1036: 同じ 300 フレーム周期で WRITE/READ 別の出力・抑制件数を出す。
+     * [P509-FDCHIST] の c5:/c6:(発行総数)と併読して取りこぼしを検出する。 */
+    debug_log("[P1036-COPYSEQ-SUM] f=%u seq=%u emitted_w=%u suppressed_w=%u "
+              "emitted_r=%u suppressed_r=%u\n",
+              frame_no, p1036_seq, p1036_emitted_w, p1036_suppressed_w,
+              p1036_emitted_r, p1036_suppressed_r);
 }
 
 /* ====================================================================
@@ -1920,7 +1994,7 @@ static void p976_refresh_apply(void) {
 }
 static void p996_update_active(void);   /* P996: 定義は P993 節の後 */
 /* P976: s_mx_cpu_backend を書き換えた直後に必ず呼ぶ(リフレッシュは c68k 経路のみ)。
- * P996: DMA 課金のゲート(Musashi 経路のみ)も同じ箇所で再計算する。 */
+ * P996/P1084: DMA 課金のゲート(030 系は Musashi のみ、X68000 系は両バックエンド)も同じ箇所で再計算する。 */
 static inline void p976_refresh_update_active(void) {
     s_p976_refresh_active = (s_p976_refresh_on && !mx_cpu_be_musashi()) ? 1 : 0;
     p976_refresh_apply();
@@ -2414,26 +2488,51 @@ static void p993_note_tcdcr_write(uint8_t val) {
 }
 
 /* ====================================================================
- * P996 (D-108): X68030 系の DMAC「最大速度オートリクエスト」転送に CPU 停止時間を課金する。
+ * P996 (D-108) / P1084 (D-109): DMAC「最大速度オートリクエスト」転送に CPU 停止時間を課金する。
  * Core の DMA_Write(CCR STR 書込み)は転送全体を同期実行し CPU 時間を 0 で済ませるため、
- * 書込み前後の MTC 差から転送オペランド数を求め、800ns/16bit 転送(X68030 Inside/Out
- * 書籍 p.133-134)を CPU サイクルに換算して「ストール負債」に積む。負債は m68000_execute()
- * の内側ループ先頭で、CPU を実行せずに予算だけ消費して返す(DMA がバスを保持中)。
- * 既定 ON、MX68K_DEBUG_DMA_CHARGE=0 と完全一致したときだけ無効。ゲートは
- * 030 筐体 && Musashi(X68000/c68k 経路は対象外、D-109)。DMA[] と書込み値は変更しない。
+ * 書込み前後の MTC 差から転送オペランド数を求め、転送時間を CPU サイクルに換算して
+ * 「ストール負債」に積む。負債は m68000_execute() の内側ループ先頭で、CPU を実行せずに
+ * 予算だけ消費して返す(DMA がバスを保持中)。DMA[] と書込み値は変更しない。
+ *
+ * 課金は DMAC 10MHz クロックの 1/16(=6.25ns、tick)単位で積算する(P1084)。
+ *  - X68030 系: 800ns/16bit 転送 = 128 tick(X68030 Inside/Out 書籍 p.133-134)。旧式
+ *    (units*4*num / 5*den)と商・端数がビット一致する(32 倍スケール)。
+ *  - X68000 系(P1084、D-109): XEiJ 0.26.10.08 の静的モデル準拠の★暫定係数(実機未確認)。
+ *    1 バス周期 = 5clk + リフレッシュウェイト 1/8clk = 82 tick。word=164、byte(パック成立)=146。
+ *    実機値が得られたら p1084 の定数表だけを差し替える。
+ * ゲート:
+ *  - 030 系: MX68K_DEBUG_DMA_CHARGE(既定 ON、"0" で無効)&& 030 筐体 && Musashi。
+ *  - X68000 系: MX68K_DEBUG_DMA_CHARGE_000(既定 ON、"0" で無効、"nocomp" は診断専用)
+ *    && !030 筐体。c68k・Musashi どちらのバックエンドでも有効(同一筐体での比較が
+ *    c68k 側の二重課金を外部から検出する独立した検出器になる)。
+ * c68k の停止処理(S1、補償付き時間ジャンプ): c68k の C68k_Release_Cycle は「残り時間を
+ * 実行済み扱いにする」時間ジャンプなので、無条件に end_timeslice すると残り rem だけ
+ * 二重課金になる。そこで rem を差し引いて負債に積む(p1084_c68k_stall 参照)。
  * ==================================================================== */
 #define P996_CHARGE_LOG_MAX 32
 #define P996_SUM_WINDOW     600
-static int      s_p996_on         = 0;   /* 環境変数(既定 ON) */
+/* P1084: X68000 系の tick 表(★暫定、XEiJ 0.26.10.08 静的モデル準拠、実機未確認) */
+#define P1084_DIV_TICK      160u   /* tick → CPU サイクル: cycles = ticks * num / (160 * den) */
+#define P1084_T_SIDE_BUS     82u   /* 16bit ポートの 1 バス周期 (5 + 1/8)clk。XEiJ.java:7167-7171, 6924 */
+#define P1084_T_SIDE_PACK    41u   /* パック成立側の 1 オペランド平均(2 オペランドで 1 バス周期) */
+#define P1084_T_BYTE_ADD     64u   /* 16bit ポート SIZE=BYTE の毎オペランド追加 4clk。HD63450.java:516-519 */
+#define P1084_T_ODD_NOCNT    16u   /* 「カウントしない側」かつ奇数アドレスの追加 1clk。同 :518-519 */
+#define P1084_T_030_UNIT    128u   /* X68030: 800ns/16bit 転送 */
+#define P1084_MODE_OFF        0
+#define P1084_MODE_ON         1
+#define P1084_MODE_NOCOMP     2    /* 診断専用: c68k で S1 補償を外す(二重課金を意図的に再現) */
+static int      s_p996_on         = 0;   /* 030 系: 環境変数(既定 ON) */
 static const char *s_p996_env     = NULL;
+static int      s_p1084_mode000   = P1084_MODE_ON;   /* X68000 系: off/on/nocomp */
+static const char *s_p1084_env000 = NULL;
 static int      s_p996_chassis030 = 0;
-static int      s_p996_active     = 0;   /* on && chassis030 && musashi */
+static int      s_p996_active     = 0;   /* (on030 && chassis030 && musashi) || (on000 && !chassis030) */
 static int32_t  s_p996_num        = 0;   /* クロック [MHz] = num/den。0 は未設定 */
 static int32_t  s_p996_den        = 1;
 static uint64_t s_p996_stall_debt = 0;   /* 未消化の停止サイクル数 */
-static uint64_t s_p996_acc        = 0;   /* 換算の端数(単位: 1/(5*den) サイクル) */
+static uint64_t s_p996_acc        = 0;   /* 換算の端数(単位: 1/(160*den) サイクル) */
 static int      s_p996_cfg_logged = 0;
-static int      s_p996_cfg_last[5];      /* on, chassis030, musashi, num, den */
+static int      s_p996_cfg_last[7];      /* on030, on000(mode000), chassis030, musashi, num, den, active */
 static unsigned s_p996_charge_logs = 0;
 static int      s_p996_win_next   = 0;
 static unsigned s_p996_str_seen, s_p996_charged, s_p996_skip_reqmode, s_p996_skip_chain,
@@ -2443,28 +2542,45 @@ static unsigned long long s_p996_stall_total = 0;
 typedef struct {
     uint32_t ch;
     char     via;
-    uint8_t  ccr_w, ocr, dcr, csr;
+    int      chassis030;
+    uint8_t  ccr_w, ocr, dcr, csr, scr;
     uint16_t mtc;
+    uint32_t mar, dar;
     uint32_t pc;
 } p996_snap_t;
+
+static const char *p1084_mode_name(int m) {
+    return (m == P1084_MODE_OFF) ? "off" : (m == P1084_MODE_NOCOMP) ? "nocomp" : "on";
+}
 
 static void p996_init(void) {
     s_p996_env = getenv("MX68K_DEBUG_DMA_CHARGE");
     s_p996_on = (s_p996_env == NULL || strcmp(s_p996_env, "0") != 0) ? 1 : 0;
+    /* P1084: X68000 系は別変数(030 系の変数と互いに巻き込まない) */
+    s_p1084_env000 = getenv("MX68K_DEBUG_DMA_CHARGE_000");
+    if (s_p1084_env000 != NULL && strcmp(s_p1084_env000, "0") == 0)           s_p1084_mode000 = P1084_MODE_OFF;
+    else if (s_p1084_env000 != NULL && strcmp(s_p1084_env000, "nocomp") == 0) s_p1084_mode000 = P1084_MODE_NOCOMP;
+    else                                                                       s_p1084_mode000 = P1084_MODE_ON;
 }
 
 /* 有効状態の再計算。値が変わったときだけ [P996-CFG] を出す(クロック未設定の間は出さない)。 */
 static void p996_update_active(void) {
     int mus = mx_cpu_be_musashi() ? 1 : 0;
-    s_p996_active = (s_p996_on && s_p996_chassis030 && mus) ? 1 : 0;
+    int on000 = (s_p1084_mode000 != P1084_MODE_OFF) ? 1 : 0;
+    int active030 = (s_p996_on && s_p996_chassis030 && mus) ? 1 : 0;   /* X68030+c68k は従来どおり対象外 */
+    int active000 = (on000 && !s_p996_chassis030) ? 1 : 0;              /* X68000 系: 両バックエンド */
+    s_p996_active = (active030 || active000) ? 1 : 0;
     if (s_p996_num <= 0) return;
-    int cur[5] = { s_p996_on, s_p996_chassis030, mus, (int)s_p996_num, (int)s_p996_den };
+    int cur[7] = { s_p996_on, s_p1084_mode000, s_p996_chassis030, mus, (int)s_p996_num, (int)s_p996_den,
+                   s_p996_active };
     if (s_p996_cfg_logged && memcmp(cur, s_p996_cfg_last, sizeof(cur)) == 0) return;
     memcpy(s_p996_cfg_last, cur, sizeof(cur));
     s_p996_cfg_logged = 1;
-    debug_log("[P996-CFG] dma_charge=%d env=%.16s chassis030=%d musashi=%d num=%d den=%d\n",
-              s_p996_on, s_p996_env ? s_p996_env : "(unset)", s_p996_chassis030, mus,
-              (int)s_p996_num, (int)s_p996_den);
+    debug_log("[P996-CFG] on030=%d on000=%d mode000=%s env030=%.16s env000=%.16s chassis030=%d musashi=%d "
+              "active=%d num=%d den=%d\n",
+              s_p996_on, on000, p1084_mode_name(s_p1084_mode000),
+              s_p996_env ? s_p996_env : "(unset)", s_p1084_env000 ? s_p1084_env000 : "(unset)",
+              s_p996_chassis030, mus, s_p996_active, (int)s_p996_num, (int)s_p996_den);
 }
 
 /* mx68k_run_frame() から毎フレーム、m68000_set_refresh_clock() の直後に呼ぶ。 */
@@ -2476,10 +2592,10 @@ void m68000_set_dma_charge(int chassis030, int32_t num, int32_t den) {
     if (g_mx68k_frame_num >= s_p996_win_next) {
         if (s_p996_str_seen > 0) {
             debug_log("[P996-DMASUM] f=%d str_seen=%u charged=%u skip_reqmode=%u skip_chain=%u skip_cnt=%u "
-                      "skip_gate=%u anomaly=%u stall_total=%llu zero_ops=%u\n",
+                      "skip_gate=%u anomaly=%u stall_total=%llu zero_ops=%u chassis030=%d active=%d\n",
                       g_mx68k_frame_num, s_p996_str_seen, s_p996_charged, s_p996_skip_reqmode,
                       s_p996_skip_chain, s_p996_skip_cnt, s_p996_skip_gate, s_p996_anomaly,
-                      s_p996_stall_total, s_p996_zero_ops);
+                      s_p996_stall_total, s_p996_zero_ops, s_p996_chassis030, s_p996_active);
         }
         s_p996_str_seen = s_p996_charged = s_p996_skip_reqmode = s_p996_skip_chain = 0;
         s_p996_skip_cnt = s_p996_skip_gate = s_p996_anomaly = s_p996_zero_ops = 0;
@@ -2503,11 +2619,15 @@ static inline int p996_pre(uint32_t a, uint32_t ccr, char via, p996_snap_t *s) {
     uint32_t ch = (a - 0xE84000u) >> 6;
     s->ch    = ch;
     s->via   = via;
+    s->chassis030 = s_p996_chassis030;
     s->ccr_w = (uint8_t)ccr;
     s->ocr   = DMA[ch].OCR;
     s->dcr   = DMA[ch].DCR;
     s->csr   = DMA[ch].CSR;
+    s->scr   = DMA[ch].SCR;
     s->mtc   = DMA[ch].MTC;
+    s->mar   = DMA[ch].MAR;
+    s->dar   = DMA[ch].DAR;
     s->pc    = MX68KQ_GUEST_PC();
     return 1;
 }
@@ -2522,6 +2642,88 @@ static inline unsigned p996_units_per_op(int opsize) {
     }
 }
 
+/* P1084: SCR のカウント方向フィールド(2bit)→ +1 / −1 / 0。Core dmac.c DMA_Exec と同じ優先順
+ * (下位ビット=+1 を先に見る。11 は +1 扱い)。 */
+static inline int p1084_count_dir(unsigned field) {
+    return (field & 1u) ? 1 : (field & 2u) ? -1 : 0;
+}
+
+/* P1084: X68000 系 byte(opsize4)の片側 tick。pack=パック成立、dir=カウント方向、adr=開始アドレス。 */
+static inline unsigned p1084_side_ticks(int pack, int dir, uint32_t adr) {
+    unsigned t = pack ? P1084_T_SIDE_PACK : P1084_T_SIDE_BUS;
+    if (dir == 0 && (adr & 1u)) t += P1084_T_ODD_NOCNT;
+    return t;
+}
+
+/* P1084: 1 オペランドあたりの tick。pack_r/pack_w には byte(opsize4)時の分類結果を返す
+ * (それ以外は -1)。 */
+static unsigned p1084_ticks_per_op(int chassis030, int opsize, const p996_snap_t *s, unsigned ops,
+                                   int *pack_r, int *pack_w) {
+    *pack_r = *pack_w = -1;
+    if (chassis030) return p996_units_per_op(opsize) * P1084_T_030_UNIT;   /* 旧式とビット一致 */
+    switch (opsize) {
+        case 5: return 2u * P1084_T_SIDE_BUS;                 /* word@16bit = 164(1025ns) */
+        case 6: return 4u * P1084_T_SIDE_BUS;                 /* long@16bit = 328(★暫定、word×2 と仮定) */
+        case 4: break;
+        default: return p996_units_per_op(opsize) * 2u * P1084_T_SIDE_BUS;   /* 8bit ポート等(★暫定フォールバック) */
+    }
+    /* byte@16bit(パックあり)。読出し/書込み側の割当ては OCR DIR(bit7): 0=メモリ→デバイス
+     * (MAR 読・DAR 書)、1=デバイス→メモリ(DAR 読・MAR 書)。方向は SCR MAC=bit3-2、DAC=bit1-0。
+     * パック成立条件(XEiJ HD63450.java:711-764 の独自の静的読み、★暫定):
+     *   読出し側: カウント方向 +1 ならパック成立。書込み側: +1 または −1 ならパック成立。
+     *   カウントしない側は非成立。カウントする側では開始アドレスの偶奇は最初の 1 オペランドにしか
+     *   影響しないので無視する(ops<2 は両側非成立扱い)。
+     * ★「読出し側 −1 は非パック」は XEiJ 静的読みのみで未検証(R7b)。通常利用・計測経路
+     *   (P1084DMA / P1084PACK の _DMAMOVE d1=$05、B 系直接起動)では読出し側は +1 で、−1 経路は
+     *   一度も通っていない(_DMAMOVE 自体は d1 で読出し側 −1 を指定できる)。根拠のない方向で
+     *   課金不足を避けるため、安全側フォールバックとして非パック(高い方の値)に倒している。
+     * 「奇数開始・+1 カウント側でもパック成立」は XEiJ 実測(T-P0、920ns/op)で確認済み。 */
+    int dir_mar = p1084_count_dir(((unsigned)s->scr >> 2) & 3u);
+    int dir_dar = p1084_count_dir((unsigned)s->scr & 3u);
+    int dev2mem = (s->ocr & 0x80u) ? 1 : 0;
+    int dir_r = dev2mem ? dir_dar : dir_mar;
+    int dir_w = dev2mem ? dir_mar : dir_dar;
+    uint32_t adr_r = dev2mem ? s->dar : s->mar;
+    uint32_t adr_w = dev2mem ? s->mar : s->dar;
+    int pr = (ops >= 2 && dir_r == 1) ? 1 : 0;
+    int pw = (ops >= 2 && dir_w != 0) ? 1 : 0;
+    *pack_r = pr;
+    *pack_w = pw;
+    return P1084_T_BYTE_ADD + p1084_side_ticks(pr, dir_r, adr_r) + p1084_side_ticks(pw, dir_w, adr_w);
+}
+
+/* P1084: c68k 経路の停止処理(S1、補償付き時間ジャンプ)。戻り値=負債へ積む量。
+ * c68k の C68k_Release_Cycle は残り rem(=CycleIO+CycleSup)を「実行済み」として Exec を
+ * 終わらせる時間ジャンプなので、rem 分はそれ自体が課金になる。
+ *  rem<=0 (deb): チャンクは尽きている/非実行中 → 負債のみ。
+ *  stall>=rem (rel): Release で rem を課金し、超過 stall-rem を負債へ。
+ *  path=irq: この命令内で Set_IRQ 済み(CycleSup!=0)かつ受理可能なら何もしない。Add すると
+ *    受理時の ACK→Set_IRQ(0) で退避値が失われ −stall が 2 回効く(Core:c68k/c68k.c:103-110)。
+ *    この場合は既存機構で rem 相当が時間ジャンプ扱いになり、課金=rem(最大 rem−stall の過課金、R15)。
+ *  それ以外 (add): Add_Cycle でチャンク内消化(Exec_End_Int の CycleSup 合流で合計は保存)。
+ * out_* はログ用の生値(判定前に採取)。 */
+static uint64_t p1084_c68k_stall(uint64_t stall, int32_t *out_rem, int32_t *out_sup, int32_t *out_irq,
+                                 int32_t *out_fi, const char **out_path) {
+    int32_t rem = C68k_Get_CycleRemaining(&C68K);
+    *out_rem = rem;
+    *out_sup = C68K.CycleSup;
+    *out_irq = C68K.IRQLine;
+    *out_fi  = (int32_t)C68K.flag_I;
+    if (rem <= 0) { *out_path = "deb"; return stall; }
+    if (stall >= (uint64_t)rem) {
+        C68k_Release_Cycle(&C68K);
+        *out_path = "rel";
+        return stall - (uint64_t)rem;
+    }
+    if (C68K.CycleSup != 0 && (C68K.IRQLine == 7 || C68K.IRQLine > (int32_t)C68K.flag_I)) {
+        *out_path = "irq";
+        return 0;
+    }
+    C68k_Add_Cycle(&C68K, (int32_t)stall);
+    *out_path = "add";
+    return 0;
+}
+
 static void p996_post(const p996_snap_t *s) {
     uint32_t ch = s->ch;
     uint16_t mtc_post = DMA[ch].MTC;
@@ -2533,25 +2735,53 @@ static void p996_post(const p996_snap_t *s) {
     if (ops == 0) { s_p996_zero_ops++; return; }
     int opsize = (int)((s->ocr >> 4) & 3u) + (int)((s->dcr >> 1) & 4u);
     unsigned units = ops * p996_units_per_op(opsize);
-    uint64_t div = 5u * (uint64_t)s_p996_den;
-    s_p996_acc += (uint64_t)units * 4u * (uint64_t)s_p996_num;
+    int pack_r, pack_w;
+    unsigned ticks = p1084_ticks_per_op(s->chassis030, opsize, s, ops, &pack_r, &pack_w);
+    uint64_t div = (uint64_t)P1084_DIV_TICK * (uint64_t)s_p996_den;
+    s_p996_acc += (uint64_t)ops * (uint64_t)ticks * (uint64_t)s_p996_num;
     uint64_t stall = s_p996_acc / div;
     s_p996_acc %= div;
     s_p996_charged++;
     s_p996_stall_total += stall;
+    int be_mus = mx_cpu_be_musashi() ? 1 : 0;
+    int32_t rem = -1, cyc_sup = -1, irq_line = -1, flag_i = -1;
+    const char *path = "none";
+    uint64_t debt_add = 0;
     if (stall > 0) {
-        s_p996_stall_debt += stall;
-        mx_cpu_end_timeslice();   /* CCR を書いた命令の直後で CPU を止め、次の反復で負債を消化する */
+        if (be_mus || (!s->chassis030 && s_p1084_mode000 == P1084_MODE_NOCOMP)) {
+            /* Musashi: end_timeslice は実行済み分だけ返す(D-108 で検証済み)。
+             * nocomp(c68k、診断専用): 補償なしの素朴な流用で二重課金を意図的に再現する。 */
+            debt_add = stall;
+            path = "ets";
+            if (!be_mus) {
+                rem = C68k_Get_CycleRemaining(&C68K);
+                cyc_sup = C68K.CycleSup;
+                irq_line = C68K.IRQLine;
+                flag_i = (int32_t)C68K.flag_I;
+            }
+            s_p996_stall_debt += debt_add;
+            mx_cpu_end_timeslice();   /* CCR を書いた命令の直後で CPU を止め、次の反復で負債を消化する */
+        } else {
+            debt_add = p1084_c68k_stall(stall, &rem, &cyc_sup, &irq_line, &flag_i, &path);
+            s_p996_stall_debt += debt_add;
+        }
     }
     if (s_p996_charge_logs < P996_CHARGE_LOG_MAX) {
         s_p996_charge_logs++;
-        debug_log("[P996-DMACHARGE] f=%d pc=%08x ch=%u via=%c ocr=%02x dcr=%02x ccr_w=%02x mtc_pre=%u mtc_post=%u "
-                  "csr_pre=%02x csr_post=%02x cer=%02x opsize=%d ops=%u units=%u stall=%u debt=%llu\n",
+        debug_log("[P996-DMACHARGE] f=%d pc=%08x ch=%u via=%c ocr=%02x dcr=%02x scr=%02x ccr_w=%02x "
+                  "mar=%06x dar=%06x mtc_pre=%u mtc_post=%u "
+                  "csr_pre=%02x csr_post=%02x cer=%02x chassis030=%d opsize=%d ops=%u units=%u ticks=%u "
+                  "pack_r=%d pack_w=%d num=%d den=%d stall=%u be=%c rem=%d path=%s debt_add=%llu "
+                  "cyc_sup=%d irq_line=%d flag_i=%d debt=%llu\n",
                   g_mx68k_frame_num, (unsigned)s->pc, (unsigned)ch, s->via,
-                  (unsigned)s->ocr, (unsigned)s->dcr, (unsigned)s->ccr_w,
+                  (unsigned)s->ocr, (unsigned)s->dcr, (unsigned)s->scr, (unsigned)s->ccr_w,
+                  (unsigned)(s->mar & 0xFFFFFFu), (unsigned)(s->dar & 0xFFFFFFu),
                   (unsigned)s->mtc, (unsigned)mtc_post,
                   (unsigned)s->csr, (unsigned)DMA[ch].CSR, (unsigned)DMA[ch].CER,
-                  opsize, ops, units, (unsigned)stall, (unsigned long long)s_p996_stall_debt);
+                  s->chassis030, opsize, ops, units, ticks, pack_r, pack_w,
+                  (int)s_p996_num, (int)s_p996_den, (unsigned)stall, be_mus ? 'm' : 'c',
+                  (int)rem, path, (unsigned long long)debt_add,
+                  (int)cyc_sup, (int)irq_line, (int)flag_i, (unsigned long long)s_p996_stall_debt);
     }
 }
 
@@ -33300,6 +33530,8 @@ void m68000_reset_pcguard_count(void)
         /* P910: [P910-040EXEC] 定期行(040型のときのみ) */
         mx_cpu_musashi_p910_tick(g_mx68k_frame_num, debug_log);
         mx_cpu_musashi_p984_tick(g_mx68k_frame_num, debug_log);   /* P984: [P984-IRQCNT] */
+        mx_cpu_musashi_p1016_tick(g_mx68k_frame_num, debug_log);  /* P1016: [P1016-UNALIGN]/[P1016-ODDPC] */
+        mx_cpu_musashi_p1017_tick(g_mx68k_frame_num, debug_log);  /* P1017: [P1017-ADRERR-INJECT] */
     }
     g_p14_pcguard_count = 0;
     /* P19-DIAG: フレームごとのベクタテーブル異常カウンタもリセットする */

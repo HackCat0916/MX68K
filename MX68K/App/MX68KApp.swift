@@ -432,14 +432,19 @@ struct FileCommands: Commands {
                 fddMenuItems(drive: 1)
             }
             // P684: FD2/FD3。Core fdd.c は元から 4 台対応で、ゲスト側 IOCS も
-            // A/B/C/D の 4 ドライブを列挙している。ツールバー/ステータスバー/D&D は
-            // 対象外(ユーザーとの合意)なので、導線はこの File メニューのみ。
+            // A/B/C/D の 4 ドライブを列挙している。ツールバー/D&D は対象外
+            // (ユーザーとの合意)なので、操作の導線はこの File メニューのみ
+            // (ステータスバーのランプ表示はP1046でFD2/FD3にも対応)。
+            // P1046: 外付けFDDユニットOFF時はFD2/FD3を無効化する(D-115: OFFのまま
+            // メディア挿入→リセットで白帯点滅ループが再現しうるため)。
             Menu("FD Drive (FD2)") {
                 fddMenuItems(drive: 2)
             }
+            .disabled(!runState.externalFDDUnitEnabled)
             Menu("FD Drive (FD3)") {
                 fddMenuItems(drive: 3)
             }
+            .disabled(!runState.externalFDDUnitEnabled)
             Menu("MO Drive") {
                 Button("Insert…") {
                     emulatorViewModel.browseAndInsertMO()

@@ -1,0 +1,112 @@
+# P1075: FDC WRITE ID で存在しないシリンダ77(C77H0)への要求を正常終了で吸収(D-119、FORMAT.X 完走)
+#
+# 分類: A(独立2参照実装[XM6・XEiJ]で実証済みの「構造」の移植。逐語移植ではない——P977/P982 の前例に倣う)
+# 出典リポジトリ: XM6 2.06(mainline、/Volumes/WD 8TB HDD/Develop/xm6)・XEiJ 0.26.10.08(/Users/toshinari/Desktop/XEiJ_0261008)の独立2者一致
+# 参照コミットハッシュ: XM6/XEiJ はどちらも git 管理外のため sha256 で版を固定する。生出力(本パッチ作成時に実行):
+#   $ shasum -a 256 "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   fa84af130e95bf819c314c03afcb0cef47b114e91ba2c628c2ce602af27a2946  /Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp
+#   7c240af5ab8f0310f88ee4e0a39dbab411027d74b4a894ad1e5f4a6b7d98fdf3  /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   (XEiJ の FDC.java は P982 と同一版。XM6 は mainline 2.06 のソースを読んだもので、ユーザーが使う XM6 TypeG[クローズドソース]の挙動は未確認)
+# 同じ欠陥の共有先(修正無し、本パッチの対象外。px68k 系統で共有された欠陥):
+#   px68k本家 74ddbb3 x68k/disk_xdf.c:128 / px68k-libretro 617574f x68k/disk_xdf.c:128 / MPX68K 42fc340 X68000 Shared/px68k/x68k/disk_xdf.c:143
+#   いずれも `if ( (trk<0)||(trk>153) ) return FALSE;`(P1075 Fix Plan「外部リポジトリの版固定」に生出力)
+# 移植の形: 移植した構造は次の3点:
+#   (1) シリンダ上限+1(2HD では C77)への WRITE ID は、ID 表が正しければ正常終了(ST0 IC=00)で終える。
+#   (2) イメージには何も書かない(XEiJ は「無視」、XM6 は「NOERROR を返すだけ」)。
+#   (3) ID 表の検査(R/N の妥当性、C/H の一致)は吸収判定の前に行う(XEiJ は C-1 にセクタがあるときだけ吸収)。
+# 移植しない点(意図的):
+#   (a) C77H1(trk=155)の吸収。XEiJ/XM6 はどちらも吸収するが、FORMAT.X は C77H0 しか出さない(P1069 解析・実機観測)ため、
+#       テストで踏まない挙動変更を避けて C77H0 だけにした(P1070 の Bridge 側吸収も C77H0 のみ)。
+#   (b) XM6 の「存在しない全トラックを NOERROR」。XEiJ と一致しない範囲(C78 以上)は移植しない。
+#   (c) XEiJ の WRITE ID による初期化データ充填(Arrays.fill)。MX の XDF_WriteID は元々充填しない(D-119 とは別項目候補)。
+#   (d) リザルトの C/H/R/N。XEiJ は C=77(ID 表の値)を返すが、MX は XDFTrk を更新しないため直前の成功トラック(通常 C76H1)を返す
+#       (XDFTrk を 154 にすると XDF_GetCurrentID が FALSE を返し、FDC_EPhaseEnd のリザルトに未初期化値が入るため)。
+# 逐語抜粋: 以下は本パッチ作成時に下記コマンドで取得した出力そのもの。
+#   XM6 は Shift_JIS のため iconv で UTF-8 へ変換し、タブを expand -t 4 で空白へ展開した(それ以外は無加工)。
+#   各行頭の「#   | 」はヘッダ用の接頭辞。
+#
+# --- XEiJ xeij/FDC.java:3363-3387(fduWriteIdEPhaseEnd: 上限+1 シリンダは無視して正常終了)
+#   $ sed -n 3363,3387p /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java | expand -t 4
+#   |         int o = fduCalcOffset ();
+#   |         if (o < 0) {  //セクタが存在しない
+#   |           //FORMAT.Xが1トラック余分にフォーマットしようとするので、シリンダが上限+1のときはエラーにせず無視する
+#   |           if (0 < fduPCN) {
+#   |             fduPCN--;
+#   |             if (FDC_DEBUG_TRACE && fdcDebugLogOn) {
+#   |               System.out.printf ("%08x unit=%d,fduPCN=%d\n", XEiJ.regPC0, abuNumber, fduPCN);
+#   |             }
+#   |             o = fduCalcOffset ();
+#   |             fduPCN++;
+#   |             if (FDC_DEBUG_TRACE && fdcDebugLogOn) {
+#   |               System.out.printf ("%08x unit=%d,fduPCN=%d\n", XEiJ.regPC0, abuNumber, fduPCN);
+#   |             }
+#   |           }
+#   |           if (o < 0) {  //シリンダを1つ減らしたセクタも存在しない
+#   |             fduEPhaseEnd (FDC_ST0_AT | FDC_ST0_EC | ((fduPHN & 1) << 2 | abuNumber) << 24);
+#   |             return;
+#   |           }
+#   |         } else {  //セクタが存在する
+#   |           Arrays.fill (fduImage, o, o + (128 << fduPNN), fdcCommandBuffer[5]);  //初期化データで充填する
+#   |           fduWritten = true;
+#   |         }
+#   |       }  //for i
+#   |       fduEPhaseEnd (FDC_ST0_NT | ((fduPHN & 1) << 2 | abuNumber) << 24);
+#   |     }  //fduWriteIdEPhaseEnd()
+#
+# --- XM6 vm/fdi.cpp:3730-3742(FDIDisk::WriteID: トラックが無ければ NOERROR)
+#   $ sed -n 3730,3742p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   | 
+#   |     // トラック取得
+#   |     if (hd == 0) {
+#   |         track = GetHead(0);
+#   |     }
+#   |     else {
+#   |         track = GetHead(1);
+#   |     }
+#   | 
+#   |     // NULLならNo Errorとする(format.x v2.20で154トラックにWrite ID)
+#   |     if (!track) {
+#   |         return FDD_NOERROR;
+#   |     }
+#
+# 実測根拠: [P509-FDCHIST] FORMAT 区間差分 c13=+164 c15=+160 c7=+5 c5=+0(P1067 H-0a、3/3 同値、.mx68k_cycles/P1067_h0.md:46-47)。
+#   「C0H0〜C76H1 の 154 本は成功、155 本目 C77H0 で異常終了 → IOCS が RECAL→SEEK→WRITE ID×2 を 5 回で断念」の下で
+#   c13=154+5×2=164・c15=155+5=160・c7=5 が同時に整合([runtime log 集計値]+[算術分解]、強い仮説)。本パッチ適用後の T-2b で直接検証。
+# 経緯: P1067 H-0a(D-119 発見)→ P1069/P1070(FORMAT.X の 155 本目=C77H0 を特定、ふろっぴU君経路は Bridge で吸収)→ P1075(本パッチ)。
+# 対象ファイル:行範囲: Core/px68k/x68k/disk_xdf.c:124-137(XDF_WriteID、適用前。最終変更 6337b28 = 初期取込み)
+# 理由(1行): XDF_WriteID が trk>153 を一律拒否し、FORMAT.X が出す存在しない C77H0 への WRITE ID を異常終了にしていたため、
+#   FORMAT.X がリトライの末に断念し WRITE DATA(ブートセクタ・FAT 書込み)へ到達しなかった(D-119)
+# 由来サイクル: P1075
+# 適用方法: git apply Patches/Core/p1075_xdf_writeid_c77_absorb.patch
+#           撤回:  git apply -R Patches/Core/p1075_xdf_writeid_c77_absorb.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+# 環境変数: なし(既定 OFF のフラグは導入しない——CLAUDE.md「既定OFF放置パターン」規律は非該当)。
+# 併用が必須の Bridge 側変更: なし。
+#   注記: Bridge/floppyu_fdc_passthrough_probe.c の P1070 吸収(ふろっぴU君の振り分け器が担当するユニットだけ、実機 FDD への送信経路)は
+#   本パッチと経路が重ならない(担当ユニットの要求は Core へ渡らない)ため撤去対象ではない(No stacking 非該当)。
+# 挙動の変化: 全機種共通。XDF 形式(拡張子が D88/88D/DIM 以外の全イメージ)で、ID 表が C77H0 として正しい WRITE ID のときだけ、
+#   異常終了(ST0 IC=01・ST1 ND)→ 正常終了(IC=00)に変わる。イメージ・XDFTrk・その他の状態は不変。
+#   D88(上限 trk 163)・DIM(WRITE ID 未実装)は対象外・不変。ステートセーブ形式は不変。
+#
+diff --git a/Core/px68k/x68k/disk_xdf.c b/Core/px68k/x68k/disk_xdf.c
+index 0b9885c..fcac942 100644
+--- a/Core/px68k/x68k/disk_xdf.c
++++ b/Core/px68k/x68k/disk_xdf.c
+@@ -125,12 +125,16 @@ int32_t XDF_WriteID(int32_t drv, int32_t trk, uint8_t* buf, int32_t num)
+ {
+ 	int_fast16_t i;
+ 	if ( (drv<0)||(drv>3) ) return FALSE;
+-	if ( (trk<0)||(trk>153) ) return FALSE;
++	if ( (trk<0)||(trk>154) ) return FALSE;
+ 	if ( !XDFImg[drv] ) return FALSE;
+ 	if ( num!=8 ) return FALSE;
+ 	for (i=0; i<8; i++, buf+=4) {
+ 		if ( (((buf[0]<<1)+buf[1])!=trk)||(buf[2]<1)||(buf[2]>8)||(buf[3]!=3) ) return FALSE;
+ 	}
++	/* P1075 (D-119): FORMAT.X は 2HD に対し存在しないシリンダ77(C77H0、trk=154)へも WRITE ID を1回余分に出す。
++	 * 何も書かず正常終了で吸収する(XEiJ FDC.java:3364-3386 / XM6 vm/fdi.cpp:3739-3742 と同じ構造)。
++	 * XDFTrk は更新しない(XDF_GetCurrentID が 153 超を拒否し、リザルトの C/H/R/N が未初期化になるため) */
++	if ( trk==154 ) return TRUE;
+ 	XDFTrk[drv] = trk;
+ 	return TRUE;
+ }

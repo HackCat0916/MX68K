@@ -77,6 +77,9 @@ static _Atomic(bool)    g_sc55_stop_requested = false;
 /* 0 = 未読込/無効, 1 = 動作中, 2 = 適用中(読込済み・warm-up 中),
  * -1 = ROM ファイルが無い/読めない, -2 = ROM のサイズ不正(コアが拒否)。 */
 static _Atomic(int32_t) g_sc55_status = 0;
+/* 内蔵 SC-55 の出力ゲイン(P1006)。1.0 = Nuked-SC55 の素の出力と同一レベル。
+ * Nuked-SC55 にはゲイン API が無いため、mx68k_sc55_render_mix 内でサンプルへ乗算する。 */
+static _Atomic(float)   g_sc55_output_gain = 1.0f;
 
 /* ---- 以下はワーカー専用(同期不要)---- */
 #define SC55_PUMP_CHUNK_BYTES 1024
@@ -207,9 +210,13 @@ void mx68k_sc55_render_mix(int16_t *stereo_buf, int32_t frames)
 	uint32_t w = atomic_load_explicit(&g_sc55_out_write, memory_order_acquire);
 	uint32_t avail = (w + SC55_OUT_RING_FRAMES - r) % SC55_OUT_RING_FRAMES;
 	uint32_t n = (avail < (uint32_t)frames) ? avail : (uint32_t)frames;
+	/* P1006: ゲインはコールバックごとに 1 回だけ読む。範囲外は下の既存飽和処理で保護される。 */
+	float gain = atomic_load_explicit(&g_sc55_output_gain, memory_order_relaxed);
 	for (uint32_t i = 0; i < n; i++) {
 		for (int ch = 0; ch < 2; ch++) {
-			int32_t s = (int32_t)stereo_buf[i * 2 + ch] + (int32_t)s_sc55_out_ring[r * 2 + ch];
+			int32_t raw = (int32_t)s_sc55_out_ring[r * 2 + ch];
+			int32_t scaled = (gain == 1.0f) ? raw : (int32_t)((float)raw * gain);
+			int32_t s = (int32_t)stereo_buf[i * 2 + ch] + scaled;
 			if (s > INT16_MAX) s = INT16_MAX;
 			if (s < INT16_MIN) s = INT16_MIN;
 			stereo_buf[i * 2 + ch] = (int16_t)s;
@@ -220,6 +227,14 @@ void mx68k_sc55_render_mix(int16_t *stereo_buf, int32_t frames)
 	if (n < (uint32_t)frames && atomic_load_explicit(&g_sc55_accepting, memory_order_relaxed)) {
 		atomic_fetch_add_explicit(&g_sc55_underrun_callbacks, 1, memory_order_relaxed);
 	}
+}
+
+/* P1006: 内蔵 SC-55 の出力ゲインを設定する(任意スレッドから呼んでよい、ロック不要)。 */
+void mx68k_set_sc55_output_gain(float gain)
+{
+	if (gain < 0.0f) gain = 0.0f;
+	if (gain > 4.0f) gain = 4.0f;
+	atomic_store_explicit(&g_sc55_output_gain, gain, memory_order_relaxed);
 }
 
 /* ---------------- コア操作(ワーカー専用)---------------- */

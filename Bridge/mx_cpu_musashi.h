@@ -76,5 +76,9 @@ void mx_cpu_musashi_p897_tick(int frame, mx_cpu_musashi_logf logf);
 void mx_cpu_musashi_p910_tick(int frame, mx_cpu_musashi_logf logf);
 /* P984: [P984-IRQCNT] の定期行(割込み受付の計数と課金合計、出力ごとにゼロクリア) */
 void mx_cpu_musashi_p984_tick(int frame, mx_cpu_musashi_logf logf);
+/* P1016: [P1016-UNALIGN]/[P1016-ODDPC] の定期行(全Musashiモードで出す、カウンタはプロセス内の累計) */
+void mx_cpu_musashi_p1016_tick(int frame, mx_cpu_musashi_logf logf);
+/* P1017: [P1017-ADRERR-INJECT] の定期行(奇数PC命令フェッチ→ベクタ3注入の累計、二重フォルト停止回数) */
+void mx_cpu_musashi_p1017_tick(int frame, mx_cpu_musashi_logf logf);
 
 #endif /* MX_CPU_MUSASHI_H */

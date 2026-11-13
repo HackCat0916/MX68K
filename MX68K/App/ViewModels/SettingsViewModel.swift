@@ -36,6 +36,8 @@ class SettingsViewModel: ObservableObject {
     @Published var externalFDDUnit: Bool = false   // P686 (D-70): 外付け FDD ユニット
     @Published var floppyuEnabled: Bool = false    // P958: ふろっぴU君を利用する
     @Published var floppyuAssignedBase: Int = 0    // P958: 0 = ドライブ0/1、2 = ドライブ2/3
+    @Published var floppyuWriteEnabled: Bool = false   // P1054: ふろっぴU君の実ディスクへの書込み許可
+    @Published var floppyuFormatEnabled: Bool = false  // P1067: ふろっぴU君の実ディスクへの FORMAT 許可
     // P490 (MIDI Stage 2)
     @Published var midiResetOnInit: Bool = true
     @Published var midiResetType: Int = 0      // 0=LA, 1=GM, 2=GS, 3=XG
@@ -48,6 +50,8 @@ class SettingsViewModel: ObservableObject {
     @Published var mt32ControlRomPath: String = ""
     @Published var mt32PcmRomPath: String = ""
     @Published var mt32PartialCount: Int = 32   // P827: 最大パーシャル数(既定 32 = 実機準拠)
+    @Published var mt32OutputGainPercent: Int = 100   // P1006: 内蔵 MT-32 出力音量(%)、即時反映
+    @Published var sc55OutputGainPercent: Int = 100   // P1006: 内蔵 SC-55 出力音量(%)、即時反映
     // P826: 内蔵 SC-55 の ROM
     @Published var sc55Rom1Path: String = ""
     @Published var sc55Rom2Path: String = ""
@@ -137,6 +141,9 @@ class SettingsViewModel: ObservableObject {
         config.extensions.externalFDDUnit = externalFDDUnit   // P686
         config.extensions.floppyuEnabled = floppyuEnabled               // P958
         config.extensions.floppyuAssignedBase = floppyuAssignedBase     // P958
+        config.extensions.floppyuWriteEnabled = floppyuWriteEnabled     // P1054
+        // P1067: 連動の正本はここ。書込み許可が OFF なら FORMAT 許可も false で保存する(画面上の選択は保持)
+        config.extensions.floppyuFormatEnabled = floppyuWriteEnabled && floppyuFormatEnabled
         config.extensions.midiResetOnInit = midiResetOnInit
         config.extensions.midiResetType = midiResetType
         config.extensions.midiDelayMs = midiDelayMs
@@ -146,6 +153,8 @@ class SettingsViewModel: ObservableObject {
         config.extensions.mt32ControlRomPath = mt32ControlRomPath               // P825
         config.extensions.mt32PcmRomPath = mt32PcmRomPath                       // P825
         config.extensions.mt32PartialCount = mt32PartialCount                   // P827
+        config.extensions.mt32OutputGainPercent = mt32OutputGainPercent         // P1006
+        config.extensions.sc55OutputGainPercent = sc55OutputGainPercent         // P1006
         config.extensions.sc55Rom1Path = sc55Rom1Path                           // P826
         config.extensions.sc55Rom2Path = sc55Rom2Path                           // P826
         config.extensions.sc55WaveRom1Path = sc55WaveRom1Path                   // P826
@@ -198,6 +207,8 @@ class SettingsViewModel: ObservableObject {
         externalFDDUnit = config.extensions.externalFDDUnit   // P686
         floppyuEnabled = config.extensions.floppyuEnabled               // P958
         floppyuAssignedBase = config.extensions.floppyuAssignedBase     // P958
+        floppyuWriteEnabled = config.extensions.floppyuWriteEnabled     // P1054
+        floppyuFormatEnabled = config.extensions.floppyuFormatEnabled   // P1067
         midiResetOnInit = config.extensions.midiResetOnInit
         midiResetType = config.extensions.midiResetType
         midiDelayMs = config.extensions.midiDelayMs
@@ -207,6 +218,8 @@ class SettingsViewModel: ObservableObject {
         mt32ControlRomPath = config.extensions.mt32ControlRomPath               // P825
         mt32PcmRomPath = config.extensions.mt32PcmRomPath                       // P825
         mt32PartialCount = config.extensions.mt32PartialCount                   // P827
+        mt32OutputGainPercent = config.extensions.mt32OutputGainPercent         // P1006
+        sc55OutputGainPercent = config.extensions.sc55OutputGainPercent         // P1006
         sc55Rom1Path = config.extensions.sc55Rom1Path                           // P826
         sc55Rom2Path = config.extensions.sc55Rom2Path                           // P826
         sc55WaveRom1Path = config.extensions.sc55WaveRom1Path                   // P826

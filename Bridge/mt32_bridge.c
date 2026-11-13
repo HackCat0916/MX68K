@@ -35,6 +35,9 @@
 static mt32emu_context g_mt32_ctx = NULL;          /* エミュスレッドが作成/破棄、audio スレッドは lock 下で読む */
 static _Atomic(bool)   g_mt32_ready = false;
 static os_unfair_lock  g_mt32_lock = OS_UNFAIR_LOCK_INIT;
+/* 内蔵 MT-32 の出力ゲイン(P1006)。初期値 1.0 は mt32emu 既定値と同じ。
+ * context 再作成(mt32_open_locked)のたびにこの値を新しい context へ反映する。 */
+static _Atomic(float)  g_mt32_output_gain = 1.0f;
 
 /* 要求済み・未適用の設定。★すべて g_mt32_lock 保持中にのみ読み書きする。 */
 static _Atomic(bool) g_pending_mt32_reconfigure = false;
@@ -203,6 +206,8 @@ static int mt32_open_locked(const char *control, const char *pcm, int32_t sample
 		mt32emu_free_context(ctx);
 		return (int)rc;
 	}
+	/* P1006: 再構成で context が作り直されても、直前まで設定していたゲインを引き継ぐ。 */
+	mt32emu_set_output_gain(ctx, atomic_load_explicit(&g_mt32_output_gain, memory_order_relaxed));
 	g_mt32_ctx = ctx;
 	atomic_store_explicit(&g_mt32_ready, true, memory_order_release);
 	*stage = "open_synth";
@@ -303,6 +308,27 @@ int32_t mx68k_mt32_get_status(void)
 		return 2;
 	}
 	return atomic_load_explicit(&g_mt32_last_status, memory_order_relaxed);
+}
+
+/* P1006: 内蔵 MT-32 の出力ゲインを設定する(メインスレッド=設定画面のスライダーから呼ばれる)。
+ * メインスレッドから生きた g_mt32_ctx へ直接 mt32emu API を呼ぶ唯一の経路だが、
+ * ctx へのアクセスは既存規律(先頭コメント (B))どおり g_mt32_lock 保持中に限る。
+ * 書き込むのは ctx の出力ゲイン(outputGain / Analog 内部値)だけで、MIDI 投入
+ * (mt32emu_parse_stream、エミュスレッド)が触るイベントキューとも、レンダリング
+ * (audio スレッド、trylock)の一時バッファとも、再構成(エミュスレッド、ブロッキング取得)
+ * の context 生成/破棄とも重ならない。audio スレッドの trylock がこの間だけ失敗した場合は、
+ * そのバッファのみ MT-32 無音になる(既存の意図された挙動、ブロックしない)。
+ * context がまだ無い場合は値の保存だけ行い、次回 open 時に mt32_open_locked で反映する。 */
+void mx68k_set_mt32_output_gain(float gain)
+{
+	if (gain < 0.0f) gain = 0.0f;
+	if (gain > 4.0f) gain = 4.0f;
+	atomic_store_explicit(&g_mt32_output_gain, gain, memory_order_relaxed);
+	os_unfair_lock_lock(&g_mt32_lock);
+	if (atomic_load_explicit(&g_mt32_ready, memory_order_acquire) && g_mt32_ctx != NULL) {
+		mt32emu_set_output_gain(g_mt32_ctx, gain);
+	}
+	os_unfair_lock_unlock(&g_mt32_lock);
 }
 
 void mt32_bridge_send_bytes(const uint8_t *data, uint32_t len)

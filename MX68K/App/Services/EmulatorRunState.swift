@@ -16,4 +16,7 @@ final class EmulatorRunState: ObservableObject {
     /// P737 — クイックセーブ/ロード操作の実行中か。Quick Save/Quick Load State
     /// メニュー項目の`.disabled`判定に使う。isRecordingと同じ理由の軽量ミラー。
     @Published var isStateOperationPending = false
+    /// P1046 — 外付けFDDユニット設定の軽量ミラー。FD2/FD3メニューの`.disabled`
+    /// 判定に使う。isRecordingと同じ理由(EmulatorViewModel直接観測を避ける)。
+    @Published var externalFDDUnitEnabled = false
 }

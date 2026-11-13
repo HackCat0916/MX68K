@@ -11,6 +11,10 @@ struct GeneralSettingsView: View {
     // P664: 走査線エフェクト(MVP: オン/オフのみ)。displayFilterと同じ
     // @AppStorage直書きパターン(メニュー項目は本サイクルでは追加しない)。
     @AppStorage("scanlineEffect") private var scanlineEffect: Bool = false
+    // P1007: 設定画面を開いている間の自動一時停止(P229)をON/OFF可能にする。
+    // 既定OFF(iOSの挙動[P706 §C-2、一時停止しない]に合わせる、ユーザー指示)。
+    // SettingsView 側でも同じキーを独立宣言して読む(displayFilter と同じパターン)。
+    @AppStorage("pauseWhileSettingsOpen") private var pauseWhileSettingsOpen: Bool = false
 
     var body: some View {
         Form {
@@ -30,6 +34,9 @@ struct GeneralSettingsView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                // P1007: @AppStorage 直書きのため即時反映(Apply 不要)。
+                Toggle("Pause While Settings Window Is Open", isOn: $pauseWhileSettingsOpen)
             }
 
             Section(header: Text("Screenshot Folder")) {

@@ -1,0 +1,283 @@
+# P1080: D88_WriteID の oldsi をループ外へ移し、FORMAT で全セクタを連結する(D-121)
+#
+# 分類: B(代替根拠——関数内不変条件+系統外独立参照[XM6/XEiJ]との設計一致。
+#   一次資料[ハードウェア仕様書]への適用は本件の性質上不能、ユーザー承認済み[P1080、本件限り。
+#   2026-11-12 AskUserQuestion で方針質問として個別パッチ承認とは別に取得——P1080 Fix Plan「承認の記録」節])
+# 一次資料: 適用不能(本件はハードウェア仕様の解釈ではなく C のブロックスコープ誤り)。代替根拠:
+#   (i) 関数内不変条件 Core/px68k/x68k/disk_d88.c:226-227(i>=1 で前セクタへ連結する分岐)・:236(sectors=num)・
+#       :240(ループ末尾の oldsi = si; は oldsi が反復をまたいで生存する場合のみ意味を持つ。現状は直後に寿命が尽きる死んだ文)
+#   (ii) 系統外独立参照: XM6 2.06 vm/fdi.cpp:5985-6044 FDITrackD68::WriteID + :1560-1594 FDITrack::AddSector(sc 個を順に末尾連結)/
+#        XEiJ 0.26.10.08 xeij/FDC.java:3355-3386 fduWriteIdEPhaseEnd(ID 表全エントリを充填)
+#   (iii) 同系先例: MPX68K 42fc340 X68000 Shared/px68k/x68k/disk_d88.c:80-115 D88_SetFD(ループ外で oldsi=NULL、ループ内で無条件 oldsi=si)
+# 実測根拠: [runtime log] P1077 d121_hang_debug.log seq=29〜32(R=1 書込み+読返し成功 → R=2 WRITE DATA で停止)/
+#   P1079 T-2b(D-124 修正後)で R=2 WRITE DATA が2回とも失敗(seq=10〜19、23〜32)。
+#   修正前の直接ダンプ([runtime dump]): P1079 が書き戻した /Users/toshinari/Desktop/X68K/blank_test.d88
+#   (161,888 バイト、sha256 4a1e2804c5fc0af07e1b3e6d7dfca3b826caeb1bc296e854f6bd7f288294df0f)を解析し
+#   nonzero_tracks=155、actual_sectors_per_track_hist={1: 155}、sectors_field_hist={8: 155}(P1080 Fix Plan「Class B条件(a)」に生出力)。
+#   修正後の直接ダンプは P1080 T-4 で取得(取得後に追記)
+# 上流欠陥同定: px68k の取込み元 xkeropi(d92ab3d "original xkeropi-20101107")由来、px68k 系統共通
+# Bridge代替検討: 却下——D88Trks/D88Cur/D88Top が disk_d88.c 内の static で Bridge から触れず、
+#   FDD_WriteID も static な関数ポインタ表 WriteID[type](fdd.c:31)経由のため横取り不可。D88 全体の Bridge 再実装は
+#   Core の外部近似(P465 の教訓)かつ約330行の複製になるため不採用
+# 対象ファイル:行範囲: Core/px68k/x68k/disk_d88.c:222-224(D88_WriteID、適用前。ファイル最終変更 6337b28 = 初期取込み)
+# 理由(1行): oldsi がループ本体内で毎反復 NULL として再宣言され、i>=1 の連結が常に行われず各トラックに先頭1セクタしか残らない
+# 由来サイクル: P1080
+# 変更内容: for 文の直前に `D88_SECTINFO *oldsi = NULL;` を置き、ループ内の `, *oldsi = NULL` を削除する(2行)。
+#   :227 の if (oldsi) と :240 の oldsi = si; は差分最小化のため据え置き(i>=1 では oldsi は前反復の si で非 NULL)。
+#   goto d88_writeid_error は宣言より後ろから関数末尾へ飛ぶだけで宣言を飛び越えない(oldsi は VLA ではない)。
+# 適用方法: git apply Patches/Core/p1080_d88_writeid_oldsi_link.patch
+#           撤回:  git apply -R Patches/Core/p1080_d88_writeid_oldsi_link.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+# 環境変数: なし(既定 OFF のフラグは導入しない——CLAUDE.md「既定OFF放置パターン」規律は非該当)。
+# 併用が必須の Bridge 側変更: なし(No stacking 非該当。置き換え対象の Bridge 近似は無い)。
+# 挙動の変化: .d88 形式イメージへの WRITE ID(FORMAT)のみ。各トラックに sc 個(2HD なら 8 個、R=1〜8)のセクタが順に連結され、
+#   FORMAT.X の R>=2 への書込みが成功するようになる。XDF/DIM・HDD・フォーマット済みディスクへの通常 READ/WRITE は経路が違うため不変
+#   (既定スモーク経路の human302.xdf 起動はこの関数を通らない)。D88_Eject で書き戻されるファイルサイズが
+#   688 + 本数×sc×(16+1024) へ変わる。これまで FORMAT ごとに未参照のまま残っていた (sc−1)×トラック数 個のセクタも
+#   リストにつながり、次の WRITE ID/Eject で解放される。ステートセーブ形式は不変(D88Trks は対象外)。
+#   注意: 修正後に FORMAT した .d88 を MX で再度開くと D88_SetFD の sct>=1 経路(D-125)を必ず通る(D-125 は別サイクルで扱う)。
+#
+# 版固定(本パッチ作成時に実行した生出力):
+#   $ shasum -a 256 "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   | fa84af130e95bf819c314c03afcb0cef47b114e91ba2c628c2ce602af27a2946  /Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp
+#   | 7c240af5ab8f0310f88ee4e0a39dbab411027d74b4a894ad1e5f4a6b7d98fdf3  /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k" rev-parse HEAD
+#   | 74ddbb37b4e12b77362a4e12f28ceb5aaa593684
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k-libretro" rev-parse HEAD
+#   | 617574fc65892421dd8be92270f8241c96a1a594
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K" rev-parse HEAD
+#   | 42fc3401b5a3449a3b758ae67edba3c4a19682b8
+#   (fdi.cpp・FDC.java の sha256 は P982/P1075/P1079 パッチヘッダ記載値と同一=同一版。
+#    3 リポジトリとも git status --short -- <disk_d88.c> は空=作業ツリーの未コミット変更なし。
+#    ※XM6 は mainline 2.06 のソースを読んだもので、ユーザーが使う XM6 TypeG[クローズドソース]の挙動は未確認——
+#     本件は設計意図の一致を見るだけで、逐語移植元ではない)
+#
+# 参照実装調査(修正不在の証明、いずれも同一欠陥・未修正)。px68k本家/libretro の disk_d88.c は ISO-8859 判定で
+#   grep がバイナリ扱いするため -a を付けた:
+#   $ grep -n -a "oldsi" "/Volumes/WD 8TB HDD/Develop/px68k/x68k/disk_d88.c"   (px68k本家 74ddbb3)
+#   | 76:		D88_SECTINFO *si, *oldsi = NULL;
+#   | 85:					oldsi->next = si;
+#   | 92:				if (oldsi) oldsi = si;
+#   | 223:		D88_SECTINFO *si = (D88_SECTINFO*)malloc(sizeof(D88_SECTINFO)+size), *oldsi = NULL;
+#   | 226:			if (oldsi) oldsi->next = si;
+#   | 239:		oldsi = si;
+#   $ grep -n -a "oldsi" "/Volumes/WD 8TB HDD/Develop/px68k-libretro/x68k/disk_d88.c"   (px68k-libretro 617574f)
+#   | 76:		D88_SECTINFO *si, *oldsi = NULL;
+#   | 85:					oldsi->next = si;
+#   | 92:				if (oldsi) oldsi = si;
+#   | 223:		D88_SECTINFO *si = (D88_SECTINFO*)malloc(sizeof(D88_SECTINFO)+size), *oldsi = NULL;
+#   | 226:			if (oldsi) oldsi->next = si;
+#   | 239:		oldsi = si;
+#   $ grep -n "oldsi" "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K/X68000 Shared/px68k/x68k/disk_d88.c"   (MPX68K 42fc340)
+#   | 83:		D88_SECTINFO *si, *oldsi = NULL;
+#   | 106:					oldsi->next = si;
+#   | 113:				oldsi = si;
+#   | 265:		D88_SECTINFO *si = (D88_SECTINFO*)malloc(alloc_size), *oldsi = NULL;
+#   | 268:			if (oldsi) oldsi->next = si;
+#   | 281:		oldsi = si;
+#   $ grep -n "oldsi" Core/px68k/x68k/disk_d88.c   (MX、適用前)
+#   | 76:		D88_SECTINFO *si, *oldsi;
+#   | 86:					oldsi->next = si;
+#   | 93:				if (oldsi) oldsi = si;
+#   | 224:		D88_SECTINFO *si = (D88_SECTINFO*)malloc(sizeof(D88_SECTINFO)+size), *oldsi = NULL;
+#   | 227:			if (oldsi) oldsi->next = si;
+#   | 240:		oldsi = si;
+#   (WriteID 側=本家/libretro :223/226/239、MPX68K :265/268/281、MX :224/227/240。いずれも oldsi をループ本体内で宣言)
+#
+# 逐語抜粋: 以下は本パッチ作成時に下記コマンドで取得した出力そのもの。
+#   XM6 は Shift_JIS のため iconv で UTF-8 へ変換し、タブを expand -t 4 で空白へ展開した(それ以外は無加工)。
+#   XM6 のソースは CRLF 改行のため、XM6 抜粋の各行末には CR がそのまま残っている(P982/P1075/P1079 の前例と同じ)。
+#   iconv は Shift_JIS の 0x7E(~)を ‾(U+203E)へ写すが、本抜粋の範囲には該当文字は無い。
+#   XEiJ・MPX68K はタブを expand -t 4 で展開した(それ以外は無加工)。各行頭の「#   | 」はヘッダ用の接頭辞。
+#
+# --- XM6 vm/fdi.cpp:5985-6044(FDITrackD68::WriteID: sc 個のセクタを順に作成して AddSector)
+#   $ sed -n 5985,6044p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   | int FASTCALL FDITrackD68::WriteID(const BYTE *buf, DWORD d, int sc, BOOL mfm, int gpl)
+#   | {
+#   |     int stat;
+#   |     FDISector *sector;
+#   |     DWORD pos;
+#   |     int i;
+#   |     BYTE fillbuf[0x2000];
+#   |     DWORD chrn[4];
+#   | 
+#   |     ASSERT(this);
+#   |     ASSERT(sc > 0);
+#   | 
+#   |     // オリジナルを呼ぶ(ライトプロテクトのチェックはFDIDiskで既に行われている)
+#   |     stat = FDITrack::WriteID(buf, d, sc, mfm, gpl);
+#   |     if (stat == FDD_NOERROR) {
+#   |         // フォーマット成功(以前と同一の物理フォーマット)
+#   |         return stat;
+#   |     }
+#   | 
+#   |     // 異なるフォーマット
+#   |     d68_format = TRUE;
+#   | 
+#   |     // 時間を設定(indexまで)
+#   |     pos = GetDisk()->GetRotationTime();
+#   |     pos -= GetDisk()->GetRotationPos();
+#   |     GetDisk()->SetSearch(pos);
+#   | 
+#   |     // bufが与えられていなければここまで
+#   |     if (!buf) {
+#   |         return FDD_NOERROR;
+#   |     }
+#   | 
+#   |     // セクタをクリア
+#   |     ClrSector();
+#   |     memset(fillbuf, d, sizeof(fillbuf));
+#   | 
+#   |     // 順にセクタを作成
+#   |     for (i=0; i<sc; i++) {
+#   |         // レングス>=7はアンフォーマット
+#   |         if (buf[i * 4 + 3] >= 0x07) {
+#   |             ClrSector();
+#   |             return FDD_NOERROR;
+#   |         }
+#   | 
+#   |         // セクタを作成
+#   |         chrn[0] = (DWORD)buf[i * 4 + 0];
+#   |         chrn[1] = (DWORD)buf[i * 4 + 1];
+#   |         chrn[2] = (DWORD)buf[i * 4 + 2];
+#   |         chrn[3] = (DWORD)buf[i * 4 + 3];
+#   |         sector = new FDISector(mfm, chrn);
+#   |         sector->Load(fillbuf, 1 << (buf[i * 4 + 3] + 7), gpl, FDD_NOERROR);
+#   | 
+#   |         // セクタを追加
+#   |         AddSector(sector);
+#   |     }
+#   | 
+#   |     // ポジション計算
+#   |     CalcPos();
+#   | 
+#   |     return FDD_NOERROR;
+#
+# --- XM6 vm/fdi.cpp:1560-1594(FDITrack::AddSector: 先頭が無ければ先頭に、あれば末尾に連結)
+#   $ sed -n 1560,1594p "/Volumes/WD 8TB HDD/Develop/xm6/vm/fdi.cpp" | iconv -f SHIFT_JIS -t UTF-8 | expand -t 4
+#   | void FASTCALL FDITrack::AddSector(FDISector *sector)
+#   | {
+#   |     FDISector *ptr;
+#   | 
+#   |     ASSERT(this);
+#   |     ASSERT(sector);
+#   | 
+#   |     // セクタを持っていなければ、そのまま追加
+#   |     if (!trk.first) {
+#   |         trk.first = sector;
+#   |         sector->SetNext(NULL);
+#   | 
+#   |         // MFM決定
+#   |         trk.mfm = sector->IsMFM();
+#   |     }
+#   |     else {
+#   |         // 最終セクタを得る
+#   |         ptr = trk.first;
+#   |             while (ptr->GetNext()) {
+#   |             ptr = ptr->GetNext();
+#   |         }
+#   | 
+#   |         // 最終セクタに追加
+#   |         ptr->SetNext(sector);
+#   |         sector->SetNext(NULL);
+#   |     }
+#   | 
+#   |     // 個数加算
+#   |     trk.sectors[0]++;
+#   |     if (sector->IsMFM()) {
+#   |         trk.sectors[1]++;
+#   |     }
+#   |     else {
+#   |         trk.sectors[2]++;
+#   |     }
+#
+# --- XEiJ xeij/FDC.java:3355-3386(fduWriteIdEPhaseEnd の ID 表ループ: 全エントリの該当セクタを充填)
+#   $ sed -n 3355,3386p /Users/toshinari/Desktop/XEiJ_0261008/xeij/FDC.java | expand -t 4
+#   |       for (int i = 0; i < fdcLimit; i += 4) {
+#   |         fduPCN = fdcTempBuffer[i    ] & 255;
+#   |         if (FDC_DEBUG_TRACE && fdcDebugLogOn) {
+#   |           System.out.printf ("%08x unit=%d,fduPCN=%d\n", XEiJ.regPC0, abuNumber, fduPCN);
+#   |         }
+#   |         fduPHN = fdcTempBuffer[i + 1] & 255;
+#   |         fduPRN = fdcTempBuffer[i + 2] & 255;
+#   |         fduPNN = fdcTempBuffer[i + 3] & 255;
+#   |         int o = fduCalcOffset ();
+#   |         if (o < 0) {  //セクタが存在しない
+#   |           //FORMAT.Xが1トラック余分にフォーマットしようとするので、シリンダが上限+1のときはエラーにせず無視する
+#   |           if (0 < fduPCN) {
+#   |             fduPCN--;
+#   |             if (FDC_DEBUG_TRACE && fdcDebugLogOn) {
+#   |               System.out.printf ("%08x unit=%d,fduPCN=%d\n", XEiJ.regPC0, abuNumber, fduPCN);
+#   |             }
+#   |             o = fduCalcOffset ();
+#   |             fduPCN++;
+#   |             if (FDC_DEBUG_TRACE && fdcDebugLogOn) {
+#   |               System.out.printf ("%08x unit=%d,fduPCN=%d\n", XEiJ.regPC0, abuNumber, fduPCN);
+#   |             }
+#   |           }
+#   |           if (o < 0) {  //シリンダを1つ減らしたセクタも存在しない
+#   |             fduEPhaseEnd (FDC_ST0_AT | FDC_ST0_EC | ((fduPHN & 1) << 2 | abuNumber) << 24);
+#   |             return;
+#   |           }
+#   |         } else {  //セクタが存在する
+#   |           Arrays.fill (fduImage, o, o + (128 << fduPNN), fdcCommandBuffer[5]);  //初期化データで充填する
+#   |           fduWritten = true;
+#   |         }
+#   |       }  //for i
+#   |       fduEPhaseEnd (FDC_ST0_NT | ((fduPHN & 1) << 2 | abuNumber) << 24);
+#
+# --- MPX68K X68000 Shared/px68k/x68k/disk_d88.c:80-115(D88_SetFD: 同系先例。oldsi をセクタループの外で NULL 初期化し、末尾で無条件 oldsi = si)
+#   $ sed -n 80,115p "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K/X68000 Shared/px68k/x68k/disk_d88.c" | expand -t 4
+#   |     
+#   |     for (trk=0; trk<164; trk++) {
+#   |         long ptr = D88Head[drv].trackp[trk];
+#   |         D88_SECTINFO *si, *oldsi = NULL;
+#   |         
+#   |         if ( (ptr>=(long)sizeof(D88_HEADER))&&(ptr<D88Head[drv].fd_size) ) {
+#   |             d88s.sectors = 65535;
+#   |             File_Seek(fp, ptr, FSEEK_SET);
+#   |             for (sct=0; sct<d88s.sectors; sct++) {
+#   |                 if ( File_Read(fp, &d88s, sizeof(D88_SECTOR))!=sizeof(D88_SECTOR) ) goto d88_set_error;
+#   |                 // Security: Validate sector count from image header
+#   |                 if (d88s.sectors == 0 || d88s.sectors > MAX_SECTORS_PER_TRACK) {
+#   |                     goto d88_set_error;
+#   |                 }
+#   |                 // Security: Validate sector size to prevent buffer overflow
+#   |                 if (d88s.size > MAX_SECTOR_SIZE) {
+#   |                     goto d88_set_error;
+#   |                 }
+#   |                 // Security: Check for integer overflow in allocation
+#   |                 size_t alloc_size = sizeof(D88_SECTINFO) + d88s.size;
+#   |                 if (alloc_size > MAX_ALLOCATION_SIZE || alloc_size < sizeof(D88_SECTINFO)) {
+#   |                     goto d88_set_error;
+#   |                 }
+#   |                 si = (D88_SECTINFO*)malloc(alloc_size);
+#   |                 if ( !si ) goto d88_set_error;
+#   |                 if ( sct ) {
+#   |                     oldsi->next = si;
+#   |                 } else {
+#   |                     D88Trks[drv][trk] = si;
+#   |                 }
+#   |                 memcpy(&si->sect, &d88s, sizeof(D88_SECTOR));
+#   |                 if ( File_Read(fp, ((unsigned char*)si)+sizeof(D88_SECTINFO), d88s.size)!=d88s.size ) goto d88_set_error;
+#   |                 si->next = 0;
+#   |                 oldsi = si;
+#   |             }
+#   |         }
+#
+diff --git a/Core/px68k/x68k/disk_d88.c b/Core/px68k/x68k/disk_d88.c
+index 5b494b8..0eeff7a 100644
+--- a/Core/px68k/x68k/disk_d88.c
++++ b/Core/px68k/x68k/disk_d88.c
+@@ -219,9 +219,10 @@ int32_t D88_WriteID(int32_t drv, int32_t trk, unsigned char* buf, int32_t num)
+ 		}
+ 		D88Trks[drv][trk] = 0;
+ 	}
++	D88_SECTINFO *oldsi = NULL;	/* P1080 D-121: 前のセクタを反復をまたいで保持する */
+ 	for (i=0; i<num; i++, buf+=4) {
+ 		int32_t size = 128<<buf[3];
+-		D88_SECTINFO *si = (D88_SECTINFO*)malloc(sizeof(D88_SECTINFO)+size), *oldsi = NULL;
++		D88_SECTINFO *si = (D88_SECTINFO*)malloc(sizeof(D88_SECTINFO)+size);
+ 		if ( !si ) goto d88_writeid_error;
+ 		if ( i ) {
+ 			if (oldsi) oldsi->next = si;

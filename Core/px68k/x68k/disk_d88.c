@@ -219,9 +219,10 @@ int32_t D88_WriteID(int32_t drv, int32_t trk, unsigned char* buf, int32_t num)
 		}
 		D88Trks[drv][trk] = 0;
 	}
+	D88_SECTINFO *oldsi = NULL;	/* P1080 D-121: 前のセクタを反復をまたいで保持する */
 	for (i=0; i<num; i++, buf+=4) {
 		int32_t size = 128<<buf[3];
-		D88_SECTINFO *si = (D88_SECTINFO*)malloc(sizeof(D88_SECTINFO)+size), *oldsi = NULL;
+		D88_SECTINFO *si = (D88_SECTINFO*)malloc(sizeof(D88_SECTINFO)+size);
 		if ( !si ) goto d88_writeid_error;
 		if ( i ) {
 			if (oldsi) oldsi->next = si;
