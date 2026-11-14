@@ -15,6 +15,23 @@ struct GeneralSettingsView: View {
     // 既定OFF(iOSの挙動[P706 §C-2、一時停止しない]に合わせる、ユーザー指示)。
     // SettingsView 側でも同じキーを独立宣言して読む(displayFilter と同じパターン)。
     @AppStorage("pauseWhileSettingsOpen") private var pauseWhileSettingsOpen: Bool = false
+    @EnvironmentObject private var configManager: ConfigManager
+
+    // P1090: LogViewerView.swift の loggingBinding と同一実装(同じ Bridge 実行時フラグを
+    // 共有する)。永続化は Release ビルドでの変更のみ——Debug ビルドでの一時操作が
+    // config.json 経由で Release ビルドの既定値へ波及しないようにするため。
+    private var loggingBinding: Binding<Bool> {
+        Binding(
+            get: { mx68k_get_debug_log_enabled() != 0 },
+            set: { newValue in
+                mx68k_set_debug_log_enabled(newValue ? 1 : 0)
+                if mx68k_is_debug_build() == 0 {
+                    configManager.config.performance.debugLogEnabled = newValue
+                    configManager.save()
+                }
+            }
+        )
+    }
 
     var body: some View {
         Form {
@@ -37,6 +54,13 @@ struct GeneralSettingsView: View {
 
                 // P1007: @AppStorage 直書きのため即時反映(Apply 不要)。
                 Toggle("Pause While Settings Window Is Open", isOn: $pauseWhileSettingsOpen)
+
+                // P1090: Bridge 関数を直接呼ぶため即時反映(Log Viewer のトグルと同一設定)。
+                Toggle("Enable Debug Log", isOn: loggingBinding)
+                Text("⚠ Debug logging increases log output and can affect audio timing (e.g. internal MIDI). Leave this off unless troubleshooting.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section(header: Text("Screenshot Folder")) {

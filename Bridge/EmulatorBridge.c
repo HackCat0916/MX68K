@@ -1614,6 +1614,51 @@ static void p808_load_overshoot_fix(void) {
     }
 }
 
+/* P1102 (D-126-b/D-129): DMAC ch0(FDC 外部要求)の DMA_Exec(0) 呼出しペース。
+ * LINE  = 走査線末尾で 1 回(P1102 段階1までの挙動。"line"/"0" で明示指定するオプトアウト)。
+ * 16US  = ゲスト時間 16µs(usedclk 160 = 0.1µs 単位)ごとに 1 回。実機 2HD MFM の
+ *         1 バイト転送時間(Inside X68000 書籍 p.398 図13)に合わせた時間基準(案β、P1102 段階2で既定)。
+ * CHUNK = CLOCK_SLICE チャンクごとに 1 回(px68k 系参照実装と同じ構造、比較計測用の診断モード、案α)。
+ * 書込みは mx68k_init() / mx68k_reset_hard() / mx68k_run_frame() のみ(エミュレーション
+ * スレッド上で直列)。 */
+#define P1102_PACE_LINE         0
+#define P1102_PACE_16US         1
+#define P1102_PACE_CHUNK        2
+#define P1102_DMA0_PERIOD_10M   160   /* 16µs ÷ 0.1µs(usedclk 単位) */
+static int32_t  s_p1102_pace = P1102_PACE_16US;
+static int32_t  s_p1102_acc  = 0;      /* 16US: 未消化の usedclk 積算(< 160 を保つ) */
+/* [P1102-DMA0PACE] の 300 フレーム窓カウンタ(出力後 0 へ戻す) */
+static unsigned long long s_p1102_calls       = 0;
+static unsigned long long s_p1102_act_calls   = 0;
+static unsigned long long s_p1102_moved       = 0;
+static unsigned long long s_p1102_act_usedclk = 0;
+static unsigned long long s_p1102_usedclk_sum = 0;
+static unsigned int       s_p1102_frames      = 0;
+
+/* P1102: 環境変数 MX68K_DEBUG_DMA0_PACE を読む。未設定・空文字は 16US(段階2で既定化)、
+ * "line"・"0" は LINE(オプトアウト)、"16us" は 16US、"chunk" は CHUNK、それ以外は LINE にして rejected を出す。
+ * 毎回 mx68k_init() で再評価し、積算器も 0 に戻す。未到達と区別できるよう未設定時も 1 行出す。 */
+static void p1102_load_dma0_pace(void) {
+    const char *env = getenv("MX68K_DEBUG_DMA0_PACE");
+    s_p1102_acc = 0;
+    if (env == NULL || env[0] == '\0') {
+        s_p1102_pace = P1102_PACE_16US;
+        debug_log("[P1102-CFG] pace=16us env=(unset) default=16us\n");
+    } else if (strcmp(env, "line") == 0 || strcmp(env, "0") == 0) {
+        s_p1102_pace = P1102_PACE_LINE;
+        debug_log("[P1102-CFG] pace=line env=\"%s\" default=16us\n", env);
+    } else if (strcmp(env, "16us") == 0) {
+        s_p1102_pace = P1102_PACE_16US;
+        debug_log("[P1102-CFG] pace=16us env=\"%s\" default=16us\n", env);
+    } else if (strcmp(env, "chunk") == 0) {
+        s_p1102_pace = P1102_PACE_CHUNK;
+        debug_log("[P1102-CFG] pace=chunk env=\"%s\" default=16us\n", env);
+    } else {
+        s_p1102_pace = P1102_PACE_LINE;
+        debug_log("[P1102-CFG] pace=line env=\"%s\" default=16us rejected\n", env);
+    }
+}
+
 // ---- init / shutdown(初期化 / 終了) ----
 int mx68k_init(void) {
     /* P753: ここにあった debug_log_init() の単独呼出しは削除した。次行の
@@ -1626,6 +1671,9 @@ int mx68k_init(void) {
 
     /* P808: 命令境界オーバーシュート補正(P974 以降既定 ON、MX68K_DEBUG_OVERSHOOT_FIX=0 でオプトアウト)。 */
     p808_load_overshoot_fix();
+
+    /* P1102: DMAC ch0 の呼出しペース(既定 line = 現行どおり走査線ごと)。 */
+    p1102_load_dma0_pace();
 
     /* P996: DMA ストール負債の初期化(mx68k_reset_hard でも 0 に戻す) */
     m68000_dma_stall_reset();
@@ -2175,6 +2223,9 @@ void mx68k_reset_hard(void) {
      * 経路(m68000_reset() の呼出し)は本関数だけで、mx68k_reset_soft() と予約
      * リセットもここを通る。NMI は時間会計を切らないので対象外。 */
     s_p808_carry = 0;
+
+    /* P1102: ch0 ペースの usedclk 積算もリセットで持ち越さない。 */
+    s_p1102_acc = 0;
 
     /* P929: MIDI Keyboard Viewer のノート状態を全消灯する。リセットでゲストが Note Off を
      * 送らないまま止まるため、これが無いと直前の点灯がリセット後も残り続ける。 */
@@ -3994,6 +4045,33 @@ static void p1041_vram_blink_probe(int frame_num)
     }
 }
 
+/* P1102: pace=16us/chunk のときにチャンクループから呼ぶ ch0 の 1 回分。中身は走査線末尾の
+ * LINE ブロックの else 側(P164 の計装なし)と同じ観測フック・P367 確認を DMA_Exec(0) の前後に置く。
+ * ★pace=16us/chunk では、P164-DMA0/P165-DMADATA の起動時診断(frame 55〜80 限定)は発火しない。
+ *   これらは LINE ブロック専用の計装で、意図的にスコープを LINE モードに限定している。
+ * 呼出し前の ACT(CSR bit3)と MTC の減少量を [P1102-DMA0PACE] の窓カウンタへ加える(読取りのみ)。 */
+static void p1102_dma0_exec(int vl) {
+    uint16_t mtc_pre = DMA[0].MTC;
+    if (DMA[0].CSR & 0x08u) s_p1102_act_calls++;
+#if P367_ENABLE
+    uint32_t p367_dst0 = (DMA[0].OCR & 0x80) ? DMA[0].MAR : DMA[0].DAR;
+    uint16_t p367_mtc0 = DMA[0].MTC;
+#endif
+    mx68k_fdlat_observe_site();   /* P940: DMA[0] 読取りのみ(OFF 時即 return) */
+    DMA_Exec(0);
+    mx68k_floppyu_fdcpt_observe_dma0_post();   /* P951: ON 時のみ観測(OFF 時即 return) */
+#if P367_ENABLE
+    {
+        uint32_t p367_dst1 = (DMA[0].OCR & 0x80) ? DMA[0].MAR : DMA[0].DAR;
+        p367_dma_write_check(0, p367_dst0, p367_mtc0, p367_dst1, DMA[0].MTC, vl);
+    }
+#else
+    (void)vl;
+#endif
+    s_p1102_calls++;
+    if (mtc_pre > DMA[0].MTC) s_p1102_moved += (unsigned long long)(mtc_pre - DMA[0].MTC);
+}
+
 void mx68k_run_frame(void) {
     p918_test_reset_maybe_arm();
     if (consume_pending_ops()) return;
@@ -4803,6 +4881,21 @@ void mx68k_run_frame(void) {
         }
 #endif
         RTC_Timer(usedclk);   /* RP5C15 1Hz/16Hz アラーム、MFP の直後(winx68k.cpp:493-494) */
+        /* P1102: ch0 のペース計測(全モード、読取り・加算のみ)と、16us/chunk モードの ch0 呼出し。
+         * px68k本家 x11/winx68k.cpp:440-444 と同じく MFP→RTC→DMA の順。LINE モードではここで
+         * DMA_Exec(0) を呼ばない(走査線末尾の既存ブロックのまま)。16us の while は 1 チャンクで
+         * 高々 usedclk/160+1 回で、積算器は毎チャンク消化されるのでアイドル中に溜め込まない。 */
+        s_p1102_usedclk_sum += (unsigned long long)usedclk;
+        if (DMA[0].CSR & 0x08u) s_p1102_act_usedclk += (unsigned long long)usedclk;
+        if (s_p1102_pace == P1102_PACE_16US) {
+            s_p1102_acc += usedclk;
+            while (s_p1102_acc >= P1102_DMA0_PERIOD_10M) {
+                s_p1102_acc -= P1102_DMA0_PERIOD_10M;
+                p1102_dma0_exec(vl);
+            }
+        } else if (s_p1102_pace == P1102_PACE_CHUNK) {
+            p1102_dma0_exec(vl);
+        }
         frame_icount -= adv;  /* MPX: ICount -= m, m == n(P808: オプトアウト時 adv==n) */
         ICount -= adv;        /* P158: mfp.c の H-SYNC ビット掃引のため Core グローバル ICount にも反映(MPX winx68k.cpp:488) */
         clk_count    += adv;
@@ -4915,6 +5008,13 @@ void mx68k_run_frame(void) {
             /* P164: DMA_Exec(0) の前後で DMA ch0 の全レジスタブロックを採取し、
              * arm 済みチャンネル(MTC!=0)が FDC データ準備済みなのに消化されない理由を調べる。read-only、
              * 件数上限付き、ストール区間限定。呼出し回数/順序は不変(単一呼出し)。 */
+            /* P1102: 下の既存ブロック(P164/P165 計装を含む)は pace=line(既定)のときだけ実行する。
+             * ブロック内部は無変更。pace=16us/chunk ではチャンクループの p1102_dma0_exec() が代わりに
+             * ch0 を呼ぶため、P164/P165 の起動時診断(frame 55〜80 限定)は発火しない(意図的なスコープ限定)。
+             * 計数はブロックの前後で値を読むだけ(どちらの分岐も DMA_Exec(0) をちょうど 1 回呼ぶ)。 */
+            if (s_p1102_pace == P1102_PACE_LINE) {
+            uint16_t p1102_mtc_pre = DMA[0].MTC;
+            if (DMA[0].CSR & 0x08u) s_p1102_act_calls++;
             {
                 static int s_p164 = 0;
                 if (frame_num >= 55 && frame_num <= 80 && DMA[0].MTC != 0 && s_p164 < 24) {
@@ -4978,6 +5078,10 @@ void mx68k_run_frame(void) {
 #endif
                 }
             }
+            s_p1102_calls++;
+            if (p1102_mtc_pre > DMA[0].MTC)
+                s_p1102_moved += (unsigned long long)(p1102_mtc_pre - DMA[0].MTC);
+            }   /* P1102: if (s_p1102_pace == P1102_PACE_LINE) */
             /* P181: DMAC ch0 は FDD 専用。ACT ビットが立つ = 実ディスク R/W 中
              * (seek/select/poll では立たない)。実転送時のみアクセスランプを点灯する。 */
             if (DMA[0].CSR & 0x08u) mx68k_fdd_note_rw();
@@ -5196,6 +5300,27 @@ void mx68k_run_frame(void) {
                   clock_slice, clkdiv);
     }
 #endif
+
+    /* P1102: [P1102-DMA0PACE] ch0 呼出しペースの 300 フレーム窓集計(無条件、周期出力のみ)。
+     * 生値のみ出し、比(act_usedclk/moved 等)は出さない。expect_16us は usedclk_sum/160 の
+     * 理論呼出し回数で、pace=16us なら calls と ±1 以内、pace=line なら calls≈frames×vline_total。
+     * vline_total/clk_total_10m/clk_num/clk_den を併記し、標本の画面モード・クロックを行自体で示す。 */
+    s_p1102_frames++;
+    if ((frame_num % 300) == 0) {
+        static const char *const p1102_pace_name[3] = { "line", "16us", "chunk" };
+        debug_log("[P1102-DMA0PACE] sum f=%d pace=%s frames=%u calls=%llu "
+                  "act_calls=%llu moved=%llu act_usedclk=%llu "
+                  "usedclk_sum=%llu expect_16us=%llu "
+                  "acc=%d vline_total=%d clk_total_10m=%d clk_num=%d clk_den=%d\n",
+                  frame_num, p1102_pace_name[s_p1102_pace], s_p1102_frames, s_p1102_calls,
+                  s_p1102_act_calls, s_p1102_moved, s_p1102_act_usedclk,
+                  s_p1102_usedclk_sum, s_p1102_usedclk_sum / P1102_DMA0_PERIOD_10M,
+                  (int)s_p1102_acc, vline_total_val, (int)g_p641_frame_clocks_10m,
+                  (int)clk_num, (int)clk_den);
+        s_p1102_calls = s_p1102_act_calls = s_p1102_moved = 0;
+        s_p1102_act_usedclk = s_p1102_usedclk_sum = 0;
+        s_p1102_frames = 0;
+    }
 
     int32_t executed = total_executed;
 
@@ -10618,6 +10743,18 @@ void mx68k_get_status(MX68KStatus* status) {
     status->fdd3_media_present = (mx68k_fdd_media_present(3) != 0);
     status->fdd2_active = (mx68k_fdd_accessing(2) != 0);   /* P689: 赤 = アクセス中 */
     status->fdd3_active = (mx68k_fdd_accessing(3) != 0);   /* P689: 赤 = アクセス中 */
+    /* P1092 (D-127): ふろっぴU君割当てドライブの表示用。上の既存フィールドは変更しない。 */
+    for (int d = 0; d < 4; d++) {
+        bool assigned = (mx68k_floppyu_status_assigned(d) != 0);
+        bool present  = (mx68k_floppyu_status_present(d) != 0);
+        bool active   = (mx68k_floppyu_status_active(d) != 0);
+        switch (d) {
+        case 0: status->floppyu_assigned0 = assigned; status->floppyu_present0 = present; status->floppyu_active0 = active; break;
+        case 1: status->floppyu_assigned1 = assigned; status->floppyu_present1 = present; status->floppyu_active1 = active; break;
+        case 2: status->floppyu_assigned2 = assigned; status->floppyu_present2 = present; status->floppyu_active2 = active; break;
+        default: status->floppyu_assigned3 = assigned; status->floppyu_present3 = present; status->floppyu_active3 = active; break;
+        }
+    }
 }
 
 /* P286: 開発者向けモニタパネル。既存のexternグローバルのread-onlyスナップショット

@@ -70,11 +70,18 @@ struct StatusBarView: View {
             HStack(spacing: 4) {
                 Text("FDD:")
                     .font(.caption)
+                // P1092 (D-127): ふろっぴU君割当て中のドライブは仮想マウント状態ではなく
+                // ふろっぴU君側の観測値(floppyu_present/active)を使う。
+                let s = viewModel.status
+                let fu0: (Bool, Bool) = s.floppyu_assigned0 ? (s.floppyu_present0, s.floppyu_active0) : (s.fdd0_inserted, s.fdd0_active)
+                let fu1: (Bool, Bool) = s.floppyu_assigned1 ? (s.floppyu_present1, s.floppyu_active1) : (s.fdd1_inserted, s.fdd1_active)
+                let fu2: (Bool, Bool) = s.floppyu_assigned2 ? (s.floppyu_present2, s.floppyu_active2) : (s.fdd2_media_present, s.fdd2_active)
+                let fu3: (Bool, Bool) = s.floppyu_assigned3 ? (s.floppyu_present3, s.floppyu_active3) : (s.fdd3_media_present, s.fdd3_active)
                 let drives: [(present: Bool, active: Bool)] = [
-                    (lampsLive && viewModel.status.fdd0_inserted, viewModel.status.fdd0_active),
-                    (lampsLive && viewModel.status.fdd1_inserted, viewModel.status.fdd1_active),
-                    (lampsLive && viewModel.status.fdd2_media_present, viewModel.status.fdd2_active),
-                    (lampsLive && viewModel.status.fdd3_media_present, viewModel.status.fdd3_active),
+                    (lampsLive && fu0.0, fu0.1),
+                    (lampsLive && fu1.0, fu1.1),
+                    (lampsLive && fu2.0, fu2.1),
+                    (lampsLive && fu3.0, fu3.1),
                 ]
                 ForEach(Array(drives.enumerated()), id: \.offset) { _, d in
                     Text(d.present ? "●" : "○")

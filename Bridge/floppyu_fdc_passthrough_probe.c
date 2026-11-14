@@ -78,6 +78,7 @@ extern void    IRQH_Int(uint8_t irq, void* handler);  /* Core:irqh.h:9 */
 extern void    IRQH_IRQCallBack(uint8_t irq);         /* Core:irqh.h:8 */
 extern uint8_t IRQH_IRQ[8];                           /* Core:irqh.c:18、ヘッダ未宣言(Bridge:fd_latency_experiment.c:49 と同じ) */
 extern void   *IRQH_CallBack[8];                      /* Core:irqh.c:19、ヘッダ未宣言 */
+extern int32_t VLINE;                                 /* Core:winx68k.h:22(P1100、読取りのみ。winx68k.h は include しない) */
 extern uint8_t IOC_IntVect;                           /* Core:ioc.h:7 */
 /* P939 観測ラッパー(Bridge:floppyu_regprobe.c)。シムは include しない方針のため直接宣言する */
 extern uint8_t mx68k_floppyu_fdc_read_probe(uint32_t adr);
@@ -448,6 +449,13 @@ static int      s_rl_prev_chr_valid = 0;
 /* フレーム毎ブロック時間 */
 static int64_t  s_rl_blk_frame_us = 0;
 static int      s_rl_frame_active = 0;
+/* P1092(D-127): ステータスバーのFD表示用(表示専用、送信判断・安全柵には使わない)。
+ * 添字はMX側ドライブ番号(0-3)。装置ユニット番号から書き込む箇所は fu_status_dev_to_mx() で変換する
+ * (割当てがドライブ2/3のとき base=2 で両者が異なるため)。初期値は安全側(未挿入)。
+ * P1095: 書込み元は p955_route_read() case 0x05 の $E94005 読出しbit7のみ(リセットは rl_install_reset) */
+static int      s_floppyu_present[4] = { 0, 0, 0, 0 };
+static int      s_rl_last_io_frame[4] = { -100000, -100000, -100000, -100000 };
+static inline uint8_t fu_status_dev_to_mx(uint8_t udev) { return (uint8_t)((udev + s_p955_base) & 3u); }
 /* 集計(分母と分子を併記する) */
 static uint32_t s_rl_relay_hist[32], s_rl_stub_hist[32], s_rl_refused_hist[32];
 static uint32_t s_rl_read_begin, s_rl_read_ok, s_rl_read_err[RE_N], s_rl_rid_begin, s_rl_rid_ok, s_rl_rid_err;
@@ -490,6 +498,34 @@ static uint16_t s_rl_wrcollect_mtc0 = 0;
 static uint8_t  s_rl_wrcollect_ocr0 = 0, s_rl_wrcollect_csr0 = 0;
 static uint32_t s_rl_wrcollect_begin, s_rl_wrcollect_done, s_rl_wrcollect_aborted, s_rl_wrcollect_refused;
 static uint32_t s_rl_wrcollect_lines;
+/* P1100: WR_COLLECT 段階の切り分け診断(挙動変更なし、読取り専用)。DMA_Exec(0) 1回あたりの MTC 減少量を数え、
+ * 1回の呼出しで1Bしか転送されない(候補b)か、無転送の呼出しが多い(候補a/c)かを区別する */
+#define P1100_TAG                 "[P1100-WRCOLL]"
+static int      s_p1100_active = 0;      /* 収集開始〜集計行出力まで1 */
+static int      s_p1100_is_fmt = 0;      /* 1=FORMAT 経由の収集(rl_fmt_collect_begin) */
+static int      s_p1100_f0 = 0, s_p1100_vl0 = 0;     /* 収集開始時の frame/VLINE */
+static uint8_t  s_p1100_ccr0 = 0, s_p1100_csr0 = 0;  /* 収集開始時の DMA[0].CCR/CSR */
+static uint16_t s_p1100_mtc0 = 0;                    /* 収集開始時の DMA[0].MTC */
+static int      s_p1100_f1 = 0, s_p1100_vl1 = 0;     /* 1バイト目(rl_collect_byte pos==0) */
+static int      s_p1100_fn = 0, s_p1100_vln = 0;     /* 最後の1バイト(rl_collect_done 冒頭) */
+static int      s_p1100_calls = 0, s_p1100_calls_moved = 0, s_p1100_calls_zero = 0;
+static uint16_t s_p1100_max_delta = 0;
+static uint16_t s_p1100_last_mtc = 0;
+static uint32_t s_p1100_n_total = 0;     /* 集計行を出した総収集件数(分母) */
+static unsigned long long s_p1100_zero_total = 0;   /* 完了した収集の無転送呼出しの累計 */
+static int      s_p1100_lines = 0;       /* 出力済み集計行の件数(最初の32件まで出力) */
+static void p1100_begin(int is_fmt)
+{
+    s_p1100_active = 1;
+    s_p1100_is_fmt = is_fmt;
+    s_p1100_f0 = g_mx68k_frame_num;
+    s_p1100_vl0 = VLINE;
+    s_p1100_ccr0 = DMA[0].CCR;
+    s_p1100_csr0 = DMA[0].CSR;
+    s_p1100_mtc0 = DMA[0].MTC;
+    s_p1100_last_mtc = DMA[0].MTC;
+    s_p1100_calls = 0; s_p1100_calls_moved = 0; s_p1100_calls_zero = 0; s_p1100_max_delta = 0;
+}
 /* P1063: FORMAT TRACK(WRITE ID, cmd 13)の dryrun 限定観測。ID表(SC×4B)を上の収集機構で受け取り、
  * 装置へは一切送らず成功リザルトを合成する。dryrun 以外のモードでは従来どおり無条件拒否 */
 #define P1063_TAG             "[P1063-FMT]"
@@ -686,6 +722,10 @@ static int64_t  s_rl_wr_state_t_us = 0;    /* 現在の書込み待ち状態へ�
 static int64_t  s_rl_wr_send_t_us = 0;     /* 書込みコマンド送信時刻(イベント時系列の基準) */
 static uint32_t s_rl_wr_c_seen = 0;        /* 当該コマンドの書込み待ち中に受けた 'C' 数 */
 static int64_t  s_rl_wr_result_t_us = 0;   /* 'C'無しで結果確定した時刻(遅着'C'の計数用、0=対象外) */
+static int      s_rl_wr_op_f0 = 0;         /* P1099(診断専用): 書込み/FORMAT専用のコマンド受信フレーム番号
+                                            * (共有変数s_rl_op_f0はREAD DATA/READ IDからも書換えられるため別に持つ) */
+static int      s_rl_wr_data_sent_f = 0;   /* P1099(診断専用): データ送信時のフレーム番号 */
+static int      s_rl_wr_result_f = 0;      /* P1099(診断専用): 結果確定時のフレーム番号 */
 static char     s_rl_wr_ev_c[FU_WR_EV_MAX];
 static int64_t  s_rl_wr_ev_us[FU_WR_EV_MAX];
 static uint32_t s_rl_wr_ev_n = 0;
@@ -830,6 +870,8 @@ static uint32_t s_nm_close_ev[NM_CL_N];
 /* P1055: 'D'/'d' の組単位の判別保留(状態機械は normal のときだけ動く)。状態遷移表・判定手順は .mx68k_cycles/P1055_plan.md。
  *  I=IDLE / H1=保留・走査未完了 / H2=保留・走査完了で 'd' 待ち。保留中は全ユニットの柵を閉扱いにする */
 #define P1055_TAG                 "[P1055-ATTR]"
+#define P1095_TAG                 "[P1095-E5P]"
+#define P1099_TAG                 "[P1099-WRSTAGE]"
 #define FU_NM_HOLD_FRAMES         30        /* 保留の打切り。起点は FDD 割込みを実際に発行したフレーム(発行待ち中は更新) */
 #define FU_NM_HOLD_MAX_FRAMES     600       /* 割込み持ち越しが続く場合の 'D' 起点の上限(約11秒) */
 #define FU_NM_OC_FRESH_FRAMES     1         /* 保留外の変化(oc_mask)を判定へ加える鮮度窓: 保留開始フレームとの差がこれ以下 */
@@ -2347,6 +2389,7 @@ static void rl_read_begin(void)
         rl_raise_int();
         return;
     }
+    s_rl_last_io_frame[fu_status_dev_to_mx(s_rl_rd_us)] = g_mx68k_frame_num;   /* P1092: 表示用(s_rl_rd_us は装置側) */
     s_rl_cf_first = 1;   /* P1051: READ 系は装置の同期フラグを立てる(app.c@2191) */
     s_rl_op_gen = mx68k_floppyu_usb_generation();
     s_rl_op_t0_us = rl_now_us();
@@ -2602,6 +2645,7 @@ static uint8_t rl_supply_byte(void)
 static void rl_collect_begin(void)
 {
     const uint8_t* p = s_rl_cmd;   /* [0]cmd [1]US/HD [2]C [3]H [4]R [5]N [6]EOT [7]GPL [8]DTL */
+    p1100_begin(0);   /* P1100: 早期 return が無いので先頭で記録してよい */
     s_rl_wrcollect_begin++;
     s_rl_wrcollect_pos = 0;
     s_rl_wrcollect_n = 128u << p[5];   /* p[5]<=3 を確認済み(WR_BUF_CAP 以内) */
@@ -2658,6 +2702,7 @@ static void rl_fmt_collect_begin(void)
                   (unsigned)DMA[0].MTC, (unsigned)(DMA[0].MAR & 0xFFFFFFu), (unsigned)DMA[0].OCR, (unsigned)DMA[0].CSR,
                   (unsigned)s_rl_fmt_dryrun_n);
     }
+    p1100_begin(1);   /* P1100: sc==0 の早期 return(rl_refuse)より後に置く(縮退ケースで active を立てない) */
     s_rl_state = RL_WR_COLLECT;
 }
 
@@ -2984,17 +3029,32 @@ static void rl_sync_log(const rl_sync_log_t* lg, const char* precheck, const cha
 /* P1064: 書込みコマンド送信成功後の WAIT_W 突入時の状態初期化(rl_wr_try_send から抽出、rl_fmt1_try_send と共用) */
 static void rl_wr_enter_wait_w(uint32_t n)
 {
+    /* P1099(診断専用、挙動変更なし): 前回サイクルが完了していた場合(s_rl_wr_result_f!=0)、
+     * 段階別フレーム差を記録してから通常の初期化へ進む。初回呼出し(前回サイクルが無い)はスキップ。
+     * 基準点はs_rl_op_f0ではなく書込み/FORMAT専用のs_rl_wr_op_f0を使う(共有変数の汚染を回避) */
+    if (s_rl_wr_result_f != 0) {
+        int d_cmd2sent = s_rl_wr_data_sent_f - s_rl_wr_op_f0;
+        int d_sent2result = s_rl_wr_result_f - s_rl_wr_data_sent_f;
+        int d_result2next = g_mx68k_frame_num - s_rl_wr_result_f;
+        debug_log(P1099_TAG " stage prev_f0=%d data_sent_f=%d result_f=%d next_f=%d "
+                  "d_cmd2sent=%d d_sent2result=%d d_result2next=%d\n",
+                  s_rl_wr_op_f0, s_rl_wr_data_sent_f, s_rl_wr_result_f, g_mx68k_frame_num,
+                  d_cmd2sent, d_sent2result, d_result2next);
+    }
     int64_t now = rl_now_us();
     s_rl_op_gen = mx68k_floppyu_usb_generation();
     s_rl_op_t0_us = now;
     s_rl_op_f0 = g_mx68k_frame_num;
+    s_rl_wr_op_f0 = g_mx68k_frame_num;   /* P1099: 書込み/FORMAT専用の複製 */
     s_rl_wr_send_t_us = now;
     s_rl_wr_state_t_us = now;
     s_rl_wr_data_sent = 0;
+    s_rl_wr_data_sent_f = 0;   /* P1099: 新サイクル用にリセット */
     s_rl_wr_n = n;
     s_rl_wr_ev_n = 0;
     s_rl_wr_c_seen = 0;
     s_rl_wr_result_t_us = 0;
+    s_rl_wr_result_f = 0;      /* P1099 */
     s_rl_wr_res_msr_n = 0;
     s_rl_wr_res_polls = 0;
     s_rl_wr_res_last_poll_us = 0;
@@ -3296,6 +3356,7 @@ static void rl_wr_try_send(void)
     }
     s_rl_wr_wp_at_send = (st3 & ST3_WP) ? 1 : 0;   /* P1035: classify の期待値選択用(wponly では等式上常に1) */
     int r = rl_send_write_cmd(n);
+    if (r != -1) s_rl_last_io_frame[s_rl_us_mx & 3u] = g_mx68k_frame_num;   /* P1092: 表示用 */
     if (is_nm && r != -1) {
         /* P1053: 装置へ書込みコマンドを送った(送信途中失敗 -2/-3 を含む)時点でだけ連続検知のキーと回数を更新する */
         if (nm_time_reset) s_nm_loop_time_reset++;
@@ -3341,6 +3402,7 @@ static void rl_wr_send_data(void)
     s_rl_wr_p2buf[0] = FU_P2_DATA_START;
     memcpy(s_rl_wr_p2buf + 1, s_rl_wrcollect_buf, n);
     s_rl_wr_data_sent = 1;   /* 送信直前に立てる。戻り値に関わらず再送しない */
+    s_rl_wr_data_sent_f = g_mx68k_frame_num;   /* P1099 */
     int64_t t0 = rl_now_us();
     int r = mx68k_floppyu_usb_port2_write(s_rl_wr_p2buf, n + 1u, FU_P2_WRITE_TIMEOUT_MS);
     int64_t us = rl_now_us() - t0;
@@ -3851,6 +3913,7 @@ static void rl_fmt1_try_send(void)
     else
 #endif
     r = rl_send_write_cmd(n);   /* B0 <n> B1 <n>>8> 83 4D 83 <HD/US> 83 N 83 SC 83 GPL 83 D(16B) */
+    if (r != -1) s_rl_last_io_frame[s_rl_us_mx & 3u] = g_mx68k_frame_num;   /* P1092: 表示用 */
     if (s_rl_fmt1_lines < FU_AR_LOG_LIMIT) {
         s_rl_fmt1_lines++;
         debug_log(P1064_TAG " send f=%d ret=%d n=%u sends_before=%u spent=%d inflight=%d h=%u spent_mask=0x%02x\n",
@@ -4349,6 +4412,7 @@ static void rl_nmf_try_send(void)
     else
 #endif
     r = rl_send_write_cmd(n);   /* B0 <n> B1 <n>>8> 83 4D 83 <HD/US> 83 N 83 SC 83 GPL 83 D(16B) */
+    if (r != -1) s_rl_last_io_frame[s_rl_us_mx & 3u] = g_mx68k_frame_num;   /* P1092: 表示用 */
     if (s_nmf_lines < FU_AR_LOG_LIMIT) {
         s_nmf_lines++;
         debug_log(P1067_TAG " sent f=%d ret=%d n=%u unit=%u C=%u H=%u k=%u run_pos_after=%u sends=%u inflight=%d\n",
@@ -4770,6 +4834,7 @@ static int rl_wr_result_fetch(const char* via, int require_msr)
     }
     s_rl_wr_results++;
     s_rl_wr_result_t_us = (s_rl_wr_c_seen == 0u) ? now : 0;
+    s_rl_wr_result_f = g_mx68k_frame_num;   /* P1099: 分岐の結果に関わらず記録(診断用) */
     rl_wr_log_result(via, res, outcome, why, msr_post, msr_post_ret, now, nmerr);
     /* P1087(C'-E): 本物の書込みエラーをゲストへ返す場合も、合成エラーと同じ排出抑止窓を起点させる */
     if (is_nm_err) rl_se_note(res[1]);
@@ -4824,6 +4889,8 @@ static void rl_wr_ev_add(uint8_t b)
  * P1032: wponly モードでは rl_wr_try_send() が送信前検査を行い、不成立なら同じ NW を合成する */
 static void rl_collect_done(void)
 {
+    s_p1100_fn = g_mx68k_frame_num;   /* P1100: 最後の1バイトを受けた時点(FORMAT 分岐より前で記録) */
+    s_p1100_vln = VLINE;
     /* P1063: FORMAT の ID 表は WRITE DATA 用の経路(rl_wr_try_send 等)へ一切入れない */
     if (s_rl_wr_is_format) {
         s_rl_wr_is_format = 0;
@@ -4874,6 +4941,8 @@ static void rl_collect_byte(uint8_t data)
         s_rl_wrcollect_mtc0 = DMA[0].MTC;
         s_rl_wrcollect_ocr0 = DMA[0].OCR;
         s_rl_wrcollect_csr0 = DMA[0].CSR;
+        s_p1100_f1 = g_mx68k_frame_num;   /* P1100 */
+        s_p1100_vl1 = VLINE;
     }
     if (s_rl_wrcollect_pos < s_rl_wrcollect_n) s_rl_wrcollect_buf[s_rl_wrcollect_pos++] = data;
     if (s_rl_wrcollect_pos >= s_rl_wrcollect_n) rl_collect_done();
@@ -5704,6 +5773,7 @@ static void rl_on_new_command(uint8_t data)
     if (s_rl_state == RL_WR_COLLECT) {
         /* P1031: dryrun は装置へ何も送っていないので物理的な後始末は不要 */
         s_rl_wrcollect_aborted++;
+        s_p1100_active = 0;   /* P1100: 中断経路でもリセットし、n_total の汚染を防ぐ */
         if (s_rl_wrcollect_lines < FU_LOG_LIMIT) {
             s_rl_wrcollect_lines++;
             debug_log(P1031_TAG " aborted f=%d new_cmd=0x%02x pos=%u n=%u aborted=%u/%u\n",
@@ -6134,6 +6204,9 @@ static void rl_log_sum(void)
         rl_nm_attr_log_sum();   /* P1055 */
     }
     if (s_rl_write_mode == WRM_NORMAL || s_fu_wc_dirty) rl_fast_log_sum("periodic");   /* P1089 */
+    if (s_rl_write_mode == WRM_NORMAL || s_fu_wc_dirty)                                 /* P1100: P1089 sum と同じ条件 */
+        debug_log(P1100_TAG " sum f=%u n_total=%u zero_calls_total=%llu active=%d\n",
+                  (unsigned)g_mx68k_frame_num, (unsigned)s_p1100_n_total, s_p1100_zero_total, s_p1100_active);
     if (s_rl_write_mode == WRM_NORMAL || s_nmf_seen > 0u) rl_nmf_log_sum("periodic");   /* P1067 */
     debug_log(P1028_DEFER_TAG " sum f=%u c_seq=%u cmd_start=%u withdrawn=%u deferred_at_c=%u merged=%u"
               " reraise_result=%u reraise_seek=%u reraise_nonrelay=%u reraise_tick=%u deferred_now=%d live_now=%d irq1_now=%d\n",
@@ -6294,6 +6367,7 @@ static void rl_install_reset(void)
     /* P1037: 武装中のリセットは永久停止(ゲストの FAT キャッシュの前提が変わるため。再武装は MX 再起動のみ)。
      * モードを再解析する前(武装中ならモードは armed のまま)に判定する */
     if (s_rl_ar_armed) rl_ar_disarm("install_reset");
+    for (int pd = 0; pd < 4; pd++) s_floppyu_present[pd] = 0;   /* P1095: install/hard reset時は未確認へ戻す */
     /* P1054: 有効判定は通信層の1箇所に集約(getenv の二重実装をしない)。ハードリセットでの遅延起動は install より前 */
     s_rl_usb_on = mx68k_floppyu_usb_is_enabled();
     /* P1054: 書込みモードは 環境変数 > 設定。環境変数が設定されていれば従来どおりその値で解析し、設定は無視する。
@@ -6388,6 +6462,7 @@ static void rl_install_reset(void)
     } else if (s_rl_state == RL_WR_COLLECT) {
         /* 装置へは未送信なのでログのみ(ラッチしない) */
         s_rl_wrcollect_aborted++;
+        s_p1100_active = 0;   /* P1100: 中断経路でもリセットし、n_total の汚染を防ぐ */
         if (s_rl_wrcollect_lines < FU_LOG_LIMIT) {
             s_rl_wrcollect_lines++;
             debug_log(P1031_TAG " aborted f=%d by=install_reset pos=%u n=%u aborted=%u/%u\n",
@@ -6755,6 +6830,24 @@ static uint8_t p955_route_read(uint32_t adr) {
         uint8_t dev_part = rl_e5_read(&src);
         rl_nm_attr_on_e5_read(dev_part, src);    /* P1055: 判別保留の走査/保留外の変化検出(normal のみ、戻り値は不変) */
         e5p_on_read(core_part, dev_part, src);   /* P1054: 戻り値確定後に読むだけ */
+        /* P1095(D-127): present表示用。P1055のrl_nm_attr_on_e5_readと同じeligible条件
+         * (単一割当てユニット・USB新鮮読出しのみ)を満たす場合だけ、実際に読んだbit7を反映する。
+         * Core FDC_Read case5(FDD_IsReady)と同じ意味(bit7=0x80=媒体あり)。既存の安全柵・
+         * s_nm_*状態には一切触れない(読み取るだけ) */
+        {
+            uint8_t key = s_p955_dev_ctrl & 0x0Fu;
+            uint8_t pa = rl_nm_assigned_keys();
+            if (e5p_single_bit(key) && (key & pa) != 0u && src == E5P_SRC_USB) {
+                int pu = rl_nm_key_unit(key);
+                int mxd = fu_status_dev_to_mx((uint8_t)pu);
+                int newval = (dev_part & 0x80u) ? 1 : 0;
+                if (s_floppyu_present[mxd] != newval) {
+                    debug_log(P1095_TAG " present_change f=%d mxd=%d dev_part=0x%02x new=%d e7_sent=0x%02x\n",
+                              g_mx68k_frame_num, mxd, (unsigned)dev_part, newval, (unsigned)s_rl_e7_sent);
+                }
+                s_floppyu_present[mxd] = newval;
+            }
+        }
         return (uint8_t)(core_part | dev_part);
     }
     default:
@@ -6833,6 +6926,32 @@ void mx68k_floppyu_fdcpt_observe_dma0_post(void)
     s_p951_dma0_exec_count++;
     if ((IOC_IntStat & 0x80u) && DMA[0].MTC != 0u) {
         s_p951_irq_before_drain_count++;   /* 割込み済みなのに MTC 未消化 = R1 懸念の実例 */
+    }
+    /* P1100: 収集中の DMA_Exec(0) 1回あたりの MTC 減少量を数える(読取りのみ) */
+    if (s_p1100_active) {
+        s_p1100_calls++;
+        uint16_t mtc_now = DMA[0].MTC;
+        uint16_t delta = (uint16_t)(s_p1100_last_mtc - mtc_now);
+        if (delta == 0) s_p1100_calls_zero++; else s_p1100_calls_moved++;
+        if (delta > s_p1100_max_delta) s_p1100_max_delta = delta;
+        s_p1100_last_mtc = mtc_now;
+        if (s_rl_state != RL_WR_COLLECT) {
+            /* 収集完了後の最初の呼出し(最後の1バイトの差分を含めるため、ここで集計行を出す) */
+            s_p1100_n_total++;
+            s_p1100_zero_total += (unsigned long long)s_p1100_calls_zero;
+            if (s_p1100_lines < 32) {
+                s_p1100_lines++;
+                int frames = s_p1100_fn - s_p1100_f0;
+                int lines_moved = s_p1100_vln - s_p1100_vl0;   /* フレーム境界を跨ぐと負値になり得る、解釈時に注意 */
+                debug_log(P1100_TAG " coll f0=%d vl0=%d f1=%d vl1=%d fn=%d vln=%d frames=%d lines=%d "
+                          "calls=%d moved=%d zero=%d max_delta=%u ccr0=0x%02x csr0=0x%02x mtc0=%u fmt=%d\n",
+                          s_p1100_f0, s_p1100_vl0, s_p1100_f1, s_p1100_vl1, s_p1100_fn, s_p1100_vln,
+                          frames, lines_moved, s_p1100_calls, s_p1100_calls_moved, s_p1100_calls_zero,
+                          (unsigned)s_p1100_max_delta, (unsigned)s_p1100_ccr0, (unsigned)s_p1100_csr0,
+                          (unsigned)s_p1100_mtc0, s_p1100_is_fmt);
+            }
+            s_p1100_active = 0;
+        }
     }
 }
 
@@ -7057,6 +7176,35 @@ void mx68k_floppyu_get_write_status(int32_t* mode, int32_t* latched, int32_t* en
     if (mode)         *mode = m;
     if (latched)      *latched = (m != 0 && la) ? 1 : 0;
     if (env_override) *env_override = (en && ms == RL_MSRC_ENV) ? 1 : 0;
+}
+
+/* P1092(D-127): ステータスバーのFD表示用(drive は MX 側ドライブ番号 0-3)。表示専用で送信判断には使わない */
+int mx68k_floppyu_status_assigned(int drive)
+{
+    if (drive < 0 || drive > 3) return 0;
+    int en = __atomic_load_n(&s_p955_enabled, __ATOMIC_RELAXED);
+    uint8_t mask = __atomic_load_n(&s_p955_mask, __ATOMIC_RELAXED);
+    return (en && ((mask >> drive) & 1u)) ? 1 : 0;
+}
+
+int mx68k_floppyu_status_present(int drive)
+{
+    if (!mx68k_floppyu_status_assigned(drive)) return 0;
+    return __atomic_load_n(&s_floppyu_present[drive], __ATOMIC_RELAXED) ? 1 : 0;
+}
+
+int mx68k_floppyu_status_active(int drive)
+{
+    if (drive < 0 || drive > 3) return 0;
+    if (!mx68k_floppyu_status_assigned(drive)) return 0;   /* P1095: presentではなくassignedにのみ依存 */
+    int last = __atomic_load_n(&s_rl_last_io_frame[drive], __ATOMIC_RELAXED);
+    /* P1097: 12→90フレームへ拡大。EmulatorEngine(1Hz=約56-60フレーム周期)・
+     * DebuggerView/DisassemblyMonitorView(0.5秒=約28-30フレーム周期)いずれの
+     * ポーリング周期より十分大きい窓にすることで、短時間READバースト(送信時刻を
+     * last_io_frameに記録、完了は見ない)が次回ポーリングまでに取りこぼされない
+     * ようにする。非消費型(値を変更しない)なので複数の読み手が同時に読んでも
+     * 互いに干渉しない */
+    return (g_mx68k_frame_num - last) < 90 ? 1 : 0;
 }
 
 void mx68k_floppyu_fdcpt_tick_frame(void)

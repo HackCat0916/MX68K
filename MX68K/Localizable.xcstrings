@@ -2241,6 +2241,26 @@
         }
       }
     },
+    "Enable Debug Log": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デバッグログを有効にする"
+          }
+        }
+      }
+    },
+    "⚠ Debug logging increases log output and can affect audio timing (e.g. internal MIDI). Leave this off unless troubleshooting.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ デバッグログを有効にするとログ出力が増え、内蔵MIDI等の音声タイミングに影響することがあります。調査目的以外ではオフのままにしてください。"
+          }
+        }
+      }
+    },
     "Power": {
       "localizations": {
         "ja": {

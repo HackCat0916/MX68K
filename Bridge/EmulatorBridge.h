@@ -323,6 +323,14 @@ int  mx68k_fdd_accessing(int drive);
  * FDD_EjectFD)も反映される。FDD_IsReady() と異なり挿入直後の SetDelay 猶予
  * 期間が無いため、1 Hz のステータスポーリングからサンプルしても安全。 */
 int  mx68k_fdd_media_present(int drive);
+/* P1092 (D-127): ふろっぴU君割当てドライブのステータスバー表示用(drive は MX 側ドライブ番号 0-3、表示専用)。
+ * 実装は Bridge/floppyu_fdc_passthrough_probe.c。Core の仮想マウント状態とは別概念のため専用関数にする。
+ * assigned: 振り分け器有効かつ割当て範囲内なら 1 /
+ * present: ゲストの排出指示(即時)・送信前 SDS・約1秒おきの定期 SDS で観測した ST3 の RY(初期値 0=未挿入) /
+ * active: present かつ直近の中継送信から12フレーム以内 */
+int  mx68k_floppyu_status_assigned(int drive);
+int  mx68k_floppyu_status_present(int drive);
+int  mx68k_floppyu_status_active(int drive);
 bool mx68k_fdd_is_active(int drive);
 const char* mx68k_fdd_get_path(int drive);
 /* P557: FD アクセス高速化(XM6 の Config::floppy_speed「フロッピーディスク高速化」
@@ -797,6 +805,11 @@ typedef struct {
      * 実際に機能するようになり、CPUMonitorView が表示先になった。 */
     bool     fdd2_active;
     bool     fdd3_active;
+    /* P1092 (D-127): ふろっぴU君割当てドライブの表示用(mx68k_floppyu_status_* 由来)。
+     * assignedN が真のドライブだけ StatusBarView が presentN/activeN を使う(既存フィールドは不変)。 */
+    bool     floppyu_assigned0; bool floppyu_assigned1; bool floppyu_assigned2; bool floppyu_assigned3;
+    bool     floppyu_present0;  bool floppyu_present1;  bool floppyu_present2;  bool floppyu_present3;
+    bool     floppyu_active0;   bool floppyu_active1;   bool floppyu_active2;   bool floppyu_active3;
     /* P455: SASI 論理 unit 0..7 の装着マスク(bit n = unit n が装着)。
      * ステータスバーの HDD ランプは実機/XM6 同様 1 個のままで、この生マスクは
      * 表示に使わない — 将来の per-drive UI・モニタパネル用の生値。
