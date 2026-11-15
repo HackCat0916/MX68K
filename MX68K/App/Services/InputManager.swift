@@ -46,11 +46,16 @@ enum GamepadButtonProfile: String, CaseIterable, Identifiable {
 /// 表示名の「L1/R1/L2/R2」はメーカー中立な一般的呼称であり、`GCExtendedGamepad` の
 /// `leftShoulder`/`rightShoulder`/`leftTrigger`/`rightTrigger` に対応する。
 /// A/B/X/Y 共々ラベル文字のため翻訳対象外(Localizable.xcstrings では扱わない)。
+/// P1103: `menu`(「+」)/`options`(「−」)は Switch Pro 等の刻印に合わせた表示名で、
+/// `GCExtendedGamepad.buttonMenu`/`buttonOptions` に対応する(対応関係は hands-on で確認)。
+/// `unassigned` は「割当なし」(常に未押下)。★ケース名を `none` にしないこと —
+/// Optional の `.none` と衝突して誤判定の原因になる。
 enum GamepadPhysicalButton: String, CaseIterable, Identifiable, Codable {
-    case a, b, x, y, leftShoulder, rightShoulder, leftTrigger, rightTrigger
+    case a, b, x, y, leftShoulder, rightShoulder, leftTrigger, rightTrigger, menu, options, unassigned
 
     var id: String { rawValue }
 
+    /// `unassigned` の表示はリマップ画面側でローカライズ文字列("Unassigned")を使う。
     var displayName: String {
         switch self {
         case .a: return "A"
@@ -61,6 +66,9 @@ enum GamepadPhysicalButton: String, CaseIterable, Identifiable, Codable {
         case .rightShoulder: return "R1"
         case .leftTrigger:   return "L2"
         case .rightTrigger:  return "R2"
+        case .menu:          return "+ (Menu)"
+        case .options:       return "− (Options)"
+        case .unassigned:    return "—"
         }
     }
 
@@ -74,6 +82,10 @@ enum GamepadPhysicalButton: String, CaseIterable, Identifiable, Codable {
         case .rightShoulder: return pad.rightShoulder.isPressed
         case .leftTrigger:   return pad.leftTrigger.isPressed
         case .rightTrigger:  return pad.rightTrigger.isPressed
+        case .menu:          return pad.buttonMenu.isPressed
+        // buttonOptions は機種によって存在しない(nil)ため、その場合は未押下扱い。
+        case .options:       return pad.buttonOptions?.isPressed ?? false
+        case .unassigned:    return false
         }
     }
 }
@@ -88,6 +100,9 @@ enum GamepadFunction: String, CaseIterable, Identifiable {
     case z, y6, x6, mode, c, start
     // magicalPad4Button 追加バンク(bank1)
     case l4, r4, b4
+    // P1103: standard2Button 専用。bank0 の方向ビットを強制する
+    // (RUN/START = 左右同時、SELECT = 上下同時。XEiJ Normal2ButtonPad 準拠)。
+    case run, select
 
     var id: String { rawValue }
 
@@ -109,6 +124,8 @@ enum GamepadFunction: String, CaseIterable, Identifiable {
         case .l4:    return "L"
         case .r4:    return "R"
         case .b4:    return "B"
+        case .run:    return "RUN/START"
+        case .select: return "SELECT"
         }
     }
 
@@ -120,6 +137,8 @@ enum GamepadFunction: String, CaseIterable, Identifiable {
     var bank1Mask: UInt8? {
         switch self {
         case .trig1, .trig2: return nil
+        // P1103: RUN/SELECT は bank0 の方向ビット側のため nil(入力モニタの bank1 表示から除外)。
+        case .run, .select:  return nil
         case .z:     return 0x01
         case .y6:    return 0x02
         case .x6:    return 0x04
@@ -145,8 +164,10 @@ enum GamepadFunction: String, CaseIterable, Identifiable {
     /// 機能の集合は無変更で、GamepadRemapView 側の表示グルーピングにのみ使う。
     static func otherRows(for profile: GamepadButtonProfile) -> [GamepadFunction] {
         switch profile {
-        case .cpsfMD6Button: return [.mode, .start]
-        default:             return []
+        case .cpsfMD6Button:   return [.mode, .start]
+        // P1103: ノーマル 2 ボタンパッドの RUN/START・SELECT も別枠 Section に出す。
+        case .standard2Button: return [.run, .select]
+        default:               return []
         }
     }
 
@@ -156,8 +177,10 @@ enum GamepadFunction: String, CaseIterable, Identifiable {
     /// 本サイクルでは解決できない実機再現性の問題)。
     static func rows(for profile: GamepadButtonProfile) -> [GamepadFunction] {
         switch profile {
-        case .standard2Button:   return [.trig1, .trig2]
-        case .cpsfMD6Button:     return [.trig1, .trig2, .z, .y6, .x6, .mode, .c, .start]
+        // P1103: RUN/SELECT は standard2Button 限定(XEiJ でも Normal2ButtonPad のみ。
+        // 多ボタンパッドの bank0 方向ビットを強制すると実機に無い入力になる)。
+        case .standard2Button:   return [.trig1, .trig2, .run, .select]
+        case .cpsfMD6Button:    return [.trig1, .trig2, .z, .y6, .x6, .mode, .c, .start]
         case .magicalPad4Button: return [.trig1, .trig2, .l4, .r4, .b4]
         }
     }
@@ -177,6 +200,9 @@ enum GamepadFunction: String, CaseIterable, Identifiable {
         case .l4:    return .leftShoulder
         case .r4:    return .rightShoulder
         case .b4:    return .leftTrigger
+        // P1103: ユーザー指定の既定(XEiJ の既定 START/BACK とも一致)。
+        case .run:    return .menu
+        case .select: return .options
         }
     }
 }
@@ -1008,6 +1034,10 @@ class InputManager: ObservableObject {
         let l4Button    = resolvedButton(port: port, function: .l4)
         let r4Button    = resolvedButton(port: port, function: .r4)
         let b4Button    = resolvedButton(port: port, function: .b4)
+        // P1103: RUN/START・SELECT(bank0 方向ビット強制)は standard2Button 限定。
+        // 他プロファイルでは .unassigned(常に未押下)にして合成に一切影響させない。
+        let runButton    = profile == .standard2Button ? resolvedButton(port: port, function: .run)    : .unassigned
+        let selectButton = profile == .standard2Button ? resolvedButton(port: port, function: .select) : .unassigned
         // P853: 連射設定もボタン割当と同じく登録時点で解決し、不変値としてキャプチャする
         // (クロージャ内・composeGamepadByte 内から gamepadAutoFireOverrides を参照しない)。
         // 設定変更時は setGamepadAutoFire(_:function:port:) がハンドラを再登録する。
@@ -1019,7 +1049,8 @@ class InputManager: ObservableObject {
             // (連射 Timer の tick からも同じロジックで再計算するため)。
             let byte = self.composeGamepadByte(gamepad: gamepad, port: port,
                                                trig1Button: trig1Button, trig2Button: trig2Button,
-                                               trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire)
+                                               trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire,
+                                               runButton: runButton, selectButton: selectButton)
             // GamePad_SetState(呼出先)はアトミック実装済み → メインスレッドへの
             // ディスパッチ不要。valueChangedHandler は任意スレッドで呼ばれてよい。
             // P499: 送出先はハンドラ登録時にキャプチャした不変の port(0=JOY1 / 1=JOY2)。
@@ -1041,6 +1072,7 @@ class InputManager: ObservableObject {
                     self?.updateAutoFireTimers(port: port, pad: gamepad,
                                                trig1Button: trig1Button, trig2Button: trig2Button,
                                                trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire,
+                                               runButton: runButton, selectButton: selectButton,
                                                generation: generation)
                 }
             }
@@ -1103,7 +1135,9 @@ class InputManager: ObservableObject {
                                     trig1Button: GamepadPhysicalButton,
                                     trig2Button: GamepadPhysicalButton,
                                     trig1AutoFire: Bool,
-                                    trig2AutoFire: Bool) -> UInt8 {
+                                    trig2AutoFire: Bool,
+                                    runButton: GamepadPhysicalButton,
+                                    selectButton: GamepadPhysicalButton) -> UInt8 {
         // 負論理: idle=0xFF を起点に、押下されたビットをクリアする。
         var byte: UInt8 = 0xFF
         let dz: Float = 0.5   // 左スティックのデッドゾーン閾値
@@ -1126,6 +1160,11 @@ class InputManager: ObservableObject {
         }
         if trig1 { byte &= ~UInt8(0x40) }   // bit6 = TRIG1
         if trig2 { byte &= ~UInt8(0x20) }   // bit5 = TRIG2
+        // P1103: ノーマル 2 ボタンパッドの RUN/START・SELECT。方向由来ビットと AND 合成し、
+        // 押下中は該当 2 ビットを強制的に押下(0)にする(XEiJ Normal2ButtonPad.readByte 準拠)。
+        // standard2Button 以外では呼出元が .unassigned を渡すため常に無効。
+        if runButton.isPressed(gamepad)    { byte &= ~UInt8(0x0C) }   // RUN/START = 左右同時
+        if selectButton.isPressed(gamepad) { byte &= ~UInt8(0x03) }   // SELECT = 上下同時
         return byte
     }
 
@@ -1140,6 +1179,8 @@ class InputManager: ObservableObject {
                                       trig2Button: GamepadPhysicalButton,
                                       trig1AutoFire: Bool,
                                       trig2AutoFire: Bool,
+                                      runButton: GamepadPhysicalButton,
+                                      selectButton: GamepadPhysicalButton,
                                       generation: Int) {
         guard gamepadHandlerGeneration[port] == generation else { return }
         guard gamepadEnabled else {
@@ -1156,7 +1197,8 @@ class InputManager: ObservableObject {
                 guard autoFireTimers[key] == nil else { continue }   // 二重生成しない
                 startAutoFireTimer(key: key, port: port, pad: pad,
                                    trig1Button: trig1Button, trig2Button: trig2Button,
-                                   trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire)
+                                   trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire,
+                                   runButton: runButton, selectButton: selectButton)
             } else if autoFireTimers[key] != nil {
                 stopAutoFireTimer(key)
             }
@@ -1174,7 +1216,9 @@ class InputManager: ObservableObject {
                                     trig1Button: GamepadPhysicalButton,
                                     trig2Button: GamepadPhysicalButton,
                                     trig1AutoFire: Bool,
-                                    trig2AutoFire: Bool) {
+                                    trig2AutoFire: Bool,
+                                    runButton: GamepadPhysicalButton,
+                                    selectButton: GamepadPhysicalButton) {
         let timer = Timer(timeInterval: Self.autoFirePhaseInterval, repeats: true) { [weak self] _ in
             // Timer はメインの RunLoop で発火する(= メインスレッド)。
             guard let self = self, self.gamepadEnabled else { return }
@@ -1183,7 +1227,8 @@ class InputManager: ObservableObject {
             self.toggleAutoFirePhase(key)
             let byte = self.composeGamepadByte(gamepad: pad, port: port,
                                                trig1Button: trig1Button, trig2Button: trig2Button,
-                                               trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire)
+                                               trig1AutoFire: trig1AutoFire, trig2AutoFire: trig2AutoFire,
+                                               runButton: runButton, selectButton: selectButton)
             mx68k_joy_set(port, byte)
             // 入力モニタ表示(joyState)も実際の送出ビットと同期させる(既にメインスレッド)。
             self.joyState[Int(port)] = byte

@@ -13,6 +13,9 @@
 //          「アナログスティック風」は**見た目とドラッグ操作の体験のみ**を指す。
 //          ノブのオフセットは不感帯(P963 以降は絶対距離 `activationRadius` +
 //          角度しきい値 `sectorThreshold` の 2 段構成)で 4 方向の量子化ビットへ落とす。
+//  P1103: ノーマル 2 ボタンパッドの SELECT(上下同時)/ START(= RUN、左右同時)ボタンを
+//        追加。方向ビットはスティックと SELECT/START の発生源別状態の OR から再計算する
+//        (`TouchJoystickInput.setStickDirection` / `setSystemButton`)。
 //
 //  ★規範(normative reference)は **MX68K 自身の macOS 実装**
 //    `MX68K/App/Services/InputManager.swift:791-810`(負論理ビット合成)である。
@@ -187,7 +190,58 @@ final class TouchJoystickInput {
     /// 現在ゲストへ送出済みの bank0 バイト。
     private var virtualPadState: UInt8 = TouchJoystickInput.idle
 
+    // MARK: - 方向ビットの発生源別状態(P1103)
+    //
+    // 方向 4 ビットの書き手はスティック(AnalogStickPad)と SELECT/START ボタンの 2 系統ある。
+    // 両者が `setVirtualPadBit` で同じビットを直接書くと、片方の解放がもう片方の押下中の
+    // ビットまで消す(所有権競合)。そのため発生源ごとの状態を正論理で分けて持ち、
+    // 方向ビットは常にその OR から再計算して送出する(XEiJ Normal2ButtonPad.readByte の
+    // 「出力段で毎回合成」と同じ考え方)。
+    // ★不変条件: 方向ビットへの書込みは `setStickDirection` / `setSystemButton` 経由に限る。
+    //   方向ビットに対して `setVirtualPadBit` を直接呼ばないこと(TRIG ビット専用)。
+
+    /// スティック由来の方向ビット(正論理: 1 = 押下)。
+    private var stickDirBits: UInt8 = 0
+    /// START(= RUN、左右同時)押下中か。
+    private var runPressed = false
+    /// SELECT(上下同時)押下中か。
+    private var selectPressed = false
+
+    /// RUN/START が強制する方向ビット(左右、0x0C)。
+    private static let runMask: UInt8 = TouchJoystickInput.bitLeft | TouchJoystickInput.bitRight
+    /// SELECT が強制する方向ビット(上下、0x03)。
+    private static let selectMask: UInt8 = TouchJoystickInput.bitUp | TouchJoystickInput.bitDown
+
+    /// スティック専用の方向ビット更新。
+    func setStickDirection(_ bit: UInt8, pressed: Bool) {
+        stickDirBits = pressed ? (stickDirBits | bit) : (stickDirBits & ~bit)
+        recomputeDirections()
+    }
+
+    /// 仮想 SELECT/START ボタン。
+    enum SystemButton { case run, select }
+
+    func setSystemButton(_ button: SystemButton, pressed: Bool) {
+        switch button {
+        case .run:    runPressed = pressed
+        case .select: selectPressed = pressed
+        }
+        recomputeDirections()
+    }
+
+    /// 発生源の OR から方向 4 ビットを再計算する。差分送出は `setVirtualPadBit` が担う
+    /// (値が変わらないビットは送出されない)。
+    private func recomputeDirections() {
+        let forced = (runPressed ? Self.runMask : 0) | (selectPressed ? Self.selectMask : 0)
+        let held = stickDirBits | forced
+        for bit in [Self.bitUp, Self.bitDown, Self.bitLeft, Self.bitRight] {
+            setVirtualPadBit(bit, pressed: (held & bit) != 0)
+        }
+    }
+
     /// 1 ビット分の押下/解放を反映し、変化したときだけゲストへ送出する。
+    ///
+    /// ★P1103: 方向ビットについては直接呼ばず `setStickDirection` / `setSystemButton` を使う。
     ///
     /// - Parameters:
     ///   - bit: 上の `bitUp` 〜 `bitTrig1` のいずれか(負論理でクリアされる側)。
@@ -296,6 +350,11 @@ final class TouchJoystickInput {
         //   `IOSKeyboardInput.releaseAll` と同じ流儀。
         let had = virtualPadState
         virtualPadState = Self.idle
+        // P1103: 発生源別の方向状態も同時にクリアする。残すと、解放後の最初の
+        // スティック操作で古い RUN/SELECT の強制が再送出される(押しっぱなしの新種)。
+        stickDirBits = 0
+        runPressed = false
+        selectPressed = false
         mx68k_joy_set(port, Self.idle)
         mx68k_log(String(format: "[Swift][iOS][P714-PADRELEASE] reason=%@ was=0x%02X port=%d",
                          reason, Int(had), Int(port)))
@@ -392,6 +451,57 @@ private struct TouchPadButton: View {
                 .lineLimit(1)
                 .padding(.horizontal, 4)
         }
+    }
+}
+
+// MARK: - SELECT / START ボタン(P1103)
+
+/// ノーマル 2 ボタンパッドの SELECT(上下同時)/ START(= RUN、左右同時)を 1 ボタンで出す
+/// カプセル型ボタン。意匠は MFC(姉妹プロジェクト)の `SystemButtonsView` を参考にした。
+/// `TouchPadButton` と同じく UIKit 直接追跡(P960/D-96)を使い、`Button`/`DragGesture` は使わない。
+/// 連射・A/B 入替・トリガーサイズ段階の対象外。
+private struct TouchSystemButton: View {
+    let kind: TouchJoystickInput.SystemButton
+    let label: String
+    let accessibilityText: String
+
+    /// 寸法(記号表: 幅 64pt × 高さ 26pt、高さ≒幅×0.4 は MFC の比率を借用)。
+    static let width: CGFloat = 64
+    static let height: CGFloat = 26
+
+    /// `TouchPadButton.isDown` と同じく、押下を 1 回だけ送るためのガード。
+    @State private var isDown = false
+
+    var body: some View {
+        let shape = TouchPadShape(Capsule())
+        return shape
+            .fill(isDown ? Color.accentColor : Color.black.opacity(0.55))
+            .overlay(shape.stroke(Color.white.opacity(0.7), lineWidth: 1.5))
+            .overlay(
+                Text(verbatim: label)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+            )
+            .frame(width: Self.width, height: Self.height)
+            .overlay(
+                TouchTrackingSurface(
+                    isCircular: false,
+                    onChanged: { _ in
+                        if !isDown {
+                            isDown = true
+                            TouchJoystickInput.shared.setSystemButton(kind, pressed: true)
+                        }
+                    },
+                    onEnded: {
+                        isDown = false
+                        TouchJoystickInput.shared.setSystemButton(kind, pressed: false)
+                    }
+                )
+            )
+            .accessibilityLabel(accessibilityText)
     }
 }
 
@@ -497,13 +607,15 @@ private struct AnalogStickPad: View {
                     withAnimation(.easeOut(duration: 0.12)) {
                         knobOffset = .zero
                     }
-                    // 4 方向すべてを解放。`setVirtualPadBit` は値が変化した分だけ
-                    // 実際に送出するため、既に OFF のビットへの重複指定は無害。
+                    // スティック由来の 4 方向すべてを解放。値が変化した分だけ実際に
+                    // 送出されるため、既に OFF のビットへの重複指定は無害。
+                    // P1103: setStickDirection 経由なので、押下中の SELECT/START が
+                    // 強制している方向ビットは消えない。
                     let input = TouchJoystickInput.shared
-                    input.setVirtualPadBit(TouchJoystickInput.bitUp, pressed: false)
-                    input.setVirtualPadBit(TouchJoystickInput.bitDown, pressed: false)
-                    input.setVirtualPadBit(TouchJoystickInput.bitLeft, pressed: false)
-                    input.setVirtualPadBit(TouchJoystickInput.bitRight, pressed: false)
+                    input.setStickDirection(TouchJoystickInput.bitUp, pressed: false)
+                    input.setStickDirection(TouchJoystickInput.bitDown, pressed: false)
+                    input.setStickDirection(TouchJoystickInput.bitLeft, pressed: false)
+                    input.setStickDirection(TouchJoystickInput.bitRight, pressed: false)
                 }
             )
         )
@@ -537,21 +649,22 @@ private struct AnalogStickPad: View {
     private func apply(_ offset: CGSize) {
         let dist = hypot(offset.width, offset.height)
         let input = TouchJoystickInput.shared
+        // P1103: 方向ビットは setStickDirection 経由(SELECT/START との発生源合成)。
         guard dist >= Self.activationRadius else {
-            input.setVirtualPadBit(TouchJoystickInput.bitLeft,  pressed: false)
-            input.setVirtualPadBit(TouchJoystickInput.bitRight, pressed: false)
-            input.setVirtualPadBit(TouchJoystickInput.bitUp,    pressed: false)
-            input.setVirtualPadBit(TouchJoystickInput.bitDown,  pressed: false)
+            input.setStickDirection(TouchJoystickInput.bitLeft,  pressed: false)
+            input.setStickDirection(TouchJoystickInput.bitRight, pressed: false)
+            input.setStickDirection(TouchJoystickInput.bitUp,    pressed: false)
+            input.setStickDirection(TouchJoystickInput.bitDown,  pressed: false)
             return
         }
         // dist >= activationRadius(10) > 0 が保証されているので 0 除算は起きない。
         let nx = offset.width / dist   // 正規化ベクトル、-1...1、正 = 右
         let ny = offset.height / dist  // 正規化ベクトル、-1...1、正 = 下(符号規約は上記コメント参照)
         let t = Self.sectorThreshold
-        input.setVirtualPadBit(TouchJoystickInput.bitLeft,  pressed: nx < -t)
-        input.setVirtualPadBit(TouchJoystickInput.bitRight, pressed: nx >  t)
-        input.setVirtualPadBit(TouchJoystickInput.bitUp,    pressed: ny < -t)
-        input.setVirtualPadBit(TouchJoystickInput.bitDown,  pressed: ny >  t)
+        input.setStickDirection(TouchJoystickInput.bitLeft,  pressed: nx < -t)
+        input.setStickDirection(TouchJoystickInput.bitRight, pressed: nx >  t)
+        input.setStickDirection(TouchJoystickInput.bitUp,    pressed: ny < -t)
+        input.setStickDirection(TouchJoystickInput.bitDown,  pressed: ny >  t)
     }
 }
 
@@ -647,12 +760,31 @@ struct TouchJoystickView: View {
     ///   `@AppStorage` 経由でそのまま再描画へ伝わる。
     private var trigButtonSize: CGFloat { Self.triggerSize(forLevel: triggerButtonSizeLevel) }
 
+    /// P1103 — SELECT / START の間隔(記号表)。
+    private static let systemButtonSpacing: CGFloat = 12
+
     var body: some View {
-        HStack(alignment: .bottom) {
-            AnalogStickPad(baseDiameter: Self.stickBaseDiameter,
-                           knobDiameter: stickKnobDiameter)
-            Spacer(minLength: 0)
-            triggers
+        // P1103 — SELECT/START の配置を幅に応じて 2 案から自動選択する(MFC の意匠を参考:
+        // 広い画面は中央 1 行、狭い画面は上の別行)。
+        // ★幅ゲート `requiredWidth(forTriggerLevel:)` は変更しない —— 縦積み案の必要幅は
+        //   従来の 1 行(スティック + トリガー)と同じで、SELECT/START 行(64×2+12=140pt)は
+        //   それより狭いため、仮想パッドの表示/非表示判定は不変。
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .bottom) {
+                stick
+                Spacer(minLength: 16)
+                systemButtons
+                Spacer(minLength: 16)
+                triggers
+            }
+            VStack(spacing: 12) {
+                systemButtons
+                HStack(alignment: .bottom) {
+                    stick
+                    Spacer(minLength: 0)
+                    triggers
+                }
+            }
         }
         .padding(.horizontal, sideInset + 16)
         // 上下の帯(topBand / bottomBand)へ被らないための余白。
@@ -662,6 +794,19 @@ struct TouchJoystickView: View {
         //   (P714 計画 §変更内容 1、ユーザー指摘)。`.opacity()` は SwiftUI の
         //   ヒットテスト領域を変えないため、薄くしてもタップ領域は不変。
         .opacity(virtualPadOpacity)
+    }
+
+    private var stick: some View {
+        AnalogStickPad(baseDiameter: Self.stickBaseDiameter,
+                       knobDiameter: stickKnobDiameter)
+    }
+
+    /// P1103 — SELECT / START(左から SELECT、START の順。実機パッド・MFC と同じ並び)。
+    private var systemButtons: some View {
+        HStack(spacing: Self.systemButtonSpacing) {
+            TouchSystemButton(kind: .select, label: "SELECT", accessibilityText: "Select")
+            TouchSystemButton(kind: .run, label: "START", accessibilityText: "Start")
+        }
     }
 
     /// TRIG2 / TRIG1。実機のジョイスティックは A(TRIG1)が親指側に来るため、

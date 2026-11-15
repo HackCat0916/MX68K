@@ -4,7 +4,7 @@
 //
 //  P585 — ゲームパッドのボタン割当設定 UI。
 //  KeyRemapView(P511)と同型の構成(タイトル + 一覧 + Close)だが、ホスト側の物理
-//  ボタンは有限個(A/B/X/Y/L1/R1/L2/R2)しかないため「次の入力を 1 回だけ捕捉する」
+//  ボタンは有限個(A/B/X/Y/L1/R1/L2/R2/+/−、P1103 で +/− と「未割当」を追加)しかないため「次の入力を 1 回だけ捕捉する」
 //  方式ではなく各行を直接 Picker にしている(候補が一覧でき、誤操作が少ない)。
 //
 //  「A・B の入れ替え」は A / B(旧表記: Trigger 1 / Trigger 2)の Picker を選び直すことで
@@ -110,8 +110,10 @@ struct GamepadRemapView: View {
                         }
                     }
                 }
+                // P1103: 見出しはプロファイルごとに別リテラルで書く(文字列を動的に
+                // 組み立てると xcstrings の抽出が崩れるため)。
                 if !otherRows.isEmpty {
-                    Section(header: Text("Other (MODE / START)")) {
+                    Section(header: otherSectionHeader) {
                         ForEach(otherRows) { function in
                             pickerRow(function)
                         }
@@ -138,14 +140,29 @@ struct GamepadRemapView: View {
     private func pickerRow(_ function: GamepadFunction) -> some View {
         Picker(selection: binding(for: function)) {
             ForEach(GamepadPhysicalButton.allCases) { button in
-                Text(verbatim: button.displayName).tag(button)
+                // P1103: 「未割当」のみ語句なのでローカライズ、他はボタン刻印のため verbatim。
+                if button == .unassigned {
+                    Text("Unassigned").tag(button)
+                } else {
+                    Text(verbatim: button.displayName).tag(button)
+                }
             }
         } label: {
             Text(verbatim: function.displayName)
         }
     }
 
-    /// 行数依存の高さ(標準 2 ボタン = 2 行 / マジカルパッド = 5 行 / CPSF-MD = 8 行)。
+    /// 「その他」Section の見出し(P587 の CPSF-MD 用 / P1103 のノーマル 2 ボタン用)。
+    @ViewBuilder
+    private var otherSectionHeader: some View {
+        if currentProfile == .standard2Button {
+            Text("RUN/START · SELECT")
+        } else {
+            Text("Other (MODE / START)")
+        }
+    }
+
+    /// 行数依存の高さ(標準 2 ボタン = 4 行[P1103 で RUN/SELECT 追加] / マジカルパッド = 5 行 / CPSF-MD = 8 行)。
     /// P586: Section ヘッダの分を加算する。
     /// P587: 「その他」Section を加えた 3 段構成に合わせ、実際に表示される
     /// Section の本数(「基礎」は常時 + 追加/その他は該当時のみ)で加算する。
