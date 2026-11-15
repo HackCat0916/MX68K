@@ -9,8 +9,10 @@ import SwiftUI
 // P831: 内蔵 SC-55 も iOS で表示するようにした(iOS では性能警告文を追加表示)。
 // P844: macOS 限定なのは Mercury Unit と CoreMIDI デバイス「一覧」選択のみ。
 // 出力先 External MIDI の選択自体は iOS でも可能(検出された最初の destination へ送出)。
-// P846: iOS 版にも CoreMIDI デバイス一覧選択(Output/Input Device)を追加。macOS 限定は
-// Mercury Unit のみ(空一覧時の案内文だけは OS 別の文言に分岐)。
+// P846: iOS 版にも CoreMIDI デバイス一覧選択(Output/Input Device)を追加
+// (空一覧時の案内文だけは OS 別の文言に分岐)。
+// P1104: Mercury Unit も iOS 対応済み。これで本タブに macOS 限定の設定項目は無い
+// (OS 分岐は案内文の文言のみ)。
 struct AudioSettingsView: View {
     @EnvironmentObject var settingsViewModel: SettingsViewModel
     #if os(macOS)
@@ -111,19 +113,30 @@ struct AudioSettingsView: View {
                 // (いずれも CoreMIDI デバイス一覧に依存しない)。CoreMIDI デバイス一覧選択
                 // だけを `#if os(macOS)` に残す(内蔵 SC-55 は P831 で iOS 対応)。
                 // P844: 出力先 External MIDI の選択は iOS でも可能(一覧選択 UI のみ macOS 限定)。
-                // P846: 一覧選択 UI も iOS 対応済み。以下の `#if os(macOS)` は Mercury Unit のみ。
-                #if os(macOS)
+                // P846: 一覧選択 UI も iOS 対応済み。
+                // P1104: Mercury Unit も iOS 対応。トグルは両 OS 共通、案内文のみ OS 別
+                // (iOS には Sound Monitor・⌘R が無いため)。
                 Toggle("Mercury Unit (16-bit linear PCM)", isOn: $settingsViewModel.mercuryUnit)
                     .disabled(settingsViewModel.midiEnabled)
                 // P581: 日本語リテラル直書き(英語モードでも日本語が出ていた)を
                 // 「英語ソース + xcstrings の ja 訳」という他タブと同じ方式へ揃える。
+                #if os(macOS)
                 Text("⚠ Supports PCM 2ch + FM (YMF288) 6ch + SSG 3ch. FM and SSG can be inspected in the Sound Monitor. Takes effect after pressing Apply and then performing a hard reset (⌘R).")
                     .font(.subheadline).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                #else
+                Text("⚠ Supports PCM 2ch + FM (YMF288) 6ch + SSG 3ch. Takes effect after pressing Apply and then tapping Hard Reset.")
+                    .font(.subheadline).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                #endif
                 // P633: 実音出力が未検証である旨を正直に表示する(Docs/01 3-3 の
                 // 「実 PCM 音は未検証」「実 PCM 音・実 FM 音とも未検証」と同趣旨)。
                 Text("⚠ Wiring is complete, but neither real PCM nor real FM sound has been verified — no compatible software has been obtained yet.")
                     .font(.subheadline).foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                #if os(iOS)
+                Text("⚠ Adds YMF288 FM (6ch) + SSG (3ch) synthesis on top of the base ADPCM audio. On some iPad models it may increase the chance of audio stutter or dropouts — if so, disable it.")
+                    .font(.subheadline).foregroundColor(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 #endif
                 // P488: MIDI ボード(CZ-6BM1)。Mercury Unit と割込みレベル 4 を共有する

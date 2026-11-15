@@ -27,7 +27,7 @@
 //    スクリーンショット / 録画 / モニタパネル。
 //    (セーブステートは P725 でクイックセーブ/ロード方式として実装済み。
 //     音声出力は P757、Audio 設定タブは P761 で実装済み —— ただし
-//     Mercury Unit / MIDI ボード設定は iOS 非対応のまま。
+//     Mercury Unit は P1104 で、MIDI ボード設定は P830/P831 で、それぞれ iOS 対応済み。
 //     ターボ・ノーウェイト・FD アクセス高速化は P762 で実装済み。)
 //
 
@@ -846,7 +846,7 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
     /// だけを抜き出した小関数。★iOS 用に新しい既定値・新しい写像を発明しない。
     ///
     /// P712 — SASI / 内蔵SCSI / MO / CD の再送を追加した(下半分)。
-    /// Mercury / Windrv 系の setter は引き続き **呼ばない**
+    /// Windrv 系の setter は引き続き **呼ばない**
     /// (iOS 未対応、P706 §0-2 非ゴールのうち P712 でも扱わない残り)。
     /// P830 — MIDI ボード・出力先・内蔵 MT-32 の setter を追加した(CoreMIDI デバイス
     /// 選択は引き続き iOS 非対応)。P831 — 内蔵 SC-55 の設定値も写すようにした。
@@ -898,6 +898,9 @@ final class MX68KiOSViewModel: ObservableObject, RendererHost {
         mx68k_set_fpu_model(Int32(config.hardware.fpuModel ?? 68882))   // P898
         // P901: FPU ボード CZ-6BP1。設定値のみ push し、配線はハードリセットで確定する(68000系機種のみ)。
         mx68k_set_fpuboard_enabled(config.extensions.fpuBoard)
+        // P1104: Mercury Unit(MK-MU1 / $ECC000)の装着設定。macOS EmulatorViewModel.swift:705と同じ
+        // 位置・同じ呼出し。値はBridge側で「設定値」として保持され、配線はハードリセットで確定する。
+        mx68k_set_mercury_enabled(config.extensions.mercuryUnit)
         // P757 — 音声サンプルレート(macOS `EmulatorViewModel.pushConfig` と同一呼出し)。
         // Core 側チップ(ADPCM / OPM / Mercury)の初期化レートはここで渡した値が
         // mx68k_init / ハードリセットで確定する。これを呼ばないと Core は常に
