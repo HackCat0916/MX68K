@@ -750,6 +750,16 @@ bool mx68k_sram_eject_on_poweroff(void);
 // スレッド(= 同一の emulationLock 区間内)から行うこと。
 int mx68k_take_guest_poweroff_request(void);
 
+// ---- 電源スイッチ(POWSW = MFP GPIP2、P1105) ----
+// on=0 で電源スイッチOFF: GPIP2 を 1 にし、AER bit2=1 なら MFP 電源OFF割込み
+// (ベクタ $42)をゲストへ通知する。on=1 で ON へ戻す(AER bit2=0 なら割込み)。
+// 電源そのものは切らない —— ゲストが後処理のあと $E8E00F へ 0→F→F を書いた時点で
+// 上の P776 経路が電源断を通知する(XEiJ PowerControl.java pwcSetPower と同じモデル)。
+// メインスレッドから呼んでよい(要求値を書くだけで、遷移の反映と割込みの発火は
+// 次の mx68k_run_frame() 冒頭、エミュレーションスレッド上で行う)。
+// mx68k_init() / mx68k_reset_hard()(=ソフトリセットも)でスイッチは ON へ戻る。
+void mx68k_set_power_switch(int on);
+
 // ---- ステータス ----
 typedef struct {
     uint32_t pc;

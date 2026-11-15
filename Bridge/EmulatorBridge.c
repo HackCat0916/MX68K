@@ -41,6 +41,12 @@ void p509_fdc_hist_dump(void);      /* フレーム末尾から毎フレーム(�
 void p776_poweroff_state_reset(void);   /* 状態機械+フラグを巻き戻す(init / hard reset) */
 extern volatile int g_p776_poweroff_req;
 
+/* P1105: 電源スイッチ(POWSW = MFP GPIP2)の状態。本体は m68000_bridge.c 側
+ * (GPIP 読取りフックと同じ翻訳単位)にある。 */
+void p1105_powsw_reset(void);           /* スイッチを ON へ戻す(init / hard reset) */
+extern volatile int g_p1105_powsw_req_off;
+extern int g_p1105_powsw_off;
+
 #define P29_RTE_STUB_ADDR  0x0FFF00U  /* RTEスタブ配置アドレス（1MB RAM末端・IPLコピー範囲外） */
 
 /* P221b: Config.XVIMode は現在、設定されたクロックから導出される(下記の
@@ -1770,6 +1776,8 @@ int mx68k_init(void) {
      * mx68k_init() を通るため、ここで巻き戻さないと「一度ゲスト起点で
      * 電源を切ると 2 回目以降が効かない」(step が 3 のまま)になる。 */
     p776_poweroff_state_reset();
+    /* P1105: 電源スイッチを ON へ戻す(cold boot 時に OFF が残らないように)。 */
+    p1105_powsw_reset();
     TVRAM_Init();       /* P171: TextDrawPattern(テキストのビット展開表)を初期化する。移植時に
                          * 欠落していた -> TextDrawWork が 0 のまま -> テキスト層が空白。MPX は
                          * これをリセット手順内で呼んでいる(winx68k.cpp:293)。 */
@@ -2563,6 +2571,10 @@ void mx68k_reset_hard(void) {
     /* P776: ゲスト起点電源OFF検出の状態機械を巻き戻す(ハードリセットで
      * 再武装 —— 実機のリセットでも電源OFF シーケンスの途中状態は残らない)。 */
     p776_poweroff_state_reset();
+    /* P1105: 電源スイッチを ON へ戻す。OFF のままリセットすると IPLROM の
+     * 起動時 GPIP ポーリングが電源OFF要因と読み得るため必須(計画 D2 / R-2)。
+     * mx68k_reset_soft() も内部でここを通る。 */
+    p1105_powsw_reset();
     /* P509 (D-48): P46-FIX-B の FDC_SetForceReady(1) をここから削除した。
      * P46-FIX-B が当初意図していたポート $E94005(ドライブレディレジスタ)には
      * fdc.ready は一切効いておらず(fdc.c:465-469 は FDD_IsReady() のみを参照する)、
@@ -4075,6 +4087,27 @@ static void p1102_dma0_exec(int vl) {
 void mx68k_run_frame(void) {
     p918_test_reset_maybe_arm();
     if (consume_pending_ops()) return;
+
+    /* P1105: 電源スイッチの遷移を検出し、AER が許可する方向なら GPIP2 割込み
+     * (MFP_Int(13) = IERB bit2、VR=$40 ならベクタ $42)を上げる。
+     * XEiJ mfpPowerRise(0→1、AER bit2=1 で発火)/ mfpPowerFall(1→0、AER bit2=0
+     * で発火)と同じ条件。IER/IMR/ISR の判定は MFP_Int 内部に任せる。
+     * エミュレーションスレッド上(emulationLock 内)で行う。 */
+    if (g_p1105_powsw_req_off != g_p1105_powsw_off) {
+        int edge_ok;
+        g_p1105_powsw_off = g_p1105_powsw_req_off ? 1 : 0;
+        edge_ok = g_p1105_powsw_off ? ((MFP[MFP_AER] & 0x04) != 0)
+                                    : ((MFP[MFP_AER] & 0x04) == 0);
+        if (edge_ok) MFP_Int(13);
+        /* 遷移ごとに必ず 1 行出す(fired=0 の解釈を 1 通りに絞るため、判定元の生値を併記)。 */
+        debug_log("[P1105-POWSW] sw=%s aer=0x%02X ierb=0x%02X imrb=0x%02X isrb=0x%02X "
+                  "vr=0x%02X edge_ok=%d fired=%d f=%u\n",
+                  g_p1105_powsw_off ? "off" : "on",
+                  (unsigned)MFP[MFP_AER], (unsigned)MFP[MFP_IERB],
+                  (unsigned)MFP[MFP_IMRB], (unsigned)MFP[MFP_ISRB],
+                  (unsigned)MFP[MFP_VR], edge_ok, edge_ok,
+                  (unsigned)g_mx68k_frame_num);
+    }
 
     /* P443 (D-7): ゲスト側イジェクト後も g_fdd_path[] に古いパスが残る副次不具合の
      * 解消。Core が FDD_EjectFD() で StatBar_ParamFDD(drive, 0, ...) を呼ぶため
@@ -7165,6 +7198,13 @@ int mx68k_take_guest_poweroff_request(void) {
     int req = g_p776_poweroff_req;
     if (req) g_p776_poweroff_req = 0;
     return req;
+}
+
+/* P1105: 電源スイッチの設定(メインスレッドから呼ぶ)。要求値を書くだけで、
+ * 遷移の検出と割込みの発火は次の mx68k_run_frame() 冒頭で行う。
+ * g_p776_poweroff_req と同じ volatile int 1 語の受け渡し規約(方向は逆)。 */
+void mx68k_set_power_switch(int on) {
+    g_p1105_powsw_req_off = on ? 0 : 1;
 }
 
 /* ======================================================================

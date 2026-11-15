@@ -306,19 +306,19 @@ struct EmulatorCommands: Commands {
                 emulatorViewModel.showHardResetConfirm = true   // 確認は ToolbarView の alert
             }
             .keyboardShortcut("r", modifiers: .command)
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)(P1106: .switchOff 待機中も無効)
 
             Button("Reset (Soft)") {
                 emulatorViewModel.softReset()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)(P1106: .switchOff 待機中も無効)
 
             Button("Interrupt") {
                 emulatorViewModel.nmi()
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)(P1106: .switchOff 待機中も無効)
 
             Divider()
 
@@ -326,7 +326,7 @@ struct EmulatorCommands: Commands {
                 emulatorViewModel.togglePause()
             }
             .keyboardShortcut("p", modifiers: .command)
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)(P1106: .switchOff 待機中も無効)
 
             // P555 — ターボ(等倍 ⇔ 設定画面で選んだ目標倍率)のワンタッチ切替。
             // ⌘⇧T は既存ショートカット(⌘⌥T = テキスト面モニタ)と衝突しない。
@@ -337,7 +337,7 @@ struct EmulatorCommands: Commands {
             // P697: 録画中はターボ/ノーウェイトを禁止(壁時計基準の PTS が
             // 実行速度変動で崩れるため)。ショートカット経由の発火は
             // EmulatorViewModel.toggleTurbo() 側のガードが受け止める二重防御。
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.isRecording)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff || runState.isRecording)   // P204/S3・P1106: フェード中・.switchOff 待機中は無効
 
             Divider()
 
@@ -345,7 +345,7 @@ struct EmulatorCommands: Commands {
                 emulatorViewModel.takeScreenshot()
             }
             .keyboardShortcut("s", modifiers: .command)
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)(P1106: .switchOff 待機中も無効)
 
             // P697 — 動画録画(映像のみ)。ラベルは録画状態でトグルする。
             // ★観測対象は EmulatorRunState.shared のみ(EmulatorViewModel を観測すると
@@ -353,7 +353,7 @@ struct EmulatorCommands: Commands {
             Button(recordingMenuLabel) {
                 emulatorViewModel.toggleRecording()
             }
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff)   // P204/S3・P1106: フェード中・.switchOff 待機中は無効
 
             Divider()
 
@@ -362,13 +362,13 @@ struct EmulatorCommands: Commands {
                 emulatorViewModel.saveState()
             }
             .keyboardShortcut("s", modifiers: [.command, .option])
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)(P1106: .switchOff 待機中も無効)
 
             Button("Load State…") {
                 emulatorViewModel.loadState()
             }
             .keyboardShortcut("o", modifiers: [.command, .option])
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff)   // P204/S3: フェード中は reset 系を無効化(scheduled reset と shutdown の競合回避)(P1106: .switchOff 待機中も無効)
 
             // P737 — パネルを介さないクイックセーブ/ロード(iOS版 P725 の逆移植)。
             // ★観測対象は EmulatorRunState.shared のみ(D-10/D-49、isRecording と同型)。
@@ -376,13 +376,13 @@ struct EmulatorCommands: Commands {
                 emulatorViewModel.quickSaveState()
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.isStateOperationPending)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff || runState.isStateOperationPending)   // P204/S3・P1106: フェード中・.switchOff 待機中は無効
 
             Button("Quick Load State") {
                 emulatorViewModel.quickLoadState()
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
-            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.isStateOperationPending)
+            .disabled(!runState.isRunning || runState.powerState == .poweringOff || runState.powerState == .switchOff || runState.isStateOperationPending)   // P204/S3・P1106: フェード中・.switchOff 待機中は無効
 
             // P578 — 旧「新規FDイメージを作成…」は Tools メニュー(ToolsCommands)の
             // 「イメージ作成」へ移設した(FD/SASI/SCSI の 3 導線を 1 箇所へ集約)。

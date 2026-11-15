@@ -12,6 +12,7 @@ import Dispatch
 ///
 /// 終了処理の連鎖(すべての正常終了経路で共通):
 ///   signal/Cmd-Q
+///     -> applicationShouldTerminate                    (P1105: Cmd-Q 等は電源OFF通知+最大15秒待機、signal は即時)
 ///     -> applicationWillTerminate
 ///        -> mx68k_log_delegate_fire()                  (C ブリッジ経由で debug.log へ出力)
 ///        -> EmulatorViewModel.shared.stopEmulation()   (engine.stop -> オーディオ解体 -> mx68k_shutdown)
@@ -25,6 +26,25 @@ final class MX68KAppDelegate: NSObject, NSApplicationDelegate {
     /// キャンセルされる(Spec Inv §C)。
     private var sigtermSource: DispatchSourceSignal?
     private var sigintSource:  DispatchSourceSignal?
+
+    /// P1105 — true のとき applicationShouldTerminate は電源OFF待機をせず即終了する。
+    /// SIGTERM/SIGINT 経路で立てる(smoke_test.sh は SIGTERM 後 5 秒で kill -9 するため、
+    /// ここで最大 15 秒待つと P53 の終了マーカー/atexit サマリが失われる)。
+    private var skipQuitPowerSequence = false
+
+    /// P1105 — アプリ終了(Cmd-Q・メニューの Quit・Dock の Quit・クローズボタン・
+    /// macOS のログアウト/再起動/システム終了)時に、ゲストへ電源OFFを通知して
+    /// 最大 15 秒待つ(XEiJ PowerControl.java pwcQuit 相当)。ゲストが $E8E00F へ
+    /// 0→F→F を書けば即終了、応答が無ければタイムアウトで終了する。
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // P53 アブレーション無効時は本機能も無効(applicationWillTerminate と同じ扱い)。
+        guard mx68k_p53_appdelegate_enabled() != 0 else { return .terminateNow }
+        guard !skipQuitPowerSequence, let vm = EmulatorViewModel.shared else { return .terminateNow }
+        let waiting = vm.beginQuitPowerSequence {
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return waiting ? .terminateLater : .terminateNow
+    }
 
     /// P193 — SwiftUI が型名由来キーで保存した旧ウィンドウ枠を一度だけ破棄する掃除処理。
     ///
@@ -62,6 +82,7 @@ final class MX68KAppDelegate: NSObject, NSApplicationDelegate {
         let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         term.setEventHandler { [weak self] in
             self?.logSig("SIGTERM")
+            self?.skipQuitPowerSequence = true   // P1105: シグナル経路は待機せず即終了
             NSApp.terminate(nil)
         }
         term.resume()
@@ -73,6 +94,7 @@ final class MX68KAppDelegate: NSObject, NSApplicationDelegate {
         let intSrc = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         intSrc.setEventHandler { [weak self] in
             self?.logSig("SIGINT")
+            self?.skipQuitPowerSequence = true   // P1105: シグナル経路は待機せず即終了
             NSApp.terminate(nil)
         }
         intSrc.resume()

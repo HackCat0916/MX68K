@@ -2,6 +2,14 @@ import SwiftUI
 import MetalKit
 import Carbon
 
+/// P1105 — メインウィンドウのクローズボタンの差し替え先。押下でアプリ終了要求を出す
+/// (= Cmd-Q と同じ経路。メインウィンドウを閉じる=アプリ終了という結果は従来と同じ)。
+final class CloseButtonQuitTarget: NSObject {
+    @objc func quitFromCloseButton(_ sender: Any?) {
+        NSApp.terminate(nil)
+    }
+}
+
 class EmulatorMTKView: MTKView {
     var inputManager: InputManager?
     private var trackingArea: NSTrackingArea?
@@ -75,9 +83,21 @@ class EmulatorMTKView: MTKView {
                 }
                 EmulatorMTKView.closeObserverRegistered = true
             }
+            // P1105: クローズボタン(赤丸)を Cmd-Q と同じ終了経路(NSApp.terminate →
+            // applicationShouldTerminate の電源OFF待機)へ合流させる。そのままだと
+            // EmulatorView.onDisappear → stopEmulation() が applicationShouldTerminate より
+            // 先に走り、待機が効かない。SwiftUI が target/action を戻す場合に備え、
+            // viewDidMoveToWindow のたびに再適用する(冪等)。⌘W(performClose:)は対象外。
+            if let closeButton = window.standardWindowButton(.closeButton) {
+                closeButton.target = EmulatorMTKView.closeButtonTarget
+                closeButton.action = #selector(CloseButtonQuitTarget.quitFromCloseButton(_:))
+            }
         }
         window?.makeFirstResponder(self)
     }
+
+    /// P1105 — クローズボタンの差し替え先。NSButton.target は弱参照のため static で保持する。
+    static let closeButtonTarget = CloseButtonQuitTarget()
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

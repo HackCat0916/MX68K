@@ -13,7 +13,7 @@ struct ToolbarView: View {
             }
             .labelStyle(.iconOnly)
             .help(String(localized: "Hard Reset"))
-            .disabled(viewModel.powerState == .poweringOff)   // P204/S3: 電源OFF フェード中は無効
+            .disabled(!viewModel.isRunning || viewModel.powerState == .poweringOff || viewModel.powerState == .switchOff)   // P204/S3: 電源OFF フェード中は無効(P1106: .switchOff 待機中も無効、P1107: .off 中も無効化するため !isRunning を追加)
             // P451: レガシー Alert(primaryButton:secondaryButton:) では Alert.Button に
             // .keyboardShortcut を付けられず Enter/Esc の挙動が AppKit 既定任せだったため、
             // 新 API (.alert(_:isPresented:actions:message:)) へ移行して明示割当てする。
@@ -33,14 +33,14 @@ struct ToolbarView: View {
             }
             .labelStyle(.iconOnly)
             .help(String(localized: "Soft Reset"))
-            .disabled(viewModel.powerState == .poweringOff)   // P204/S3
+            .disabled(!viewModel.isRunning || viewModel.powerState == .poweringOff || viewModel.powerState == .switchOff)   // P204/S3(P1106: .switchOff 待機中も無効、P1107: .off 中も無効化するため !isRunning を追加)
 
             Button(action: { viewModel.nmi() }) {
                 Label("Interrupt", systemImage: "exclamationmark.triangle")
             }
             .labelStyle(.iconOnly)
             .help(String(localized: "Interrupt"))
-            .disabled(viewModel.powerState == .poweringOff)   // P204/S3
+            .disabled(!viewModel.isRunning || viewModel.powerState == .poweringOff || viewModel.powerState == .switchOff)   // P204/S3(P1106: .switchOff 待機中も無効、P1107: .off 中も無効化するため !isRunning を追加)
 
             Divider()
                 .frame(height: 20)

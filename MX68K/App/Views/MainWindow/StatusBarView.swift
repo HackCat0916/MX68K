@@ -153,9 +153,11 @@ struct StatusBarView: View {
             }
 
             // P204 — 電源ランプ: ON=緑 / OFF=赤 / 遷移中=緑を遅→速点滅。
+            // P1105 — スイッチOFF・ゲスト後処理待ち(.switchOff)=消灯(XEiJ Indicator 準拠)。
             powerLamp(date: date)
 
             // P204 — 電源ボタン(XM6 下部 POWER 相当)。遷移中(4.0s フェード)は無効。
+            // P1105 — ボタンは電源スイッチのトグル。.switchOff 中に押すとスイッチ ON へ戻る。
             Button {
                 viewModel.togglePower()
             } label: {
@@ -180,6 +182,9 @@ struct StatusBarView: View {
             Text("●").font(.caption).foregroundColor(.green)
         case .off:
             Text("●").font(.caption).foregroundColor(.red)
+        case .switchOff:
+            // P1105: VCC1 はまだ ON だがスイッチは OFF = ランプ消灯(静的表示、点滅しない)。
+            Text("○").font(.caption).foregroundColor(.gray)
         case .poweringOff:
             let elapsed = date.timeIntervalSince(viewModel.powerOffStart ?? date)
             // P204-fix: 遅い 1Hz(最初の 2 秒)→ 速い 12Hz。位相を累積しているため

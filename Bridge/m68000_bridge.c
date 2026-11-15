@@ -1021,6 +1021,31 @@ static void p776_sysport_poweroff_note(uint32_t addr, uint8_t val) {
     }
 }
 
+/* ============================================================================
+ * P1105: 電源スイッチ(POWSW = MFP GPIP2)の状態
+ *
+ * 参照実装: XEiJ PowerControl.java(pwcSetPower)/ MC68901.java
+ * (mfpPowerRise / mfpPowerFall、MFP_GPIP_POWER_LEVEL = 2 「0=POWERスイッチON」)。
+ * Core の GPIP 読取り(Core:x68k/mfp.c case 0x01、ret=0x22)は bit2 を常に 0
+ * (=スイッチON)で返すため、スイッチOFF中だけ Bridge の GPIP 読取りフック
+ * (trace_Memory_ReadB/W の P657 分岐)でゲストに返す値の bit2 を 1 にする。
+ * Core 内部の状態は変えない。
+ *
+ * g_p1105_powsw_req_off : メインスレッドが書く要求値(mx68k_set_power_switch)。
+ * g_p1105_powsw_off     : エミュレーションスレッドで反映済みの値。遷移の検出と
+ *                         MFP_Int(13) の発火は mx68k_run_frame() 冒頭で行う。
+ * ========================================================================== */
+volatile int g_p1105_powsw_req_off = 0;
+int g_p1105_powsw_off = 0;
+
+/* mx68k_init() / mx68k_reset_hard() から呼ぶ(p776_poweroff_state_reset と同じ
+ * 2 か所)。★リセットでスイッチを ON へ戻すこと —— OFF のまま残すと IPLROM の
+ * 起動時 GPIP ポーリングが電源OFF要因と読み得る(P1105 計画 D2 / R-2)。 */
+void p1105_powsw_reset(void) {
+    g_p1105_powsw_req_off = 0;
+    g_p1105_powsw_off = 0;
+}
+
 /* mx68k_run_frame() のフレーム末尾から毎フレーム呼ばれる(出力は 300 フレーム
  * ごと)。f= は取得時点の g_mx68k_frame_num そのもの。 */
 void p509_fdc_hist_dump(void) {
@@ -24690,6 +24715,8 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
         }
         val = Memory_ReadB(addr);
         if (p657_gpip) ICount = p657_saved_icount;
+        /* P1105: 電源スイッチOFF中は GPIP2(POWSW、bit2)を 1 で返す。 */
+        if (p657_gpip && g_p1105_powsw_off) val |= 0x04u;
         /* D-67 (P646): DMAC ch2(Mercury担当)のCCR STRビットは、px68k系統(MX/本家/
          * libretro全て共通)がDMA転送継続中もクリアしない実装のため、PCM8PPの
          * read-modify-writeで古いSTRが書き戻され誤ったタイミングエラーを誘発する。
@@ -25581,6 +25608,10 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
         }
         val = Memory_ReadW(addr);
         if (p657_gpip) ICount = p657_saved_icount;
+        /* P1105: byte 側と対称。word 読み取りでは下位バイトが GPIP なので 0x0004。
+         * ロングワード読み取り($E88000.L)は c68k / Musashi とも ReadW×2 に分解され、
+         * このフックを通る。 */
+        if (p657_gpip && g_p1105_powsw_off) val |= 0x0004u;
         /* D-67 (P646): byte 側 ($E84087) と対称の STR マスク。trace_Memory_ReadW は
          * trace_Memory_ReadB を内部で呼ばず Memory_ReadW を独立に呼ぶ構造のため、
          * byte 側の修正だけでは word 経路のゲストは救われない。

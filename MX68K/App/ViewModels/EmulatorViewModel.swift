@@ -7,8 +7,13 @@ import UniformTypeIdentifiers
 
 /// P204 — 電源ボタンの状態機械。`.on`=通常動作 / `.poweringOff`=電源OFF 遷移中
 /// (4.0s の点滅+黒フェード演出中) / `.off`=停止(黒画面維持)。
+/// P1105 — `.switchOff`=電源スイッチOFF・ゲストの後処理待ち(VCC1 はまだ ON で
+/// エミュレーションは走り続ける)。ゲストが $E8E00F へ 0→F→F を書くと
+/// `.poweringOff` → `.off` へ進む。ゲストが応答しなければ `.switchOff` のまま
+/// (XEiJ 準拠、タイムアウト無し)。
 enum PowerState {
     case on
+    case switchOff
     case poweringOff
     case off
 }
@@ -41,8 +46,15 @@ class EmulatorViewModel: ObservableObject {
     var onPowerOn: (() -> Void)?
     /// P776 — ゲスト側ソフトウェアがシステムポート $E8E00F へ実機の電源OFF
     /// シーケンス("00"→"0F"→"0F")を書き込んだときに呼ばれる。EmulatorView が
-    /// powerOff() を注入する(onPowerOn と同型 = 手動の電源ボタンと完全に同じ経路)。
+    /// powerOff() を注入する(onPowerOn と同型)。P1105 以降、電源ボタンは電源スイッチ
+    /// OFF の通知だけを行い、実際の電源断はこの経路(ゲスト応答)でのみ起きる。
     var onGuestPowerOffRequested: (() -> Void)?
+    /// P1105 — アプリ終了時の電源OFF待機中か(XEiJ pwcQuitStep != 0 相当)。
+    private(set) var quitInProgress = false
+    /// P1105 — 待機の完了時に呼ぶ(NSApp.reply(toApplicationShouldTerminate:))。1回だけ呼ぶ。
+    private var quitCompletion: (() -> Void)?
+    /// P1105 — 終了待機の上限秒数(XEiJ PowerControl.java pwcQuitWait の既定値)。
+    static let quitPowerOffWaitSeconds: TimeInterval = 15.0
     @Published var statusText = String(localized: "Ready")
     /// P189 — 下部ステータスバーに数秒だけ一時表示するメッセージ（スクショ完了等）。
     /// nil のとき非表示。showTransientMessage() で世代管理付きに自動クリアする。
@@ -508,12 +520,15 @@ class EmulatorViewModel: ObservableObject {
 
     // MARK: - 電源 (P204)
 
-    /// 電源OFF 押下 — 実機の電源OFF シーケンスを host 側で近似する:
+    /// 電源断の後処理演出 — ゲストが $E8E00F へ 0→F→F を書いた後(P776 経路)に呼ばれる。
+    /// P1105 以降は電源ボタンから直接は呼ばない(ボタンは switchPowerOff() でゲストへ
+    /// 通知するだけ)。スイッチ ON 中に書かれた 0→F→F でも従来どおり発火する(計画 D1)。
     /// 電源ランプ点滅(遅→速・計 4.0s)+ 画面を 4.0s かけて黒へフェード。
     /// SRAM $ED0029(FD 排出フラグ)が立っていれば両ドライブを排出してから停止。
     /// 音はフェードしない(実機忠実 — 鳴っていた音は stopEmulation まで継続)。
+    /// アプリ終了の待機中(quitInProgress)は SRAM 設定による FD 排出だけ行い、フェードを省いて即座に終了する。
     func powerOff() {
-        guard powerState == .on else { return }
+        guard powerState == .on || powerState == .switchOff else { return }
         powerState = .poweringOff
         EmulatorRunState.shared.powerState = powerState      // P546: メニューゲート用の軽量ミラー
         powerOffStart = Date()
@@ -523,6 +538,9 @@ class EmulatorViewModel: ObservableObject {
             ejectFDD(drive: 0)
             ejectFDD(drive: 1)
         }
+        // P1105: 終了待機中はFD排出後に即終了(フェードは省略。タイムアウト終了では排出しない、
+        // XEiJ+実機ふろっぴU君で確認済みの挙動)。
+        if quitInProgress { finishQuit(); return }
         withAnimation(.easeIn(duration: 4.0)) {
             displayDimming = 1.0
         }
@@ -546,13 +564,72 @@ class EmulatorViewModel: ObservableObject {
         }
     }
 
-    /// 電源ボタン — 状態でトグル。遷移中(.poweringOff)は無視。
+    /// 電源ボタン — 電源スイッチのトグル(P1105、XEiJ pwcSetPower 相当)。
+    /// .on → スイッチOFF(ゲストへ電源OFF割込みを通知) / .switchOff → スイッチ ON へ戻す /
+    /// .off → 電源ON(cold boot) / 遷移中(.poweringOff)は無視。
     func togglePower() {
         switch powerState {
-        case .on:  powerOff()
+        case .on:  switchPowerOff()
+        case .switchOff: switchPowerOn()
         case .off: powerOn()
         case .poweringOff: break
         }
+    }
+
+    /// P1105 — 電源スイッチOFF。GPIP2 を立てて MFP 電源OFF割込み(ベクタ $42)を
+    /// ゲストへ通知するだけで、電源は切らない。タイムアウトは設けない(XEiJ 準拠 ——
+    /// ゲストが応答しなければ電源は入ったまま、という意図的な実機再現)。
+    private func switchPowerOff() {
+        guard powerState == .on else { return }
+        mx68k_set_power_switch(0)
+        powerState = .switchOff
+        EmulatorRunState.shared.powerState = powerState      // P546: メニューゲート用の軽量ミラー
+    }
+
+    /// P1105 — 電源スイッチを ON へ戻す(XEiJ pwcSetPower(true) → mfpPowerFall)。
+    private func switchPowerOn() {
+        guard powerState == .switchOff else { return }
+        mx68k_set_power_switch(1)
+        powerState = .on
+        EmulatorRunState.shared.powerState = powerState      // P546: メニューゲート用の軽量ミラー
+    }
+
+    /// P1105 — Bridge 側のリセット(mx68k_reset_hard 内の p1105_powsw_reset)で
+    /// スイッチが ON へ戻るのに合わせ、Swift 側の状態も .on へ戻す(計画 D2)。
+    private func syncPowerSwitchOnAfterReset() {
+        guard powerState == .switchOff else { return }
+        powerState = .on
+        EmulatorRunState.shared.powerState = powerState      // P546: メニューゲート用の軽量ミラー
+    }
+
+    /// P1105 — アプリ終了時の電源OFF待機を開始する(XEiJ pwcQuit 相当)。
+    /// 戻り値 true = 待機を開始した(呼び出し側は .terminateLater を返し、completion で
+    /// 終了を確定させる)/ false = 即終了してよい。
+    /// 即終了の条件: 未起動・電源OFF・電源断の演出中(ゲスト応答済み)・一時停止中
+    /// (デバッガ停止を含む。ゲストが走っておらず応答できない、MX 独自の安全側判断)。
+    func beginQuitPowerSequence(completion: @escaping () -> Void) -> Bool {
+        if quitInProgress { return true }   // XEiJ pwcQuitStep != 0 → 何もしない
+        guard isRunning, !isPaused else { return false }
+        switch powerState {
+        case .off, .poweringOff: return false
+        case .on, .switchOff: break
+        }
+        quitInProgress = true
+        quitCompletion = completion
+        if powerState == .on { switchPowerOff() }   // .switchOff なら再通知しない
+        // DispatchQueue.main は common モードで処理されるため、.terminateLater 中の
+        // モーダルパネル用ランループモードでも発火する。二重完了は finishQuit() の冪等性で防ぐ。
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.quitPowerOffWaitSeconds) { [weak self] in
+            self?.finishQuit()
+        }
+        return true
+    }
+
+    /// P1105 — 終了待機を完了させる(冪等: completion は 1 回だけ呼ぶ)。
+    private func finishQuit() {
+        guard let completion = quitCompletion else { return }
+        quitCompletion = nil
+        completion()
     }
 
     /// 起動時 config プッシュ（挙動不変で startEmulation から抽出・applySettings と共有）。
@@ -863,6 +940,8 @@ class EmulatorViewModel: ObservableObject {
     func setSc55OutputGain(_ percent: Int) { mx68k_set_sc55_output_gain(Float(max(0, min(300, percent))) / 100.0) }
 
     func hardReset() {
+        // P1107: .off(完全電源断)中の呼出しは無視する(UI 無効化に対する二重防御)。
+        guard isRunning, powerState == .on || powerState == .switchOff else { return }
         // P628: サンプルレート設定はCore側チップ(ADPCM/OPM/Mercury)だけでなく
         // AudioEngine(ホスト出力)側の再構成も必要——他の「ハードリセットで反映」
         // 設定(機種/メモリ/FPU/BIOS)と異なり、Core内部状態だけでは完結しない。
@@ -883,6 +962,7 @@ class EmulatorViewModel: ObservableObject {
         requestSC55Reconfigure()
         audio.start()
         mx68k_schedule_hard_reset()   // フレーム境界で安全にリセット(直接 mx68k_reset_hard は run_frame とレース)。
+        syncPowerSwitchOnAfterReset() // P1105: リセットで電源スイッチは ON へ戻る(Bridge 側と同期)。
         resumeIfPausedByDebugger()    // P749: リセットは Core 側のデバッガ停止を消すので Swift 側も同期させる。
         InputManager.shared.requestMouseHoming()   // P196: reset でゲストポインタ位置が失われるため原点合わせ。
         showTransientMessage(String(localized: "Hard Reset"))
@@ -917,7 +997,10 @@ class EmulatorViewModel: ObservableObject {
     }
 
     func softReset() {
+        // P1107: .off 中にフラグが残留して次回 cold boot 直後に余計なリセットが走るのを防ぐ。
+        guard isRunning, powerState == .on || powerState == .switchOff else { return }
         mx68k_schedule_soft_reset()   // フレーム境界で安全にリセット(直接 mx68k_reset_soft は run_frame とレース)。
+        syncPowerSwitchOnAfterReset() // P1105: ソフトリセットも内部で mx68k_reset_hard を通る。
         resumeIfPausedByDebugger()    // P749: リセットは Core 側のデバッガ停止を消すので Swift 側も同期させる。
         InputManager.shared.requestMouseHoming()   // P196: reset でゲストポインタ位置が失われるため原点合わせ。
         showTransientMessage(String(localized: "Soft Reset"))
@@ -931,6 +1014,7 @@ class EmulatorViewModel: ObservableObject {
     }
 
     func nmi() {
+        guard isRunning, powerState == .on || powerState == .switchOff else { return }   // P1107: 二重防御
         mx68k_nmi()
         showTransientMessage(String(localized: "Interrupt"))
     }
@@ -996,7 +1080,8 @@ class EmulatorViewModel: ObservableObject {
     /// 問題を設計で回避する — 逆向きのガードは toggleTurbo() 側にある)。
     func startRecording() {
         guard !isRecording else { return }
-        guard isRunning, powerState == .on else {
+        // P1105: .switchOff(スイッチOFF・ゲスト後処理待ち)もゲストは走っているため許可する。
+        guard isRunning, powerState == .on || powerState == .switchOff else {
             showTransientMessage(String(localized: "Recording failed to start"))
             return
         }
@@ -1305,7 +1390,8 @@ class EmulatorViewModel: ObservableObject {
     /// モーダル UI(設定シート・ファイル選択ダイアログ等)を開く直前に呼ぶ。
     func requestAutoPause() {
         autoPauseRequests += 1
-        guard isRunning, powerState == .on, !isPaused, !didAutoPause else { return }
+        // P1105: .switchOff もゲストが走っている状態として含める。
+        guard isRunning, powerState == .on || powerState == .switchOff, !isPaused, !didAutoPause else { return }
         engine.pause()
         statusText = String(localized: "Paused")
         isPaused = true

@@ -99,8 +99,10 @@ struct EmulatorView: View {
                             fdd3: configManager.config.fdd.lastFDD3Path)
                     }
                     // P776: ゲスト起点のソフトウェア電源OFF($E8E00F への
-                    // "00"→"0F"→"0F")= 手動の電源ボタンと完全に同じ経路を通す
-                    // (4秒フェード + ランプ点滅)。onPowerOn と同型に [weak viewModel]。
+                    // "00"→"0F"→"0F")で powerOff() を呼ぶ(4秒フェード + ランプ点滅)。
+                    // P1105 以降、電源ボタンはスイッチOFFの通知だけを行い、電源断は
+                    // この経路でのみ起きる。アプリ終了待機中の即終了分岐は powerOff()
+                    // 先頭にあるため、ここは無条件に呼ぶ。onPowerOn と同型に [weak viewModel]。
                     viewModel.onGuestPowerOffRequested = { [weak viewModel] in
                         viewModel?.powerOff()
                     }
