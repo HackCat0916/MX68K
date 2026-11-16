@@ -47,8 +47,13 @@ int mx68k_fdd_accessing(int drive)
 {
     if (drive < 0 || drive > 3) return 0;   /* P684: 2 台 → 4 台 */
     if (!s_fdd_present[drive]) return 0;
-    /* 直近約 12 フレーム(60 fps で約 200 ms)以内にアクセスあり = アクティブ表示。 */
-    return (g_mx68k_frame_num - s_fdd_last_access[drive]) < 12;
+    /* P1109(D-130): 12→90フレーム(約1.5秒)へ拡大、P1097のmx68k_floppyu_status_active()
+     * と同一設計。EmulatorEngine(1Hz=約56-60フレーム周期)・DebuggerView/
+     * DisassemblyMonitorView(0.5秒=約28-30フレーム周期)いずれのポーリング周期より
+     * 十分大きい窓にすることで、dir a:等の短時間READバーストが次回ポーリングまでに
+     * 取りこぼされないようにする。非消費型(値を変更しない)なので複数の読み手が同時に
+     * 読んでも互いに干渉しない */
+    return (g_mx68k_frame_num - s_fdd_last_access[drive]) < 90;
 }
 
 /* P443 (D-7): メディア有無のアクセサ。Core fdd.c は FDD_EjectFD() から(ゲスト起点の
