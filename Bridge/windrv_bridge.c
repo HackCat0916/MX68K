@@ -14,7 +14,8 @@
  *   公開されていない(`.mx68k_cycles/windrv_protocol.md` 冒頭)。したがって
  *   「A5 ブロックのレイアウト・構造体オフセット・エラーコード体系」は
  *   windrv.cpp からの [static code reading] で完全に裏取りできているが、
- *   「パス変換・ワイルドカード照合・大文字小文字ポリシー」は MX 独自設計である。
+ *   「パス変換・ワイルドカード照合」は MX 独自設計である。大文字小文字は XM6・XEiJ と
+ *   同じく、表示はホスト名のまま・照合は大小無視(P1112)。
  *
  * ★スレッドモデル: 本ファイルの全コードは `trace_Memory_WriteB/WriteW`
  *   (= CPU コアのメモリ書込みコールバック、CVDisplayLink スレッド)から
@@ -277,6 +278,30 @@ typedef struct {
     uint8_t       ent_attr;
     uint16_t      ent_time, ent_date;
     uint32_t      ent_size;
+    /* P1113: "."/".." 除外の分母付き診断プローブ(D-134候補調査用)。
+     * windrv_search_alloc() の memset(0) で検索コンテキストごとにゼロ初期化される。
+     * total == 7種の除外内訳 + matched が常に成立するよう、全 continue 地点を計上する。 */
+    uint32_t probe_total;      /* readdir() が返した総エントリ数 */
+    uint32_t probe_dotskip;    /* d_name[0]=='.' で除外した件数 */
+    uint32_t probe_h68fail;    /* windrv_host_to_h68() 失敗で除外した件数 */
+    uint32_t probe_namemiss;   /* windrv_name_match() 不一致で除外した件数 */
+    uint32_t probe_pathtrunc;  /* snprintf(full,...) の切り詰めで除外した件数 */
+    uint32_t probe_statfail;   /* stat() 失敗で除外した件数 */
+    uint32_t probe_typemiss;   /* S_ISDIR/S_ISREG どちらでもないため除外した件数 */
+    uint32_t probe_attrmiss;   /* windrv_attr_match() 不一致で除外した件数 */
+    uint32_t probe_matched;    /* windrv_write_files_entry() 後 return 0 で採用した件数 */
+    /* P1114(D-134): 非ルートでの "."/".." 合成段。0="." 未処理、1=".." 未処理、
+     * 2=合成完了(readdir へ)。ルートでは windrv_cmd_files() が最初から 2 にする。 */
+    uint8_t  dot_stage;
+    /* P1114: 合成段の診断カウンタ。上の readdir 由来の恒等式とは独立で、
+     * 非ルートでは synth_h68fail+statfail+namemiss+attrmiss+matched == 2、
+     * ルートでは synth_root == 1 かつ他 5 項目すべて 0 が成立する。 */
+    uint8_t  probe_synth_root;      /* ルートのため合成段を丸ごと省いた(0/1) */
+    uint32_t probe_synth_h68fail;   /* windrv_host_to_h68() が "."/".." の変換に失敗 */
+    uint32_t probe_synth_statfail;  /* stat(dirpath) 失敗または S_ISDIR でない */
+    uint32_t probe_synth_namemiss;  /* windrv_name_match() 不一致 */
+    uint32_t probe_synth_attrmiss;  /* windrv_attr_match() 不一致 */
+    uint32_t probe_synth_matched;   /* 合成して返した件数 */
 } WindrvSearch;
 static WindrvSearch s_search[WINDRV_MAX_SEARCH];
 static uint32_t     s_search_serial = 0;
@@ -305,6 +330,18 @@ static uint32_t s_log_count = 0;
  *   自己反証可能性の破れ(0 行の解釈が複数通りに割れる)を生むため。 */
 static uint32_t s_wlog_count = 0;
 #define WINDRV_WLOG_CAP 200
+
+/* P1113: ディレクトリ列挙プローブ専用カウンタ(search_begin/search_end 共有)。
+ * ★他のログと共有しない理由: 既存カウンタが先に上限へ達すると列挙結果が
+ *   1 行も残らず、「列挙されていない」のか「見えていないだけ」かが割れるため。 */
+static uint32_t s_p1113_probe_count = 0;
+#define WINDRV_P1113_PROBE_CAP 60
+
+/* P1114: $43 RemoveDir の .DS_Store 掃除判定ログ専用カウンタ。
+ * ★書込み監査ログと共有しない理由: TF の再試行ループで監査ログが上限に達しても、
+ *   掃除の判断記録(最初の 60 回分)が残るようにするため。 */
+static uint32_t s_p1114_rmdirmeta_count = 0;
+#define WINDRV_P1114_RMDIRMETA_CAP 60
 
 /* P649: エラー応答専用ログ用カウンタ。
  * ★s_log_count と共有しない理由: 通常コマンドログが上限 200 を使い切った後は
@@ -438,8 +475,8 @@ static int windrv_char_forbidden(unsigned char c) {
     }
 }
 
-/* CP932 の 2 バイト文字の先頭バイト判定。windrv_host_to_h68() の大文字化ループと
- * 同一の判定式を共有する(書き写しをしない)。 */
+/* CP932 の 2 バイト文字の先頭バイト判定。切り詰め(windrv_truncate_h68)と
+ * 照合(windrv_name_bytes_match)で同一の判定式を共有する(書き写しをしない)。 */
 static int windrv_sjis_lead(unsigned char c) {
     return (c >= 0x81 && c <= 0x9F) || (c >= 0xE0 && c <= 0xFC);
 }
@@ -540,21 +577,7 @@ static int windrv_host_to_h68(const char* host_utf8, WindrvH68Name* out) {
         }
     }
 
-    /* 大文字化(ASCII のみ。CP932 の 2 バイト文字は触らない)。
-     * ★2 バイト文字の 2 バイト目が ASCII 小文字域(0x61-0x7A)に入りうるため、
-     *   先頭バイトが 0x81-0x9F / 0xE0-0xFC のときは 2 バイトまとめて読み飛ばす。 */
-    for (i = 0; i < blen; ) {
-        unsigned char c = (unsigned char)base[i];
-        if (windrv_sjis_lead(c)) { i += 2; continue; }
-        base[i] = (char)toupper(c);
-        i++;
-    }
-    for (i = 0; i < elen; ) {
-        unsigned char c = (unsigned char)ext[i];
-        if (windrv_sjis_lead(c)) { i += 2; continue; }
-        ext[i] = (char)toupper(c);
-        i++;
-    }
+    /* 大文字小文字はホストの名前のまま保持する(XM6・XEiJと同じ。照合は windrv_name_match() が大小無視で行う)。 */
 
     memset(out->name, 0x20, sizeof(out->name));
     memset(out->ext,  0x20, sizeof(out->ext));
@@ -575,8 +598,8 @@ static int windrv_host_to_h68(const char* host_utf8, WindrvH68Name* out) {
  * 1 = 問題なし / 0 = 拒否。
  * ★2 バイト文字の第 2 バイトを誤検出しないこと —— CP932 の第 2 バイトは
  *   0x5C('\')や 0x7C('|')を取りうる(例:「表」= 0x95 0x5C)。先頭バイトが
- *   0x81-0x9F / 0xE0-0xFC のときは 2 バイトまとめて読み飛ばす。判定式は既存
- *   windrv_host_to_h68() の大文字化ループと同一のもの(書き写しではなく同じ式)。
+ *   0x81-0x9F / 0xE0-0xFC のときは 2 バイトまとめて読み飛ばす。判定式は
+ *   windrv_sjis_lead() と同一のもの。
  * ★末尾が中途半端なリードバイトで終わる入力はここを素通りするが、その場合は
  *   続く iconv() が不完全なシーケンスとして変換に失敗し、そこで拒否される。 */
 static int windrv_sjis_scan_ok(const char* s, size_t len) {
@@ -606,8 +629,8 @@ static int windrv_sjis_scan_ok(const char* s, size_t len) {
  *
  * ★大文字小文字(MX 独自ポリシー、参照実装に対応物なし): ゲストが送ってきた
  *   バイトをそのまま使い、MX 側では大文字化も小文字化もしない。
- *   windrv_host_to_h68() はホスト名を大文字化してゲストへ見せるので、
- *   ゲストが TEST.TXT を作ればホストにも TEST.TXT ができ、往復で一致する。
+ *   windrv_host_to_h68() もホスト名を大文字小文字のままゲストへ見せる(P1112)ので、
+ *   ゲストが Test.Txt を作ればホストにも Test.Txt ができ、往復で一致する。
  *
  * 戻り値: 1 = 成功(out に UTF-8 のファイル名 1 要素、区切り文字を含まない)
  *         0 = 拒否(呼出し側は FS_INVALIDPATH を返すこと) */
@@ -676,7 +699,9 @@ static int windrv_h68_to_host(uint32_t ns_addr, char* out, size_t outsz) {
     if (strchr(utf8, '/') != NULL) return 0;
     if (strcmp(utf8, ".") == 0 || strcmp(utf8, "..") == 0) return 0;
     /* ★先頭 '.' の拒否: 列挙側(windrv_find_entry / windrv_search_next)が
-     *   d_name[0]=='.' を無条件にスキップするため、ドット始まりのファイルを
+     *   readdir 由来の d_name[0]=='.' を無条件にスキップするため(P1114 以降、
+     *   windrv_search_next は非ルートで "."/".." を別途合成するが、ホスト上の
+     *   ドット始まりの実体は依然スキップする)、ドット始まりのファイルを
      *   作れてしまうと「作成できるが dir に出ず、ゲストが二度と列挙・削除
      *   できない名前空間」へ書き込めることになる(一貫性の破れ)。加えて
      *   ホスト側の設定ファイル(.DS_Store 等)と衝突しうる。 */
@@ -696,24 +721,35 @@ static int windrv_h68_to_host(uint32_t ns_addr, char* out, size_t outsz) {
  *   add[10](ファイル名 9-18 文字目)を照合対象から外す。
  *   `dir *.*` のときゲストが送る add は 0x00 埋めであり、これを厳密照合すると
  *   長いファイル名が一切列挙されなくなるため。`wildcard == 0`(完全名指定、
- *   `type FOO.TXT` 等)では add まで含めて厳密に照合する。 */
-static int windrv_name_match(const WindrvSearch* q, const WindrvH68Name* h) {
+ *   `type FOO.TXT` 等)では add まで含めて厳密に照合する。
+ * ASCII は大文字小文字を区別せず(Human68k は指定時に区別しない、XM6 既定と同じ)、
+ *   CP932 の 2 バイト目は h 側で区切りを追って完全一致で比べる。 */
+static int windrv_name_bytes_match(const uint8_t* q, const uint8_t* h, int n, int* trail) {
     int i;
-    for (i = 0; i < NAMESTS_NAME_LEN; i++) {
-        if (q->name[i] == '?') continue;
-        if (q->name[i] != h->name[i]) return 0;
-    }
-    for (i = 0; i < NAMESTS_EXT_LEN; i++) {
-        if (q->ext[i] == '?') continue;
-        if (q->ext[i] != h->ext[i]) return 0;
-    }
-    if (q->wildcard == 0) {
-        for (i = 0; i < NAMESTS_ADD_LEN; i++) {
-            if (q->add[i] == '?') continue;
-            if (q->add[i] != h->add[i]) return 0;
+    for (i = 0; i < n; i++) {
+        int is_trail = *trail;
+        /* 区切りは h(ホスト由来の確定したバイト列、windrv_sjis_lead() で判定)で追う。
+         * q は '?' を含むので区切りの基準にできない。 */
+        *trail = !is_trail && windrv_sjis_lead(h[i]);
+        if (q[i] == '?') continue;
+        if (is_trail) {
+            if (q[i] != h[i]) return 0;
+        } else if (toupper(q[i]) != toupper(h[i])) {
+            return 0;
         }
     }
     return 1;
+}
+
+static int windrv_name_match(const WindrvSearch* q, const WindrvH68Name* h) {
+    int trail = 0;
+    /* name→add は 1 本のベース名から切り出されているので区切り状態を引き継ぐ
+     * (全角文字が name[7]/add[0] にまたがりうる)。ext は独立。 */
+    if (!windrv_name_bytes_match(q->name, h->name, NAMESTS_NAME_LEN, &trail)) return 0;
+    if (q->wildcard == 0 &&
+        !windrv_name_bytes_match(q->add, h->add, NAMESTS_ADD_LEN, &trail)) return 0;
+    trail = 0;
+    return windrv_name_bytes_match(q->ext, h->ext, NAMESTS_EXT_LEN, &trail);
 }
 
 /* stat の mtime を Human68k(= MS-DOS FAT)の time/date 形式へ。 */
@@ -750,6 +786,14 @@ static uint8_t windrv_attr_of(const struct stat* st) {
     if (S_ISDIR(st->st_mode)) return AT_DIRECTORY;
     if (!g_windrv_write_wired) return (uint8_t)(AT_ARCHIVE | AT_READONLY);
     return (uint8_t)(AT_ARCHIVE | ((st->st_mode & S_IWUSR) ? 0 : AT_READONLY));
+}
+
+/* 検索属性の一致判定。エントリ属性と検索属性 fatr のビットが1つでも重なれば該当
+ * (XM6:mfc/mfc_host.h:423 CheckAttribute、XEiJ:HFS.java:2074、
+ *  PRO-68K 書籍p.184「そのビットのいずれかを検索したら終了」)。
+ * fatr=0 は参照実装どおり何にも一致しない。 */
+static int windrv_attr_match(uint8_t entry_attr, uint8_t fatr) {
+    return (entry_attr & fatr) != 0;
 }
 
 /* ------------------------------------------------------------------------
@@ -1080,38 +1124,133 @@ static void windrv_write_files_entry(uint32_t files_addr, const WindrvH68Name* h
     }
 }
 
+/* P1113: ルート絶対パスを撒かないよう s_root からの相対部分を返す(windrv_wlog() と同じ規則)。 */
+static const char* windrv_p1113_rel(const char* abspath) {
+    size_t rootlen = strlen(s_root);
+    const char* rel = abspath;
+    if (rootlen > 0 && strncmp(abspath, s_root, rootlen) == 0) {
+        rel = abspath + rootlen;
+        if (*rel == '/') rel++;
+    }
+    return rel;
+}
+
+/* P1113: NAMESTS のバイト列を表示用に整形する。0x20 詰め/0x00 詰めの区別を
+ * 読めるよう、表示可能 ASCII 以外(と '"' '\\')は \xNN で出す。 */
+static void windrv_p1113_dump(char* out, size_t outsz, const uint8_t* p, int n) {
+    size_t o = 0;
+    int i;
+    out[0] = '\0';
+    for (i = 0; i < n && o + 5 < outsz; i++) {
+        uint8_t c = p[i];
+        if (c >= 0x20 && c < 0x7F && c != '"' && c != '\\') {
+            out[o++] = (char)c;
+        } else {
+            o += (size_t)snprintf(out + o, outsz - o, "\\x%02X", (unsigned)c);
+        }
+    }
+    out[o] = '\0';
+}
+
+static int windrv_p1113_take_slot(void) {
+    if (s_p1113_probe_count >= WINDRV_P1113_PROBE_CAP) return 0;
+    s_p1113_probe_count++;
+    return 1;
+}
+
+static void windrv_p1113_note_cap(void) {
+    if (s_p1113_probe_count == WINDRV_P1113_PROBE_CAP) {
+        debug_log("[P1113-WINDRV-DOTPROBE] further probe lines suppressed (>%d)\n",
+                  WINDRV_P1113_PROBE_CAP);
+    }
+}
+
+static void windrv_p1113_log_begin(const WindrvSearch* s) {
+    char nm[8 * 4 + 1], ex[3 * 4 + 1], ad[10 * 4 + 1];
+    if (!windrv_p1113_take_slot()) return;
+    windrv_p1113_dump(nm, sizeof(nm), s->name, NAMESTS_NAME_LEN);
+    windrv_p1113_dump(ex, sizeof(ex), s->ext,  NAMESTS_EXT_LEN);
+    windrv_p1113_dump(ad, sizeof(ad), s->add,  NAMESTS_ADD_LEN);
+    debug_log("[P1113-WINDRV-DOTPROBE] op=search_begin dirpath_rel=\"%s\" fatr=0x%02x "
+              "wildcard=%d name=\"%s\" ext=\"%s\" add=\"%s\"\n",
+              windrv_p1113_rel(s->dirpath), (unsigned)s->fatr, (int)s->wildcard, nm, ex, ad);
+    windrv_p1113_note_cap();
+}
+
+static void windrv_p1113_log_end(const WindrvSearch* s) {
+    if (!windrv_p1113_take_slot()) return;
+    debug_log("[P1113-WINDRV-DOTPROBE] op=search_end dirpath_rel=\"%s\" fatr=0x%02x "
+              "wildcard=%d total=%u dotskip=%u h68fail=%u namemiss=%u pathtrunc=%u "
+              "statfail=%u typemiss=%u attrmiss=%u matched=%u "
+              "synth_root=%u synth_h68fail=%u synth_statfail=%u synth_namemiss=%u "
+              "synth_attrmiss=%u synth_matched=%u\n",
+              windrv_p1113_rel(s->dirpath), (unsigned)s->fatr, (int)s->wildcard,
+              (unsigned)s->probe_total, (unsigned)s->probe_dotskip,
+              (unsigned)s->probe_h68fail, (unsigned)s->probe_namemiss,
+              (unsigned)s->probe_pathtrunc, (unsigned)s->probe_statfail,
+              (unsigned)s->probe_typemiss, (unsigned)s->probe_attrmiss,
+              (unsigned)s->probe_matched,
+              (unsigned)s->probe_synth_root, (unsigned)s->probe_synth_h68fail,
+              (unsigned)s->probe_synth_statfail, (unsigned)s->probe_synth_namemiss,
+              (unsigned)s->probe_synth_attrmiss, (unsigned)s->probe_synth_matched);
+    windrv_p1113_note_cap();
+}
+
+/* 採用したエントリを files_t へ書き、$53 DiskRead 用に検索側へ控える。 */
+static void windrv_search_take(WindrvSearch* s, const WindrvH68Name* h, const struct stat* st) {
+    uint16_t tm, dt;
+    windrv_write_files_entry(s->files_addr, h, st);
+    /* P650 変更4: XM6 の CHostFiles::GetEntry() 相当の控え。 */
+    windrv_time_date(st, &tm, &dt);
+    s->ent       = *h;
+    s->ent_attr  = windrv_attr_of(st);
+    s->ent_time  = tm;
+    s->ent_date  = dt;
+    s->ent_size  = S_ISDIR(st->st_mode) ? 0u : (uint32_t)st->st_size;
+    s->have_entry = 1;
+}
+
 /* 検索コンテキストから次の一致エントリを返す。0 = 見つかった / FS_LASTFILE = 終端。 */
 static uint32_t windrv_search_next(WindrvSearch* s) {
     struct dirent* de;
     if (!s->dir) return FS_LASTFILE;
+    /* P1114(D-134): 実 FAT のサブディレクトリは先頭 2 エントリに "."/".."(attr=0x10)を
+     * 物理的に持つ(human302.xdf ダンプで確認、ルートには無い)。ホストの readdir 由来の
+     * "."/".." は下のループで除外したまま、非ルートでは列挙の先頭に合成する。
+     * 名前解決(windrv_find_entry)には合成しないため、削除・リネーム・Open の対象には
+     * ならない。時刻は "."/".." とも当該ディレクトリ自身の stat を使う(実 FAT と同じく同値)。 */
+    while (s->dot_stage < 2) {
+        int which = s->dot_stage++;
+        WindrvH68Name h;
+        struct stat st;
+        if (!windrv_host_to_h68(which ? ".." : ".", &h)) { s->probe_synth_h68fail++; continue; }
+        if (stat(s->dirpath, &st) != 0 || !S_ISDIR(st.st_mode)) { s->probe_synth_statfail++; continue; }
+        if (!windrv_name_match(s, &h)) { s->probe_synth_namemiss++; continue; }
+        if (!windrv_attr_match(windrv_attr_of(&st), s->fatr)) { s->probe_synth_attrmiss++; continue; }
+        windrv_search_take(s, &h, &st);
+        s->probe_synth_matched++;
+        return 0;
+    }
     while ((de = readdir(s->dir)) != NULL) {
         WindrvH68Name h;
         char full[WINDRV_PATH_BUF];
         struct stat st;
 
-        if (de->d_name[0] == '.') continue;
-        if (!windrv_host_to_h68(de->d_name, &h)) continue;
-        if (!windrv_name_match(s, &h)) continue;
-        if ((size_t)snprintf(full, sizeof(full), "%s/%s", s->dirpath, de->d_name) >= sizeof(full)) continue;
-        if (stat(full, &st) != 0) continue;
-        /* 検索属性フィルタ: ディレクトリは fatr の AT_DIRECTORY 要求時のみ返す。
-         * 通常ファイルは Human68k の慣例どおり常に返す。 */
-        if (S_ISDIR(st.st_mode) && !(s->fatr & AT_DIRECTORY)) continue;
-        if (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode)) continue;
+        s->probe_total++;
+        if (de->d_name[0] == '.') { s->probe_dotskip++; continue; }
+        if (!windrv_host_to_h68(de->d_name, &h)) { s->probe_h68fail++; continue; }
+        if (!windrv_name_match(s, &h)) { s->probe_namemiss++; continue; }
+        if ((size_t)snprintf(full, sizeof(full), "%s/%s", s->dirpath, de->d_name) >= sizeof(full)) { s->probe_pathtrunc++; continue; }
+        if (stat(full, &st) != 0) { s->probe_statfail++; continue; }
+        if (!S_ISDIR(st.st_mode) && !S_ISREG(st.st_mode)) { s->probe_typemiss++; continue; }
+        /* 検索属性フィルタ: ディレクトリも通常ファイルも同じビット判定で選ぶ。 */
+        if (!windrv_attr_match(windrv_attr_of(&st), s->fatr)) { s->probe_attrmiss++; continue; }
 
-        windrv_write_files_entry(s->files_addr, &h, &st);
-        {   /* P650 変更4: XM6 の CHostFiles::GetEntry() 相当の控え。 */
-            uint16_t tm, dt;
-            windrv_time_date(&st, &tm, &dt);
-            s->ent       = h;
-            s->ent_attr  = windrv_attr_of(&st);
-            s->ent_time  = tm;
-            s->ent_date  = dt;
-            s->ent_size  = S_ISDIR(st.st_mode) ? 0u : (uint32_t)st.st_size;
-            s->have_entry = 1;
-        }
+        windrv_search_take(s, &h, &st);
+        s->probe_matched++;
         return 0;
     }
+    windrv_p1113_log_end(s);
     return FS_LASTFILE;
 }
 
@@ -1184,8 +1323,9 @@ static void windrv_cmd_files_volume(uint32_t nfiles) {
     wd_ww(nfiles + FILES_OFF_TIME, 0);           /* XM6fs:4796 */
     wd_ww(nfiles + FILES_OFF_DATE, 0);           /* XM6fs:4797 */
     wd_wl(nfiles + FILES_OFF_SIZE, 0);           /* XM6fs:4798 */
-    /* ★windrv_host_to_h68() を通してはならない —— MX 独自の大文字化により
-     *   "macOS" → "MACOS" に化ける。固定 ASCII ≤18 バイトなので直書きで XM6 と同結果。
+    /* ★固定ラベル "macOS" は MX 独自の代替(関数冒頭コメントのとおり、XM6 は実ボリューム名を
+     *   動的取得し SetHuman() で変換する)。固定 ASCII ≤18 バイトなので windrv_host_to_h68() を
+     *   通さず直書きする。
      * ★FILES_OFF_SECTOR / FILES_OFF_OFFSET は触らない —— XM6 の FilesVolume は
      *   両者を設定しない。後続 $48 は呼出し側の明示解放により
      *   windrv_search_find() が NULL → FS_LASTFILE で自然に終端する。 */
@@ -1229,6 +1369,11 @@ static void windrv_cmd_files(void) {
     for (i = 0; i < NAMESTS_EXT_LEN;  i++) s->ext[i]  = (uint8_t)wd_rb(ns + NAMESTS_OFF_EXT  + i);
     for (i = 0; i < NAMESTS_ADD_LEN;  i++) s->add[i]  = (uint8_t)wd_rb(ns + NAMESTS_OFF_ADD  + i);
     snprintf(s->dirpath, sizeof(s->dirpath), "%s", dirpath);
+    /* P1114: ルートは実 FAT と同じく "."/".." を持たないため合成段を省く。
+     * dirpath・s_root とも realpath 済み(windrv_path_inside_root() と同型の比較)。 */
+    if (strcmp(s->dirpath, s_root) == 0) { s->dot_stage = 2; s->probe_synth_root = 1; }
+    /* opendir() 失敗時も検索条件が残るよう、opendir より前に出す。 */
+    windrv_p1113_log_begin(s);
 
     s->dir = opendir(dirpath);
     if (!s->dir) { windrv_search_free(s); windrv_set_result(FS_DIRNOTFND); return; }
@@ -1899,6 +2044,58 @@ static void windrv_cmd_makedir(void) {
     windrv_set_result(0);
 }
 
+/* rmdir(2) が ENOTEMPTY で失敗したとき、中身が Finder の表示設定ファイル
+ * ".DS_Store"(通常ファイル)ちょうど 1 個だけなら、それを削除する。
+ * ゲストは先頭 '.' のエントリを見られないため、このファイルが残ると
+ * 「ゲストには空、ホストでは空でない」となり、TF が $43/$46 を無限に再試行する(D-134/P1114)。
+ * ユーザーのドットファイル等、それ以外が 1 個でもあれば何もしない。
+ * ★dirfd 基準の fstatat/unlinkat でパス文字列を再解決せず、AT_SYMLINK_NOFOLLOW で
+ *   シンボリックリンクを、O_NOFOLLOW|O_DIRECTORY でディレクトリ自体のすり替えを拒否する。
+ * 戻り値 1 = 削除した(呼出し側は rmdir を 1 回だけ再試行する) / 0 = 何もしていない。 */
+static int windrv_rmdir_clear_dsstore(const char* path, int* p_open_ok, int* p_dsstore,
+                                      int* p_others, int* p_reg) {
+    struct dirent* de;
+    struct stat st;
+    DIR* d;
+    int dfd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    int removed = 0;
+    *p_open_ok = 0; *p_dsstore = 0; *p_others = 0; *p_reg = -1;
+    if (dfd < 0) return 0;
+    d = fdopendir(dfd);              /* 成功時は dfd の所有権が d へ移る */
+    if (!d) { close(dfd); return 0; }
+    *p_open_ok = 1;
+    while ((de = readdir(d)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+        if (strcmp(de->d_name, ".DS_Store") == 0) (*p_dsstore)++;
+        else (*p_others)++;
+    }
+    if (*p_dsstore == 1 && *p_others == 0 &&
+        fstatat(dirfd(d), ".DS_Store", &st, AT_SYMLINK_NOFOLLOW) == 0) {
+        /* ★通常ファイル以外(.DS_Store という名前のディレクトリ・シンボリックリンク等)は消さない。 */
+        *p_reg = S_ISREG(st.st_mode) ? 1 : 0;
+        if (*p_reg == 1 && unlinkat(dirfd(d), ".DS_Store", 0) == 0) removed = 1;
+    }
+    closedir(d);                     /* dfd も閉じる */
+    return removed;
+}
+
+/* P1114: .DS_Store 掃除判定の記録。ENOTEMPTY で判定に入ったときは掃除の有無に
+ * かかわらず必ず 1 行出す。掃除しなかった原因(open_ok=0 / others>0 / dsstore!=1 /
+ * reg=0 / reg=1 かつ unlinked=0 = unlink 失敗)は行単体から一意に読める。
+ * retry_errno: 再試行 rmdir の errno、成功なら 0、未実施なら -1。 */
+static void windrv_p1114_log_rmdirmeta(const char* path, int open_ok, int dsstore, int others,
+                                       int reg, int unlinked, int retry_errno) {
+    if (s_p1114_rmdirmeta_count >= WINDRV_P1114_RMDIRMETA_CAP) return;
+    s_p1114_rmdirmeta_count++;
+    debug_log("[P1114-WINDRV-RMDIRMETA] rel=\"%s\" open_ok=%d dsstore=%d others=%d reg=%d "
+              "unlinked=%d retry_errno=%d\n",
+              windrv_p1113_rel(path), open_ok, dsstore, others, reg, unlinked, retry_errno);
+    if (s_p1114_rmdirmeta_count == WINDRV_P1114_RMDIRMETA_CAP) {
+        debug_log("[P1114-WINDRV-RMDIRMETA] further lines suppressed (>%d)\n",
+                  WINDRV_P1114_RMDIRMETA_CAP);
+    }
+}
+
 /* $43 RemoveDir — windrv.cpp:1225。in: a5+14 (1L) NAMESTS(完全形、:1237)。 */
 static void windrv_cmd_removedir(void) {
     if (!g_windrv_write_wired) {
@@ -1933,10 +2130,28 @@ static void windrv_cmd_removedir(void) {
 
     /* ★rmdir(2) は空でないディレクトリを削除しない —— **再帰削除は一切
      *   実装しない**(1 コマンドで多数のファイルを失う経路を作らない)。
-     *   したがって 1 コマンドの最大破壊量は「空ディレクトリ 1 個」である。 */
+     *   したがって 1 コマンドの最大破壊量は「空ディレクトリ 1 個」である。
+     *   唯一の例外(P1114): 中身が .DS_Store(通常ファイル)1 個だけの場合に限り
+     *   それを消して rmdir を 1 回だけ再試行する(最大破壊量は .DS_Store 1 個+空ディレクトリ 1 個)。 */
     if (rmdir(path) != 0) {
+        /* ★errno はログ関数等が書き換えるため、他の関数を呼ぶ前に退避する。 */
+        int saved = errno;
         uint32_t e;
-        switch (errno) {
+        if (saved == ENOTEMPTY) {
+            int open_ok, dsstore, others, reg, retry_errno = -1;
+            int unlinked = windrv_rmdir_clear_dsstore(path, &open_ok, &dsstore, &others, &reg);
+            if (unlinked) {
+                retry_errno = (rmdir(path) == 0) ? 0 : errno;
+                if (retry_errno != 0) saved = retry_errno;
+            }
+            windrv_p1114_log_rmdirmeta(path, open_ok, dsstore, others, reg, unlinked, retry_errno);
+            if (unlinked && retry_errno == 0) {
+                windrv_wlog("rmdir", path, 0);
+                windrv_set_result(0);
+                return;
+            }
+        }
+        switch (saved) {
         case ENOTEMPTY: case EEXIST:         e = FS_CANTDELETE; break;
         case ENOENT:                         e = FS_DIRNOTFND;  break;
         case EACCES: case EPERM: case EROFS: e = FS_CANTDELETE; break;
@@ -2447,6 +2662,8 @@ void windrv_init(void) {
     s_unit_max      = 1;
     s_log_count     = 0;
     s_wlog_count    = 0;
+    s_p1113_probe_count = 0;
+    s_p1114_rmdirmeta_count = 0;
     s_errlog_count  = 0;
     s_root[0]       = '\0';
     s_root_slash[0] = '\0';
