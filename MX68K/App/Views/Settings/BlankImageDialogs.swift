@@ -104,7 +104,12 @@ struct BlankFDImageDialog: View {
         do {
             try BlankImageService.createBlankFD(at: url)
             // 作成に成功した場合のみ挿入する(失敗時に空振りマウントしない)。
-            if mountDrive == 0 || mountDrive == 1 {
+            // P1108 (D-128): ふろっぴU君に割当て中のドライブへは挿入しない(イメージ作成自体は行う)。
+            let skippedForFloppyU = (mountDrive == 0 || mountDrive == 1)
+                && emulatorViewModel.isFloppyUAssigned(drive: mountDrive)
+            if skippedForFloppyU {
+                mx68k_log("[P1108-GUARD] BlankImage: drive \(mountDrive) はふろっぴU君に割当て中のためマウントしない")
+            } else if mountDrive == 0 || mountDrive == 1 {
                 // ライトプロテクトは既存のドライブ別トグルに従う(通常のマウント経路と同条件)。
                 // P599: zip 由来の一時的な書込み禁止が残っていれば先に復元してから読む。
                 let writeProtect = emulatorViewModel.resolvedWriteProtectForNewMount(drive: mountDrive)
@@ -113,7 +118,12 @@ struct BlankFDImageDialog: View {
                                            writeProtect: writeProtect)
             }
             resultIsError = false
-            resultMessage = String(localized: "Blank image created: \(url.lastPathComponent)")
+            if skippedForFloppyU {
+                // 作成は成功、挿入のみ見送った部分的成功として伝える(エラー扱いにはしない)。
+                resultMessage = String(localized: "Blank image created: \(url.lastPathComponent) (not inserted: the drive is assigned to FloppyU)")
+            } else {
+                resultMessage = String(localized: "Blank image created: \(url.lastPathComponent)")
+            }
         } catch {
             resultIsError = true
             resultMessage = String(localized: "Failed to create the blank disk image.")

@@ -69,6 +69,8 @@ struct ToolbarView: View {
 
     @ViewBuilder
     private func fddSection(drive: Int, path: String) -> some View {
+        // P1108 (D-128): ふろっぴU君に割当て中のドライブは誤操作防止のため3ボタンとも無効化する。
+        let floppyUAssigned = viewModel.isFloppyUAssigned(drive: drive)
         HStack(spacing: 4) {
             Text("FDD\(drive):")
                 .font(.caption)
@@ -84,13 +86,13 @@ struct ToolbarView: View {
                 Image(systemName: "folder")
             }
             .help(String(localized: "Select disk image for FDD\(drive)"))
-            .disabled(viewModel.powerState == .poweringOff)   // P204/S3
+            .disabled(viewModel.powerState == .poweringOff || floppyUAssigned)   // P204/S3, P1108
 
             Button(action: { viewModel.ejectFDD(drive: drive) }) {
                 Image(systemName: "eject")
             }
             .help(String(localized: "Eject FDD\(drive)"))
-            .disabled(path.isEmpty || viewModel.powerState == .poweringOff)   // P204/S3
+            .disabled(path.isEmpty || viewModel.powerState == .poweringOff || floppyUAssigned)   // P204/S3, P1108
 
             // P271: FDライトプロテクト トグル。南京錠アイコンで現在の保護状態を表す。
             // 空ドライブでも「次に入れるディスクを保護するか」を事前設定できるため
@@ -101,7 +103,7 @@ struct ToolbarView: View {
                     .frame(width: 16)   // P272: lock.fill/lock.open のグリフ幅差でレイアウトがガタつかないよう固定幅化
             }
             .help(String(localized: "Write-protect FDD\(drive). Turning it ON takes effect immediately, even on an inserted disk. To turn it OFF, eject and re-insert the disk to apply."))
-            .disabled(viewModel.powerState == .poweringOff)   // P204/S3
+            .disabled(viewModel.powerState == .poweringOff || floppyUAssigned)   // P204/S3, P1108
         }
     }
 

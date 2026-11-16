@@ -471,18 +471,19 @@ struct FileCommands: Commands {
 
     @ViewBuilder
     private func fddMenuItems(drive: Int) -> some View {
+        // P1108 (D-128): ふろっぴU君に割当て中のドライブは無効化する(MO/CDのisDisabledとは独立)。
         Button("Insert…") {
             emulatorViewModel.browseAndMountFDD(drive: drive)
         }
-        .disabled(isDisabled)
+        .disabled(isDisabled || (runState.floppyuAssignedMask >> drive) & 1 != 0)
         Button("Insert (Write-Protected)…") {
             emulatorViewModel.browseAndMountFDD(drive: drive, forceWriteProtect: true)
         }
-        .disabled(isDisabled)
+        .disabled(isDisabled || (runState.floppyuAssignedMask >> drive) & 1 != 0)
         Button("Eject") {
             emulatorViewModel.ejectFDD(drive: drive)
         }
-        .disabled(isDisabled)
+        .disabled(isDisabled || (runState.floppyuAssignedMask >> drive) & 1 != 0)
     }
 }
 

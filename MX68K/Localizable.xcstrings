@@ -1916,6 +1916,16 @@
         }
       }
     },
+    "Blank image created: %@ (not inserted: the drive is assigned to FloppyU)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "空イメージを作成しました: %@(ドライブがふろっぴU君に割当て中のため挿入していません)"
+          }
+        }
+      }
+    },
     "Board (CZ-6BM1 / YM3802 $EAFA00)": {
       "localizations": {
         "ja": {

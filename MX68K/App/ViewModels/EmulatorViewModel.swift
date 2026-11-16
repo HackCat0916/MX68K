@@ -379,6 +379,17 @@ class EmulatorViewModel: ObservableObject {
         engine.onStatusUpdate = { [weak self] newStatus in
             self?.status = newStatus
             self?.reconcileFDDMedia(newStatus)   // P443 (D-7)
+            // P1108 (D-128): Fileメニュー用のふろっぴU君割当てマスクのミラー。
+            // ★同値代入でも@Publishedは発火しCommandsが再評価される(D-49)ため、
+            // 値が変わったときだけ代入する。
+            var mask: UInt8 = 0
+            if newStatus.floppyu_assigned0 { mask |= 1 << 0 }
+            if newStatus.floppyu_assigned1 { mask |= 1 << 1 }
+            if newStatus.floppyu_assigned2 { mask |= 1 << 2 }
+            if newStatus.floppyu_assigned3 { mask |= 1 << 3 }
+            if mask != EmulatorRunState.shared.floppyuAssignedMask {
+                EmulatorRunState.shared.floppyuAssignedMask = mask
+            }
         }
         engine.onCRTCStatusUpdate = { [weak self] s in   // P286
             self?.crtcStatus = s
@@ -1734,6 +1745,11 @@ class EmulatorViewModel: ObservableObject {
             // P554: 展開 → 単一なら自動マウント / 複数なら選択シート / 失敗ならメッセージ。
             handleArchiveSelection(drive: drive, zipPath: url.path)
         } else {
+            // P1108 (D-128): ダイアログ表示中に割当てが変わった場合の二重ガード。
+            if isFloppyUAssigned(drive: drive) {
+                mx68k_log("[P1108-GUARD] browseAndMountFDD: drive \(drive) はふろっぴU君に割当て中のためマウントしない")
+                return
+            }
             // P599: zip 由来の一時的な書込み禁止が残っていれば先に復元してから読む。
             let wp = forceWriteProtect ?? resolvedWriteProtectForNewMount(drive: drive)
             mountFDD(drive: drive, path: url.path, writeProtect: wp)
@@ -1745,6 +1761,19 @@ class EmulatorViewModel: ObservableObject {
                 setFddWriteProtectBeforeZip(drive, fddWriteProtect(drive))
                 setFddWriteProtect(drive, true)
             }
+        }
+    }
+
+    /// P1108 (D-128) — 指定ドライブがふろっぴU君に割当て中か(実効値、約1Hz更新)。
+    /// ユーザー操作起点のマウント入口とツールバーのdisabled判定に使う。
+    /// mountFDD/ejectFDD自身では見ない(起動時復元・電源OFF排出を巻き込まないため)。
+    func isFloppyUAssigned(drive: Int) -> Bool {
+        switch drive {
+        case 0: return status.floppyu_assigned0
+        case 1: return status.floppyu_assigned1
+        case 2: return status.floppyu_assigned2
+        case 3: return status.floppyu_assigned3
+        default: return false
         }
     }
 
@@ -1819,6 +1848,13 @@ class EmulatorViewModel: ObservableObject {
     /// 破棄後に書込み内容が失われるため、**強制的に書込み禁止**でマウントする
     /// (ユーザー承認済みの安全策)。
     func mountFDDFromArchive(drive: Int, extractedPath: String, tempDir: URL) {
+        // P1108 (D-128): zip経由の全入口(ダイアログ/D&D/選択シート)はここを通る。
+        // ★引数tempDirは展開済みで未記録のため、ここで破棄しないと残留する。
+        if isFloppyUAssigned(drive: drive) {
+            mx68k_log("[P1108-GUARD] mountFDDFromArchive: drive \(drive) はふろっぴU君に割当て中のためマウントしない")
+            ArchiveMountService.cleanup(tempDir)
+            return
+        }
         // ★ 旧一時ディレクトリの破棄。mountFDD 側でも同じ処理を行うが(通常ファイルでの
         //   上書きマウント経路をカバーするため)、こちら側でも明示的に先行して呼ぶ
         //   — 新しい tempDir を記録するのは mountFDD の後なので、破棄対象を取り違えない。

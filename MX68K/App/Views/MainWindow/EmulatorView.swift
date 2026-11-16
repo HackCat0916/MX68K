@@ -133,6 +133,12 @@ struct EmulatorView: View {
                                 if ext == "zip" {
                                     viewModel.handleArchiveSelection(drive: drive, zipPath: url.path)
                                 } else {
+                                    // P1108 (D-128): ふろっぴU君に割当て中のドライブへはマウントしない
+                                    // (zip分岐はmountFDDFromArchive側でガード)。
+                                    if viewModel.isFloppyUAssigned(drive: drive) {
+                                        mx68k_log("[P1108-GUARD] D&D: drive \(drive) はふろっぴU君に割当て中のためマウントしない")
+                                        return
+                                    }
                                     // P599: zip 由来の一時的な書込み禁止が残っていれば先に復元してから読む。
                                     let wp = viewModel.resolvedWriteProtectForNewMount(drive: drive)
                                     viewModel.mountFDD(drive: drive, path: url.path, writeProtect: wp)

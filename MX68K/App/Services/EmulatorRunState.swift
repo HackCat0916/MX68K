@@ -19,4 +19,8 @@ final class EmulatorRunState: ObservableObject {
     /// P1046 — 外付けFDDユニット設定の軽量ミラー。FD2/FD3メニューの`.disabled`
     /// 判定に使う。isRecordingと同じ理由(EmulatorViewModel直接観測を避ける)。
     @Published var externalFDDUnitEnabled = false
+    /// P1108 (D-128) — ふろっぴU君に割当て中のドライブのビットマスク
+    /// (bit0=FD0 .. bit3=FD3)。FDメニューの`.disabled`判定に使う軽量ミラー。
+    /// 更新側は値が変わったときだけ代入すること(D-49)。
+    @Published var floppyuAssignedMask: UInt8 = 0
 }
