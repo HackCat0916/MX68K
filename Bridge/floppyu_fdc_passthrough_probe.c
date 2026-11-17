@@ -656,7 +656,8 @@ static uint32_t    s_nmf_seen, s_nmf_ref[NMF_REF_N], s_nmf_sends, s_nmf_ok, s_nm
                    s_nmf_tracks_ok, s_nmf_verify_runs, s_nmf_verify_ok, s_nmf_verify_bad, s_nmf_verify_skipped,
                    s_nmf_verify_at[3], s_nmf_c_deficit_n, s_nmf_relay_lost_n, s_nmf_runs_started, s_nmf_runs_completed,
                    s_nmf_runs_aborted, s_nmf_pcn_rec, s_nmf_pcn_inval_seek, s_nmf_pcn_inval_sense, s_nmf_pcn_inval_bringup,
-                   s_nmf_pcn_inval_sync, s_nmf_pcn_inval_all, s_nmf_map_inval, s_nmf_wr_refused;
+                   s_nmf_pcn_inval_sync, s_nmf_pcn_inval_all, s_nmf_map_inval, s_nmf_wr_refused,
+                   s_nmf_pcn_inval_diag;   /* P1116: READ DIAG 中継(装置内 seekAgain でヘッドが動き得る) */
 static uint32_t    s_nmf_wr_mt = 0, s_nmf_wr_multi = 0, s_nmf_wr_nbig = 0;   /* WRITE DATA の受付前拒否の内訳(R-g2 観測用) */
 /* 行種別ごとの予算(各 FU_AR_LOG_LIMIT)。1走行=154トラックで precheck/result/verify 各154行、sent+wsync 308行 */
 static uint32_t    s_nmf_pre_lines = 0, s_nmf_lines = 0, s_nmf_res_lines = 0, s_nmf_v_lines = 0, s_nmf_pcn_lines = 0;
@@ -677,7 +678,7 @@ static int         s_nmf_ld_f = 0;
 static uint32_t    s_nmf_c77_seen = 0, s_nmf_c77_cand = 0, s_nmf_absorbed = 0, s_nmf_c77_lines = 0;
 /* 失効点別の計数(有効な記録を実際に消した回数だけ数える) */
 static uint32_t    s_nmf_ld_exp_write = 0, s_nmf_ld_exp_seek = 0, s_nmf_ld_exp_install = 0, s_nmf_ld_exp_halt = 0,
-                   s_nmf_ld_exp_fmt = 0;
+                   s_nmf_ld_exp_fmt = 0, s_nmf_ld_exp_diag = 0;   /* P1116: READ DIAG 中継で失効 */
 static void rl_nmf_halt(const char* why);
 #ifdef MX68K_FLOPPYU_USB_SELFTEST
 static int      s_st_nmf_force_ret = 0;    /* 単体テスト専用: 次の1回の normal FORMAT 送信を装置へ送らずこの戻り値とする */
@@ -742,6 +743,7 @@ static uint32_t s_rl_wr_supp_e5r, s_rl_wr_supp_e5w, s_rl_wr_supp_e7w;
 static uint32_t s_rl_wr_pre_lines, s_rl_wr_lines;
 /* P1033: E5W ログ専用の行数カウンタ(書込み診断行 s_rl_wr_lines の予算を消費しないよう分離) */
 static uint32_t s_rl_e5w_lines = 0;
+static uint32_t s_rl_ejg_lines = 0;   /* P1117: EJGUARD 抑止行と、抑止時の E5W 排出行の出力数(FU_LOG_LIMIT まで) */
 
 /* P1035: MX68K_FLOPPYU_WRITE=1(mode1)段階1。WP=0 の書込み可能ディスクへも送るが、WPセンサーと独立した柵
  * (送信上限1回/プロセス・許可ユニット必須・許可セクタ必須・読み戻しベリファイ)を全て満たした場合のみ。
@@ -763,6 +765,10 @@ static int      s_rl_wv_pre_valid = 0;     /* 書込み前に許可セクタを�
 static uint32_t s_rl_wv_pre_fnv = 0;
 /* 読出し開始時のCHRN/ユニット(read end ログ用。後続コマンドで s_rl_cmd が上書きされても正しい値を出すため) */
 static uint8_t  s_rl_rd_chrn[4], s_rl_rd_us = 0;
+/* P1116(D-139): 進行中の読出しが READ DIAGNOSTIC か。DIAG のデータは要求 CHRN のセクタとは限らない
+ * (Core:fdc.c:193-200 の retid 比較)ため、書込み安全フック(武装・柵解除・読み戻し照合)へ流さない */
+static int      s_rl_rd_is_diag = 0;
+static uint32_t s_rl_diag_begin, s_rl_diag_ok, s_rl_diag_hook_skip;   /* diag_hook_skip==diag_ok が常に成り立つはず */
 /* 集計(分母と分子を併記) */
 static uint32_t s_rl_m1_ref_env, s_rl_m1_ref_unit, s_rl_m1_ref_chr, s_rl_m1_ref_max, s_rl_m1_pass;
 static uint32_t s_rl_m1_ok_written, s_rl_m1_ok_chrn_unexp, s_rl_m1_fence_reads_ok;
@@ -2017,7 +2023,8 @@ static void rl_set_result(const uint8_t* r, uint32_t n)
     s_rl_state = n ? RL_RESULT : RL_IDLE;
 }
 
-/* P1058: 書込み系の合成エラーの直近記録(rl_e5_write の排出ビット抑止窓の起点) */
+/* P1058/P1117(D-140): MXが合成した全ての異常終了(読取り系・READ ID を含む)と、書込み系の装置の本物の異常終了の
+ * 直近記録(rl_e5_write の排出ビット抑止窓の起点) */
 static int      s_rl_se_valid = 0;
 static int      s_rl_se_f     = 0;      /* 合成時のエミュフレーム */
 static uint8_t  s_rl_se_us_mx = 0;      /* 合成時のユニット選択(ログ用、窓判定はユニット非依存) */
@@ -2025,21 +2032,33 @@ static uint8_t  s_rl_se_st1   = 0;
 static uint8_t  s_rl_se_cmd   = 0;
 static uint32_t s_rl_e5_ej_supp = 0;    /* 抑止回数カウンタ(sumログ用) */
 static uint32_t s_rl_se_n     = 0;      /* 書込み系合成エラーの発生回数累積(自己反証可能性の分母) */
+static uint32_t s_rl_se_rd_n  = 0;      /* 書込み系以外(読取り系・READ ID 等)の合成エラー記録回数(P1117、sum 用) */
 
-/* P1058: 書込み系(WRITE DATA/WRITE DELETED/FORMAT)のエラーをゲストへ返した記録(排出ビット抑止窓の起点)。
- * P1087(C'-E): rl_synth_err から切り出し(挙動同一)、装置の本物の異常終了を素通しするとき(device_err_nm 系)にも呼ぶ。
- * ゲストからは合成エラーと本物のエラーを区別できないため、書込み系エラー直後は排出を中継しないという不変条件を統一する */
+/* P1117(D-140): 排出抑止窓の起点を無条件に記録する。MX が合成した異常終了はコマンド種別を問わずゲストから本物と区別できない。
+ * 合成エラーは (i) 拒否合成(装置へ送らずMXが拒否、実機なら成功しうる: rl_refuse の全理由・書込み送信前拒否・fmt1/nmf 拒否)と
+ * (ii) 代理合成(装置側の本物の失敗[無応答・途切れ・切断・t事象・媒体事象等]をMXが代わりに合成: rl_abort_op・送信失敗・
+ * フレーム長不足・invalid_result・未接続)に分かれるが、どちらも起点にする(代理合成の時点では装置と媒体の状態が分からず、
+ * 物理排出を中継するのは安全側ではないため。再試行ループで抑止が長引くリスクは P1117 計画 R2b でユーザー承認事項)。
+ * s_rl_se_n は従来どおり書込み系のみ数え、それ以外は s_rl_se_rd_n へ */
+static void rl_se_record(uint8_t st1)
+{
+    uint8_t cmd5 = s_rl_cmd[0] & 0x1Fu;
+    s_rl_se_valid = 1;
+    s_rl_se_f = g_mx68k_frame_num;
+    s_rl_se_us_mx = s_rl_us_mx;
+    s_rl_se_st1 = st1;
+    s_rl_se_cmd = s_rl_cmd[0];
+    if (cmd5 == 5u || cmd5 == 9u || cmd5 == 13u) s_rl_se_n++;
+    else                                          s_rl_se_rd_n++;
+}
+
+/* P1058/P1087(C'-E): 装置の本物の異常終了を素通しする場合(書込み結果の device_err_nm 系)は、従来どおり書込み系
+ * (WRITE DATA/WRITE DELETED/FORMAT)だけを起点にする。読取り系の本物の異常終了(DE/ND 等のプロテクト応答)は
+ * 正当な応答なので起点にしない(P1117) */
 static void rl_se_note(uint8_t st1)
 {
     uint8_t cmd5 = s_rl_cmd[0] & 0x1Fu;
-    if (cmd5 == 5u || cmd5 == 9u || cmd5 == 13u) {
-        s_rl_se_valid = 1;
-        s_rl_se_f = g_mx68k_frame_num;
-        s_rl_se_us_mx = s_rl_us_mx;
-        s_rl_se_st1 = st1;
-        s_rl_se_cmd = s_rl_cmd[0];
-        s_rl_se_n++;
-    }
+    if (cmd5 == 5u || cmd5 == 9u || cmd5 == 13u) rl_se_record(st1);
 }
 
 /* 合成エラー: ST0=0x40|US_mx, ST1=st1, ST2=0, C/H/R/N=パラメータエコー(XM6t fdc_bridger.h:851-858) */
@@ -2050,7 +2069,7 @@ static void rl_synth_err(uint8_t st1, int with_chrn)
     r[1] = st1;
     if (with_chrn) { r[3] = s_rl_cmd[2]; r[4] = s_rl_cmd[3]; r[5] = s_rl_cmd[4]; r[6] = s_rl_cmd[5]; }
     rl_set_result(r, FU_RESULT_LEN);
-    rl_se_note(st1);
+    rl_se_record(st1);   /* P1117(D-140): コマンド種別を問わず排出抑止窓の起点にする */
 }
 
 /* P1087(D): 書込み系の異常で bringup を無効化した直後に呼ぶ。次のゲストコマンドが no_bringup でスタブ NR
@@ -2108,12 +2127,13 @@ static void rl_log_read_end(const char* result, int fnv_valid, uint32_t fnv)
     if (fnv_valid) snprintf(fh, sizeof(fh), "0x%08x", (unsigned)fnv);
     else           snprintf(fh, sizeof(fh), "-");
     debug_log(P1009_TAG " read end f=%d gen=%u result=%s len=%d got=%u wait_us=%lld wait_frames=%d msr_wait=%u other_bytes=%u"
-              " C=%u H=%u R=%u N=%u us_dev=%u data_fnv=%s\n",
+              " C=%u H=%u R=%u N=%u us_dev=%u data_fnv=%s diag=%d\n",
               g_mx68k_frame_num, (unsigned)s_rl_op_gen, result,
               s_rl_seen_r ? (int)s_rl_frame_len : -1, (unsigned)(s_rl_seen_r ? s_rl_p2_got : 0),
               (long long)(now - s_rl_op_t0_us), g_mx68k_frame_num - s_rl_op_f0,
               (unsigned)s_rl_msr_wait, (unsigned)s_rl_other_bytes,
-              s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], s_rl_rd_chrn[3], (unsigned)s_rl_rd_us, fh);
+              s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], s_rl_rd_chrn[3], (unsigned)s_rl_rd_us, fh,
+              s_rl_rd_is_diag);   /* P1116: READ DATA と READ DIAG の終了を区別する */
 }
 
 static void rl_log_rid_end(const char* result, const uint8_t* res)
@@ -2353,7 +2373,8 @@ static void rl_refuse(int nw, const char* why)
         debug_log(P1009_TAG " refused f=%d cmd=0x%02x us_mx=0x%02x reason=%s prm_dev=%s\n",
                   g_mx68k_frame_num, (unsigned)s_rl_cmd[0], (unsigned)s_rl_us_mx, why, ph);
     }
-    /* 書込み系は NW(ST1 bit1)。MX独自方針で、実機/XM6t忠実ではない */
+    /* 書込み系は NW(ST1 bit1)。MX独自方針で、実機/XM6t忠実ではない。
+     * P1117(D-140): コマンド種別(読取り系を含む)を問わず、この合成エラーは排出抑止窓の起点になる(rl_synth_err) */
     rl_synth_err(nw ? 0x02u : 0x00u, cmd != 13u);
     rl_raise_int();
 }
@@ -2361,6 +2382,8 @@ static void rl_refuse(int nw, const char* why)
 static void rl_read_begin(void)
 {
     const uint8_t* p = s_rl_cmd;   /* [0]cmd [1]US/HD [2]C [3]H [4]R [5]N [6]EOT [7]GPL [8]DTL */
+    s_rl_rd_is_diag = ((p[0] & 0xBFu) == 0x02u);   /* P1116: rl_exec の case 2 から来た READ DIAG */
+    if (s_rl_rd_is_diag) s_rl_diag_begin++;
     s_rl_rd_d_begin = s_rl_d_events;
     memcpy(s_rl_rd_ue_begin, s_nm_ue, sizeof(s_rl_rd_ue_begin));   /* P1055: 4ユニット分(s_rl_rd_us の設定順に依存しない) */
     s_rl_rd_gen_begin = mx68k_floppyu_usb_generation();
@@ -2390,6 +2413,13 @@ static void rl_read_begin(void)
         return;
     }
     s_rl_last_io_frame[fu_status_dev_to_mx(s_rl_rd_us)] = g_mx68k_frame_num;   /* P1092: 表示用(s_rl_rd_us は装置側) */
+    if (s_rl_rd_is_diag) {
+        /* P1116: 装置は READ DIAG のときだけ最後のゲスト SEEK を装置内で再実行する(app.c:2207-2212、RECAL では消えない)。
+         * ヘッドが MX に見えないまま動き得るので、ゲスト SEEK と同じく PCN 記録と完走記録を失効させる。
+         * 送信失敗時(上の fault 経路)は装置へ9バイト揃っておらず seekAgain() は実行されないので失効させない */
+        rl_nmf_pcn_invalidate(s_rl_rd_us, &s_nmf_pcn_inval_diag);
+        if (s_nmf_ld_valid && s_rl_rd_us == s_nmf_ld_us) { s_nmf_ld_valid = 0; s_nmf_ld_exp_diag++; }
+    }
     s_rl_cf_first = 1;   /* P1051: READ 系は装置の同期フラグを立てる(app.c@2191) */
     s_rl_op_gen = mx68k_floppyu_usb_generation();
     s_rl_op_t0_us = rl_now_us();
@@ -2556,33 +2586,37 @@ static void rl_read_frame_done(void)
     uint32_t n = len - FU_RESULT_LEN;
     memcpy(s_rl_dev_result, s_rl_frame + n, FU_RESULT_LEN);
     s_rl_read_ok++;
+    if (s_rl_rd_is_diag) s_rl_diag_ok++;
     s_rl_frame_fnv = rl_fnv(s_rl_frame, n);   /* P1035: read end 行へ出すため、ログより先に計算する */
     rl_log_read_end("ok", 1, s_rl_frame_fnv);
-    rl_ar_on_read_ok(n);   /* P1037: armed の武装・照合(armed 以外では何もしない) */
-    rl_nm_on_read_ok(n);   /* P1053: normal の柵解除・照合(normal 以外では何もしない) */
-    /* P1035: mode1 の読み戻しベリファイ(ログ機械照合のみ。ゲストへ返すデータ・リザルトには影響しない) */
-    if (s_rl_write_mode == WRM_WRITE && s_rl_wf_env_ok && s_rl_rd_us == (uint8_t)s_rl_wf_unit &&
-        memcmp(s_rl_rd_chrn, s_rl_wf_chrn, 4) == 0) {
-        s_rl_m1_fence_reads_ok++;
-        if (s_rl_wr_sends == 0) { s_rl_wv_pre_valid = 1; s_rl_wv_pre_fnv = s_rl_frame_fnv; }   /* 書込み前の元データ */
-    }
-    if (s_rl_wv_pending && s_rl_rd_us == s_rl_wv_us && memcmp(s_rl_rd_chrn, s_rl_wv_chrn, 4) == 0) {
-        int match = (n == s_rl_wr_n) && (s_rl_frame_fnv == s_rl_wv_fnv);
-        int changed = s_rl_wv_pre_valid ? (s_rl_frame_fnv != s_rl_wv_pre_fnv) : -1;
-        if (match) s_rl_wv_match++; else s_rl_wv_mismatch++;
-        s_rl_wv_pending = 0;   /* 照合は書込み後の最初の1回のみ */
-        if (s_rl_wv_lines < FU_LOG_LIMIT) {
-            char ph[16];
-            s_rl_wv_lines++;
-            if (s_rl_wv_pre_valid) snprintf(ph, sizeof(ph), "0x%08x", (unsigned)s_rl_wv_pre_fnv);
-            else                   snprintf(ph, sizeof(ph), "-");
-            debug_log(P1035_VERIFY_TAG " verify f=%d us_dev=%u C=%u H=%u R=%u N=%u outcome=%s written_fnv=0x%08x"
-                      " read_fnv=0x%08x read_n=%u written_n=%u pre_fnv=%s match=%d changed=%d\n",
-                      g_mx68k_frame_num, (unsigned)s_rl_rd_us, s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2],
-                      s_rl_rd_chrn[3], s_rl_wv_outcome, (unsigned)s_rl_wv_fnv, (unsigned)s_rl_frame_fnv,
-                      (unsigned)n, (unsigned)s_rl_wr_n, ph, match, changed);
+    /* P1116: READ DIAG のデータは要求 CHRN のセクタとは限らないので、書込み安全フックへは流さない(安全側) */
+    if (!s_rl_rd_is_diag) {
+        rl_ar_on_read_ok(n);   /* P1037: armed の武装・照合(armed 以外では何もしない) */
+        rl_nm_on_read_ok(n);   /* P1053: normal の柵解除・照合(normal 以外では何もしない) */
+        /* P1035: mode1 の読み戻しベリファイ(ログ機械照合のみ。ゲストへ返すデータ・リザルトには影響しない) */
+        if (s_rl_write_mode == WRM_WRITE && s_rl_wf_env_ok && s_rl_rd_us == (uint8_t)s_rl_wf_unit &&
+            memcmp(s_rl_rd_chrn, s_rl_wf_chrn, 4) == 0) {
+            s_rl_m1_fence_reads_ok++;
+            if (s_rl_wr_sends == 0) { s_rl_wv_pre_valid = 1; s_rl_wv_pre_fnv = s_rl_frame_fnv; }   /* 書込み前の元データ */
         }
-    }
+        if (s_rl_wv_pending && s_rl_rd_us == s_rl_wv_us && memcmp(s_rl_rd_chrn, s_rl_wv_chrn, 4) == 0) {
+            int match = (n == s_rl_wr_n) && (s_rl_frame_fnv == s_rl_wv_fnv);
+            int changed = s_rl_wv_pre_valid ? (s_rl_frame_fnv != s_rl_wv_pre_fnv) : -1;
+            if (match) s_rl_wv_match++; else s_rl_wv_mismatch++;
+            s_rl_wv_pending = 0;   /* 照合は書込み後の最初の1回のみ */
+            if (s_rl_wv_lines < FU_LOG_LIMIT) {
+                char ph[16];
+                s_rl_wv_lines++;
+                if (s_rl_wv_pre_valid) snprintf(ph, sizeof(ph), "0x%08x", (unsigned)s_rl_wv_pre_fnv);
+                else                   snprintf(ph, sizeof(ph), "-");
+                debug_log(P1035_VERIFY_TAG " verify f=%d us_dev=%u C=%u H=%u R=%u N=%u outcome=%s written_fnv=0x%08x"
+                          " read_fnv=0x%08x read_n=%u written_n=%u pre_fnv=%s match=%d changed=%d\n",
+                          g_mx68k_frame_num, (unsigned)s_rl_rd_us, s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2],
+                          s_rl_rd_chrn[3], s_rl_wv_outcome, (unsigned)s_rl_wv_fnv, (unsigned)s_rl_frame_fnv,
+                          (unsigned)n, (unsigned)s_rl_wr_n, ph, match, changed);
+            }
+        }
+    } else s_rl_diag_hook_skip++;
     int all_same = (n > 0);
     for (uint32_t i = 0; i < n; i++) if (s_rl_frame[i] != s_rl_frame[0]) { all_same = 0; break; }
     char dh[2 * 32 + 8];
@@ -5086,6 +5120,19 @@ static void rl_exec(void)
         rl_read_begin();
         return;
     }
+    case 2: {   /* P1116(D-139)/P1117: READ DIAGNOSTIC。MT=0・SK=0((cmd&0xBF)==0x02、XEiJ+t/XM6t/装置app.c と同じ判定)かつ
+                 * R==EOT かつ 1<=N<=6 のみ中継。R==EOT ならゲストの期待転送量は (EOT-R+1)=1 セクタ(Core:fdc.c FDC_NextTrack と同じ)で、
+                 * 装置が EOT によらず出す 128<<N の TC と一致する。R<EOT は装置の転送量が不足するので拒否(EJGUARD の起点になる)。
+                 * 理由文字列 diag_multi は互換のため据置(意味は R≠EOT)。N=0 は DTL 指定のため除外。
+                 * 装置内 seekAgain() はヘッドを動かし得るので、FORMAT 検証予約中は中継しない */
+        uint8_t r = s_rl_cmd[4], n = s_rl_cmd[5], eot = s_rl_cmd[6];
+        if ((s_rl_cmd[0] & 0xBFu) != 0x02u) { rl_refuse(0, "diag_sk_mt"); return; }
+        if (r != eot)                        { rl_refuse(0, "diag_multi"); return; }
+        if (n < 1u || n > 6u)                { rl_refuse(0, "diag_n"); return; }
+        if (s_rl_fmt1_verify_pending || s_nmf_verify_pending) { rl_refuse(0, "diag_fmt_verify_pending"); return; }
+        rl_read_begin();
+        return;
+    }
     case 10: rl_rid_begin(); return;
     case 4:  rl_sds(); return;
     case 7: case 15: rl_seek(); return;
@@ -5114,7 +5161,7 @@ static void rl_exec(void)
         s_nmf_ref[s_rl_write_mode == WRM_NORMAL ? NMF_REF_OFF : NMF_REF_MODE]++;
         rl_refuse(1, "write");
         return;
-    default: rl_refuse(0, "unsupported"); return;   /* 2/12/17/25/29 */
+    default: rl_refuse(0, "unsupported"); return;   /* 12/17/25/29 */
     }
 }
 
@@ -5928,9 +5975,9 @@ static void rl_nmf_log_sum(const char* why)
               " verify_pending=%d c_deficit_n=%u relay_lost_n=%u runs_started=%u runs_completed=%u runs_aborted=%u"
               " run_active=%d run_us=%u run_pos=%u run_n=%u,%u,%u,%u chain_ok=%d halt=%d halt_why=%s partial=%d"
               " ui_halted=%d inflight=%d pcn_rec=%u pcn_inval_seek=%u pcn_inval_sense=%u pcn_inval_bringup=%u"
-              " pcn_inval_sync=%u pcn_inval_all=%u map_inval=%u wr_refused_verify=%u wr_mt=%u wr_multi=%u wr_n_large=%u"
-              " c77_seen=%u c77_cand=%u absorbed_c77=%u ld_valid=%d ld_exp=write:%u,seek:%u,install:%u,halt:%u,fmt:%u"
-              " latched=%d router=%d\n",
+              " pcn_inval_sync=%u pcn_inval_all=%u pcn_inval_diag=%u map_inval=%u wr_refused_verify=%u wr_mt=%u wr_multi=%u"
+              " wr_n_large=%u c77_seen=%u c77_cand=%u absorbed_c77=%u ld_valid=%d ld_exp=write:%u,seek:%u,install:%u,halt:%u,fmt:%u"
+              " ld_exp_diag=%u latched=%d router=%d\n",
               (unsigned)g_mx68k_frame_num, why, s_nmf_on, NMF_SRC_NAME[s_nmf_src], (unsigned)s_nmf_seen, rs,
               (unsigned)s_nmf_sends, (unsigned)s_nmf_ok, (unsigned)s_nmf_nw, (unsigned)s_nmf_n_unexp, (unsigned)s_nmf_invalid,
               (unsigned)s_nmf_tracks_ok, (unsigned)s_nmf_verify_runs, (unsigned)s_nmf_verify_ok, (unsigned)s_nmf_verify_bad,
@@ -5943,11 +5990,11 @@ static void rl_nmf_log_sum(const char* why)
               (s_nmf_halt || (s_rl_wr_latched_off && s_nmf_run_active)) ? 1 : 0, s_nmf_inflight,
               (unsigned)s_nmf_pcn_rec, (unsigned)s_nmf_pcn_inval_seek, (unsigned)s_nmf_pcn_inval_sense,
               (unsigned)s_nmf_pcn_inval_bringup, (unsigned)s_nmf_pcn_inval_sync, (unsigned)s_nmf_pcn_inval_all,
-              (unsigned)s_nmf_map_inval, (unsigned)s_nmf_wr_refused, (unsigned)s_nmf_wr_mt, (unsigned)s_nmf_wr_multi,
+              (unsigned)s_nmf_pcn_inval_diag, (unsigned)s_nmf_map_inval, (unsigned)s_nmf_wr_refused, (unsigned)s_nmf_wr_mt, (unsigned)s_nmf_wr_multi,
               (unsigned)s_nmf_wr_nbig,
               (unsigned)s_nmf_c77_seen, (unsigned)s_nmf_c77_cand, (unsigned)s_nmf_absorbed, s_nmf_ld_valid,
               (unsigned)s_nmf_ld_exp_write, (unsigned)s_nmf_ld_exp_seek, (unsigned)s_nmf_ld_exp_install,
-              (unsigned)s_nmf_ld_exp_halt, (unsigned)s_nmf_ld_exp_fmt,
+              (unsigned)s_nmf_ld_exp_halt, (unsigned)s_nmf_ld_exp_fmt, (unsigned)s_nmf_ld_exp_diag,
               s_rl_wr_latched_off, en);
 }
 
@@ -6003,7 +6050,7 @@ static void rl_log_sum(void)
               " rp_e5_rd=%u rp_e5_wr=%u rp_e7_wr=%u rp_cmd_wr=%u rp_msr_rd=%u rp_total=%u retry_same_chr=%u"
               " dnb_set=%u dnb_clr_sense=%u dnb_clr_timeout=%u dnb_clr_disc=%u dnb_clr_fault=%u dnb_clr_other=%u"
               " dnb_busy_reads=%u dnb_sense_no_se=%u dnb_mask_now=0x%02x result_discarded=%u/%u"
-              " rebringup_inline=%u/%u/%u\n",
+              " rebringup_inline=%u/%u/%u diag_begin=%u diag_ok=%u diag_hook_skip=%u se_rd_n=%u ejg_supp=%u\n",
               (unsigned)g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(),
               s_rl_last_mode == 1 ? "relay" : "stub", s_rl_reason ? s_rl_reason : "-", hr, hs, hf,
               (unsigned)s_rl_read_begin, (unsigned)s_rl_read_ok, (unsigned)s_rl_read_err[RE_TIMEOUT],
@@ -6032,7 +6079,9 @@ static void rl_log_sum(void)
               (unsigned)s_rl_dnb_clr_disc, (unsigned)s_rl_dnb_clr_fault, (unsigned)s_rl_dnb_clr_other,
               (unsigned)s_rl_dnb_busy_reads, (unsigned)s_rl_dnb_sense_no_se, (unsigned)s_rl_dnb_mx,
               (unsigned)s_rl_result_discarded, (unsigned)s_p955_cmd_start,
-              (unsigned)s_rl_rebringup_ok, (unsigned)s_rl_rebringup_fail, (unsigned)s_rl_rebringup_skip);   /* P1087(D): ok/fail/skip */
+              (unsigned)s_rl_rebringup_ok, (unsigned)s_rl_rebringup_fail, (unsigned)s_rl_rebringup_skip,   /* P1087(D): ok/fail/skip */
+              (unsigned)s_rl_diag_begin, (unsigned)s_rl_diag_ok, (unsigned)s_rl_diag_hook_skip,   /* P1116 */
+              (unsigned)s_rl_se_rd_n, (unsigned)s_rl_e5_ej_supp);   /* P1117: nm sum の ej_supp と別名 */
     /* P1052: 既存の集計行の書式は変えず、別の1行で出す */
     debug_log(P1052_TAG " sum f=%u D=%u d=%u pend_set=%u coalesced=%u raised=%u masked=%u deferred_irq1=%u"
               " deferred_cdef=%u deferred_wr=%u defer_streak_max=%u requeued=%u requeued_ext=%u inflight=%d acked=%u"
@@ -6477,6 +6526,9 @@ static void rl_install_reset(void)
     s_rl_last_mode = -1;
     s_rl_last_reason = NULL;
     s_rl_synth_after_read = 0;
+    /* P1116: DIAG 判別フラグは読出しごとに rl_read_begin で再設定する。計数(diag_begin/ok/hook_skip)は
+     * read_begin/read_ok と同じ行で比較するため、それらと同じくプロセス寿命とする */
+    s_rl_rd_is_diag = 0;
     s_rl_spec_capturing = 0;
     s_rl_verify_pending = 0;
     s_rl_c_irq_live = 0;           /* P1028: リセットで保留中の割込みは無効になる */
@@ -6650,17 +6702,25 @@ static void rl_e5_write(void)
     uint8_t v = s_p955_dev_ctrl;
     uint8_t v_orig = v;   /* P1058: E5Wログ・is_eject 判定はゲストの元の指示値で行う */
     int us_match = s_rl_se_valid && (s_rl_se_us_mx == s_rl_us_mx);
-    /* P1058: 書込み系の合成エラー直後の排出指示は実機へ中継しない(bit5 のみ落とし、他ビットは送る) */
+    /* P1058/P1117(D-140): MXが合成した異常終了(読取り系を含む)・書込み系の装置の本物の異常終了の直後の排出指示は
+     * 実機へ中継しない(bit5 のみ落とし、他ビットは送る) */
+    int supp = 0, supp_logged = 0;
     if ((v & 0x20u) && s_rl_se_valid &&
         (uint32_t)(g_mx68k_frame_num - s_rl_se_f) <= FU_EJECT_GUARD_FRAMES) {
         v &= ~0x20u;
+        supp = 1;
         s_rl_e5_ej_supp++;
-        /* P1058: 抑止ログ、予算対象外で必ず出す(排出関連は稀かつ診断上重要、P1057と同方針) */
-        debug_log(P1058_EJGUARD_TAG " suppress f=%d v=0x%02x sent=0x%02x dt_f=%d se_st1=0x%02x"
-                  " se_cmd=0x%02x se_us=0x%02x us_match=%d\n",
-                  g_mx68k_frame_num, (unsigned)v_orig, (unsigned)v,
-                  (int)(g_mx68k_frame_num - s_rl_se_f), (unsigned)s_rl_se_st1,
-                  (unsigned)s_rl_se_cmd, (unsigned)s_rl_se_us_mx, us_match);
+        /* P1117(Fable5 M2): 再試行ループで無制限に出ないよう FU_LOG_LIMIT で打ち切る。以降は sum の ejg_supp で数える。
+         * 末尾の n= は抑止の通番(行数との差で打ち切りを判別する) */
+        if (s_rl_ejg_lines < FU_LOG_LIMIT) {
+            s_rl_ejg_lines++;
+            supp_logged = 1;
+            debug_log(P1058_EJGUARD_TAG " suppress f=%d v=0x%02x sent=0x%02x dt_f=%d se_st1=0x%02x"
+                      " se_cmd=0x%02x se_us=0x%02x us_match=%d n=%u\n",
+                      g_mx68k_frame_num, (unsigned)v_orig, (unsigned)v,
+                      (int)(g_mx68k_frame_num - s_rl_se_f), (unsigned)s_rl_se_st1,
+                      (unsigned)s_rl_se_cmd, (unsigned)s_rl_se_us_mx, us_match, (unsigned)s_rl_e5_ej_supp);
+        }
     }
     if (s_rl_e5_sent_valid && v == s_rl_e5_sent) return;
     uint8_t tx[2] = { FU_WR | FU_REG_E5, v };
@@ -6668,9 +6728,11 @@ static void rl_e5_write(void)
      * (EJGUARD で落とした場合は排出しないので e5 扱い) */
     rl_wc_note_trigger((v & 0x20u) ? WCF_E5_EJECT : WCF_E5);
     if (rl_p1("e5_write", tx, 2, NULL, 0) < 0) return;
-    /* P1057: 排出ビット(bit5)の中継は稀・診断上重要なため予算対象外で必ず出す(P1058: 抑止時も v_orig で判定) */
+    /* P1057: 排出ビット(bit5)の中継は稀・診断上重要なため予算対象外で必ず出す(P1058: 抑止時も v_orig で判定)。
+     * P1117(Fable5 M2): 実際に bit5 を送った排出は必ず出す。抑止した排出は抑止行と同じ上限に従う */
     int is_eject = (v_orig & 0x20u) ? 1 : 0;
-    if (is_eject || s_rl_e5w_lines < FU_LOG_LIMIT) {
+    int log_eject = is_eject && (!supp || supp_logged);
+    if (log_eject || (!is_eject && s_rl_e5w_lines < FU_LOG_LIMIT)) {
         if (!is_eject) s_rl_e5w_lines++;
         debug_log(P1033_E5_TAG " f=%d v=0x%02x sent=0x%02x eject_bit5=%d prev=0x%02x prev_valid=%d PC=0x%06x\n",
                   g_mx68k_frame_num, (unsigned)v_orig, (unsigned)v, is_eject,
