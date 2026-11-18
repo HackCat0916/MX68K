@@ -61,6 +61,20 @@ struct GeneralSettingsView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                // P1118(D-141): ~/Library は Finder で既定非表示のため、ログフォルダを直接開く。
+                // パス構成は LogViewerView.swift / ConfigManager.swift と同じ手順。
+                Button("Show Log Folder in Finder") {
+                    let appSupport = FileManager.default.urls(
+                        for: .applicationSupportDirectory, in: .userDomainMask).first!
+                    let folder = appSupport.appendingPathComponent("MX68K", isDirectory: true)
+                    let logFile = folder.appendingPathComponent("debug.log")
+                    if FileManager.default.fileExists(atPath: logFile.path) {
+                        NSWorkspace.shared.activateFileViewerSelecting([logFile])
+                    } else {
+                        NSWorkspace.shared.open(folder)
+                    }
+                }
+                .help("Opens the folder where debug.log, config.json, and SRAM files are stored. This folder is hidden by default in Finder.")
             }
 
             Section(header: Text("Screenshot Folder")) {

@@ -5095,6 +5095,26 @@
         }
       }
     },
+    "Opens debug.log in Finder (or its folder if the file doesn't exist yet).": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "debug.log を Finder で選択表示します(ファイルがまだ無い場合は格納フォルダを開きます)。"
+          }
+        }
+      }
+    },
+    "Opens the folder where debug.log, config.json, and SRAM files are stored. This folder is hidden by default in Finder.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "debug.log・config.json・SRAM ファイルが保存されているフォルダを Finder で開きます。このフォルダは Finder では既定で非表示になっています。"
+          }
+        }
+      }
+    },
     "OPM (FM) Volume": {
       "localizations": {
         "ja": {
@@ -6551,6 +6571,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "全チャンネル表示"
+          }
+        }
+      }
+    },
+    "Show in Finder": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finderで表示"
+          }
+        }
+      }
+    },
+    "Show Log Folder in Finder": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ログフォルダをFinderで表示"
           }
         }
       }

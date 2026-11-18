@@ -70,6 +70,17 @@ final class LogViewerModel: ObservableObject {
         lines = []
     }
 
+    /// debug.log を Finder で選択表示する(P1118、D-141)。ファイルが未生成なら
+    /// 格納フォルダ自体を開く(フォルダも無い場合は NSWorkspace.open が静かに失敗するのみ)。
+    func revealInFinder() {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: logURL.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([logURL])
+        } else {
+            NSWorkspace.shared.open(logURL.deletingLastPathComponent())
+        }
+    }
+
     /// 配列を保持上限まで切り詰めて返す(`lines` へは書き込まない)。
     /// ★`ingest()` が `lines` へ 1 回だけ代入する構造を保つための純関数
     ///   ——ここで `lines` を直接触ると `@Published` の二重 publish になる。
@@ -248,6 +259,10 @@ struct LogViewerView: View {
                     showStatus(message)
                 }
                 .help("Copies the lines currently visible (after the filter above) to the clipboard as plain text.")
+                Button("Show in Finder") {
+                    model.revealInFinder()
+                }
+                .help("Opens debug.log in Finder (or its folder if the file doesn't exist yet).")
             }
             // 出現/消失でレイアウトが揺れないよう、常に 1 行ぶんの高さを確保する。
             Text(statusMessage ?? " ")
