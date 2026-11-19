@@ -32,12 +32,14 @@
  *    コマンドをコマンド単位で装置へ中継する。不成立なら従来のスタブ(Not Ready)のまま。
  *    中継するもの: SPECIFY(Coreへも送るミラー)・SENSE DEVICE STATUS・RECALIBRATE/SEEK・
  *    SENSE INTERRUPT STATUS・READ ID・単一セクタのREAD DATA・$E94005/$E94007。
+ *    (P1116: 単一セクタの READ DIAGNOSTIC、P1120/D-142: 単一セクタの READ DELETED DATA も条件付きで中継)
  *    READ DATA のデータは、受信バッファを Core の DMA ch0 が ReadyCB 経由で1Bずつ引き取る
  *    (候補C1、Core標準FD経路と同じ順序で最後のデータB読出し時に割込み)。
  *    WRITE系は装置へ一切送らず書込み禁止(NW)エラーを合成する(MX独自方針)。
  *    (P1031: MX68K_FLOPPYU_WRITE=dryrun でデータ収集のみ。P1032: =wponly で、送信直前の非キャッシュ
  *     SDS が FT=0・WP=1・RY=1 を示した WRITE DATA 単一セクタに限り装置へ実送信する [P1032-WRSEND])
- *    マルチセクタ・MT=1・READ DELETED/DIAG・SCAN も装置へ送らず異常終了を合成する。
+ *    マルチセクタ・MT=1・SCAN も装置へ送らず異常終了を合成する
+ *    (READ DIAG は P1116、READ DELETED は P1120 で条件付き中継。条件外の形は異常終了を合成する)。
  *    port1 の同期往復はエミュレーションスレッド上で行い、port2 の唯一の消費者もこのスレッド。
  *    設計・定数の根拠は .mx68k_cycles/P1009_plan.md(記号表・変更内容 1-a〜1-k)。
  *
@@ -769,6 +771,10 @@ static uint8_t  s_rl_rd_chrn[4], s_rl_rd_us = 0;
  * (Core:fdc.c:193-200 の retid 比較)ため、書込み安全フック(武装・柵解除・読み戻し照合)へ流さない */
 static int      s_rl_rd_is_diag = 0;
 static uint32_t s_rl_diag_begin, s_rl_diag_ok, s_rl_diag_hook_skip;   /* diag_hook_skip==diag_ok が常に成り立つはず */
+/* P1120(D-142): 進行中の読出しのコマンド番号(cmd & 0x1F)。書込み安全フックは READ DATA(6)のときだけ適用する(許可リスト) */
+static uint8_t  s_rl_rd_cmd5 = 0;
+static int      s_rl_rd_is_rdel = 0;   /* P1120: rl_exec の case 12 から来た READ DELETED DATA */
+static uint32_t s_rl_rdel_begin, s_rl_rdel_ok, s_rl_rdel_hook_skip;   /* rdel_hook_skip==rdel_ok が常に成り立つはず */
 /* 集計(分母と分子を併記) */
 static uint32_t s_rl_m1_ref_env, s_rl_m1_ref_unit, s_rl_m1_ref_chr, s_rl_m1_ref_max, s_rl_m1_pass;
 static uint32_t s_rl_m1_ok_written, s_rl_m1_ok_chrn_unexp, s_rl_m1_fence_reads_ok;
@@ -2127,13 +2133,14 @@ static void rl_log_read_end(const char* result, int fnv_valid, uint32_t fnv)
     if (fnv_valid) snprintf(fh, sizeof(fh), "0x%08x", (unsigned)fnv);
     else           snprintf(fh, sizeof(fh), "-");
     debug_log(P1009_TAG " read end f=%d gen=%u result=%s len=%d got=%u wait_us=%lld wait_frames=%d msr_wait=%u other_bytes=%u"
-              " C=%u H=%u R=%u N=%u us_dev=%u data_fnv=%s diag=%d\n",
+              " C=%u H=%u R=%u N=%u us_dev=%u data_fnv=%s diag=%d rdel=%d\n",
               g_mx68k_frame_num, (unsigned)s_rl_op_gen, result,
               s_rl_seen_r ? (int)s_rl_frame_len : -1, (unsigned)(s_rl_seen_r ? s_rl_p2_got : 0),
               (long long)(now - s_rl_op_t0_us), g_mx68k_frame_num - s_rl_op_f0,
               (unsigned)s_rl_msr_wait, (unsigned)s_rl_other_bytes,
               s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], s_rl_rd_chrn[3], (unsigned)s_rl_rd_us, fh,
-              s_rl_rd_is_diag);   /* P1116: READ DATA と READ DIAG の終了を区別する */
+              s_rl_rd_is_diag,    /* P1116: READ DATA と READ DIAG の終了を区別する */
+              s_rl_rd_is_rdel);   /* P1120: READ DELETED の終了を区別する */
 }
 
 static void rl_log_rid_end(const char* result, const uint8_t* res)
@@ -2384,6 +2391,9 @@ static void rl_read_begin(void)
     const uint8_t* p = s_rl_cmd;   /* [0]cmd [1]US/HD [2]C [3]H [4]R [5]N [6]EOT [7]GPL [8]DTL */
     s_rl_rd_is_diag = ((p[0] & 0xBFu) == 0x02u);   /* P1116: rl_exec の case 2 から来た READ DIAG */
     if (s_rl_rd_is_diag) s_rl_diag_begin++;
+    s_rl_rd_cmd5 = p[0] & 0x1Fu;                    /* P1120: 書込み安全フックの許可リスト判定に使う */
+    s_rl_rd_is_rdel = (s_rl_rd_cmd5 == 0x0Cu);      /* P1120: rl_exec の case 12 から来た READ DELETED */
+    if (s_rl_rd_is_rdel) s_rl_rdel_begin++;
     s_rl_rd_d_begin = s_rl_d_events;
     memcpy(s_rl_rd_ue_begin, s_nm_ue, sizeof(s_rl_rd_ue_begin));   /* P1055: 4ユニット分(s_rl_rd_us の設定順に依存しない) */
     s_rl_rd_gen_begin = mx68k_floppyu_usb_generation();
@@ -2587,10 +2597,14 @@ static void rl_read_frame_done(void)
     memcpy(s_rl_dev_result, s_rl_frame + n, FU_RESULT_LEN);
     s_rl_read_ok++;
     if (s_rl_rd_is_diag) s_rl_diag_ok++;
+    if (s_rl_rd_is_rdel) s_rl_rdel_ok++;   /* P1120 */
     s_rl_frame_fnv = rl_fnv(s_rl_frame, n);   /* P1035: read end 行へ出すため、ログより先に計算する */
     rl_log_read_end("ok", 1, s_rl_frame_fnv);
-    /* P1116: READ DIAG のデータは要求 CHRN のセクタとは限らないので、書込み安全フックへは流さない(安全側) */
-    if (!s_rl_rd_is_diag) {
+    /* P1116/P1120: 書込み安全フックは READ DATA のときだけ適用する(許可リスト)。READ DATA 以外
+     * (DIAG: 要求 CHRN のセクタとは限らない[P1116]、DELETED: DDAM セクタが ST2=0 で読め、柵が開くと後続の
+     * WRITE DATA が DDAM→DAM へ書き換え得る[P1120])は書込み安全フックへ流さない。新しい読取り系コマンドを
+     * 中継に加えても、ここに明示しない限りフック対象外になる(既定で安全側) */
+    if (s_rl_rd_cmd5 == 0x06u) {
         rl_ar_on_read_ok(n);   /* P1037: armed の武装・照合(armed 以外では何もしない) */
         rl_nm_on_read_ok(n);   /* P1053: normal の柵解除・照合(normal 以外では何もしない) */
         /* P1035: mode1 の読み戻しベリファイ(ログ機械照合のみ。ゲストへ返すデータ・リザルトには影響しない) */
@@ -2616,7 +2630,10 @@ static void rl_read_frame_done(void)
                           (unsigned)n, (unsigned)s_rl_wr_n, ph, match, changed);
             }
         }
-    } else s_rl_diag_hook_skip++;
+    } else {
+        if (s_rl_rd_is_diag) s_rl_diag_hook_skip++;
+        if (s_rl_rd_is_rdel) s_rl_rdel_hook_skip++;   /* P1120 */
+    }
     int all_same = (n > 0);
     for (uint32_t i = 0; i < n; i++) if (s_rl_frame[i] != s_rl_frame[0]) { all_same = 0; break; }
     char dh[2 * 32 + 8];
@@ -5113,7 +5130,8 @@ static void rl_exec(void)
 {
     uint8_t cmd = s_rl_cmd[0] & 0x1Fu;
     switch (cmd) {
-    case 6: {   /* READ DATA: 単一セクタ(MT=0 かつ R==EOT)かつ (128<<N)+7 <= FU_FRAME_CAP のみ中継 */
+    case 6: {   /* READ DATA: 単一セクタ(MT=0 かつ R==EOT)かつ N<=6 のみ中継(FU_FRAME_CAP は N=7 まで収容できるが、
+                 * READ DATA で N=7 の観測例が無いため据置。P1119/D-136 でコメントを実装に合わせて訂正) */
         int mt = (s_rl_cmd[0] >> 7) & 1;
         uint8_t r = s_rl_cmd[4], n = s_rl_cmd[5], eot = s_rl_cmd[6];
         if (mt || r != eot || n > 6u) { rl_refuse(0, mt ? "mt" : (r != eot ? "multi_sector" : "n_too_large")); return; }
@@ -5121,15 +5139,25 @@ static void rl_exec(void)
         return;
     }
     case 2: {   /* P1116(D-139)/P1117: READ DIAGNOSTIC。MT=0・SK=0((cmd&0xBF)==0x02、XEiJ+t/XM6t/装置app.c と同じ判定)かつ
-                 * R==EOT かつ 1<=N<=6 のみ中継。R==EOT ならゲストの期待転送量は (EOT-R+1)=1 セクタ(Core:fdc.c FDC_NextTrack と同じ)で、
+                 * R==EOT かつ 1<=N<=7((128<<N)+7 <= FU_FRAME_CAP)のみ中継(P1119/D-136 で上限を 6→7 に訂正)。R==EOT ならゲストの期待転送量は (EOT-R+1)=1 セクタ(Core:fdc.c FDC_NextTrack と同じ)で、
                  * 装置が EOT によらず出す 128<<N の TC と一致する。R<EOT は装置の転送量が不足するので拒否(EJGUARD の起点になる)。
                  * 理由文字列 diag_multi は互換のため据置(意味は R≠EOT)。N=0 は DTL 指定のため除外。
                  * 装置内 seekAgain() はヘッドを動かし得るので、FORMAT 検証予約中は中継しない */
         uint8_t r = s_rl_cmd[4], n = s_rl_cmd[5], eot = s_rl_cmd[6];
         if ((s_rl_cmd[0] & 0xBFu) != 0x02u) { rl_refuse(0, "diag_sk_mt"); return; }
         if (r != eot)                        { rl_refuse(0, "diag_multi"); return; }
-        if (n < 1u || n > 6u)                { rl_refuse(0, "diag_n"); return; }
+        if (n < 1u || n > 7u)                { rl_refuse(0, "diag_n"); return; }
         if (s_rl_fmt1_verify_pending || s_nmf_verify_pending) { rl_refuse(0, "diag_fmt_verify_pending"); return; }
+        rl_read_begin();
+        return;
+    }
+    case 12: {   /* P1120(D-142): READ DELETED DATA。MT=0・SK=0 かつ R==EOT かつ 1<=N<=6 のみ中継(READ DATA と同じ単一セクタ条件、
+                  * XEiJ+t/XM6t/装置app.c は 0x0C を READ DATA と同じ読取り経路で中継する)。装置は seekAgain しないので
+                  * PCN 失効・FORMAT 検証予約中の拒否は不要。結果は書込み安全フックへ流さない(rl_read_frame_done) */
+        uint8_t r = s_rl_cmd[4], n = s_rl_cmd[5], eot = s_rl_cmd[6];
+        if ((s_rl_cmd[0] & 0xA0u) != 0u) { rl_refuse(0, "rdel_sk_mt"); return; }
+        if (r != eot)                    { rl_refuse(0, "rdel_multi"); return; }
+        if (n < 1u || n > 6u)            { rl_refuse(0, "rdel_n"); return; }
         rl_read_begin();
         return;
     }
@@ -5161,7 +5189,7 @@ static void rl_exec(void)
         s_nmf_ref[s_rl_write_mode == WRM_NORMAL ? NMF_REF_OFF : NMF_REF_MODE]++;
         rl_refuse(1, "write");
         return;
-    default: rl_refuse(0, "unsupported"); return;   /* 12/17/25/29 */
+    default: rl_refuse(0, "unsupported"); return;   /* 17/25/29 */
     }
 }
 
@@ -6050,7 +6078,8 @@ static void rl_log_sum(void)
               " rp_e5_rd=%u rp_e5_wr=%u rp_e7_wr=%u rp_cmd_wr=%u rp_msr_rd=%u rp_total=%u retry_same_chr=%u"
               " dnb_set=%u dnb_clr_sense=%u dnb_clr_timeout=%u dnb_clr_disc=%u dnb_clr_fault=%u dnb_clr_other=%u"
               " dnb_busy_reads=%u dnb_sense_no_se=%u dnb_mask_now=0x%02x result_discarded=%u/%u"
-              " rebringup_inline=%u/%u/%u diag_begin=%u diag_ok=%u diag_hook_skip=%u se_rd_n=%u ejg_supp=%u\n",
+              " rebringup_inline=%u/%u/%u diag_begin=%u diag_ok=%u diag_hook_skip=%u se_rd_n=%u ejg_supp=%u"
+              " rdel_begin=%u rdel_ok=%u rdel_hook_skip=%u\n",
               (unsigned)g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(),
               s_rl_last_mode == 1 ? "relay" : "stub", s_rl_reason ? s_rl_reason : "-", hr, hs, hf,
               (unsigned)s_rl_read_begin, (unsigned)s_rl_read_ok, (unsigned)s_rl_read_err[RE_TIMEOUT],
@@ -6081,7 +6110,8 @@ static void rl_log_sum(void)
               (unsigned)s_rl_result_discarded, (unsigned)s_p955_cmd_start,
               (unsigned)s_rl_rebringup_ok, (unsigned)s_rl_rebringup_fail, (unsigned)s_rl_rebringup_skip,   /* P1087(D): ok/fail/skip */
               (unsigned)s_rl_diag_begin, (unsigned)s_rl_diag_ok, (unsigned)s_rl_diag_hook_skip,   /* P1116 */
-              (unsigned)s_rl_se_rd_n, (unsigned)s_rl_e5_ej_supp);   /* P1117: nm sum の ej_supp と別名 */
+              (unsigned)s_rl_se_rd_n, (unsigned)s_rl_e5_ej_supp,   /* P1117: nm sum の ej_supp と別名 */
+              (unsigned)s_rl_rdel_begin, (unsigned)s_rl_rdel_ok, (unsigned)s_rl_rdel_hook_skip);   /* P1120 */
     /* P1052: 既存の集計行の書式は変えず、別の1行で出す */
     debug_log(P1052_TAG " sum f=%u D=%u d=%u pend_set=%u coalesced=%u raised=%u masked=%u deferred_irq1=%u"
               " deferred_cdef=%u deferred_wr=%u defer_streak_max=%u requeued=%u requeued_ext=%u inflight=%d acked=%u"
@@ -6529,6 +6559,9 @@ static void rl_install_reset(void)
     /* P1116: DIAG 判別フラグは読出しごとに rl_read_begin で再設定する。計数(diag_begin/ok/hook_skip)は
      * read_begin/read_ok と同じ行で比較するため、それらと同じくプロセス寿命とする */
     s_rl_rd_is_diag = 0;
+    /* P1120: 同様に cmd5/rdel フラグだけリセット。rdel 計数は diag 計数と同じくプロセス寿命 */
+    s_rl_rd_cmd5 = 0;
+    s_rl_rd_is_rdel = 0;
     s_rl_spec_capturing = 0;
     s_rl_verify_pending = 0;
     s_rl_c_irq_live = 0;           /* P1028: リセットで保留中の割込みは無効になる */
