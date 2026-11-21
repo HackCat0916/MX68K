@@ -7869,6 +7869,16 @@
         }
       }
     },
+    "Writing to drive %lld: Stopped until restart — FloppyU discarded unwritten data": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ドライブ%lldへの書込み: 再起動まで停止中 — ふろっぴU君が未書込みのデータを破棄しました"
+          }
+        }
+      }
+    },
     "Writing: Off": {
       "localizations": {
         "ja": {

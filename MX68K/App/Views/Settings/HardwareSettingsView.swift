@@ -163,6 +163,13 @@ struct HardwareSettingsView: View {
         return (fast != 0, dirty != 0, Int(unverified), Int(mismatches), discarded != 0)
     }
 
+    // P1124(D-144): ユニット限定で書込み停止中の MX ドライブ番号(実行中の値、1秒周期で読む)
+    private func floppyUWriteUnitStopDrives() -> [Int] {
+        var mask: Int32 = 0
+        mx68k_floppyu_get_write_unit_stop(&mask)
+        return (0..<4).filter { (mask >> Int32($0)) & 1 != 0 }
+    }
+
     @ViewBuilder
     private func floppyUWriteStatusRow() -> some View {
         let st = floppyUWriteStatus()
@@ -184,6 +191,12 @@ struct HardwareSettingsView: View {
             }
         } else {
             Text("Writing: Off").font(.subheadline).foregroundColor(.secondary)
+        }
+        // P1124(D-144): 'D' による破棄は失ったドライブだけを停止する。全体の停止表示の有無に関係なく併記する
+        let unitStop = floppyUWriteUnitStopDrives()
+        ForEach(unitStop, id: \.self) { n in
+            Text("Writing to drive \(n): Stopped until restart — FloppyU discarded unwritten data")
+                .font(.subheadline).foregroundColor(.red)
         }
         // P1089(B-12): 高速モードのときだけ、未書込みデータの有無・未照合セクタ数・読み戻し不一致数を出す
         if fs.fast {

@@ -718,9 +718,15 @@ static int      s_st_nmf_force_ret = 0;    /* 単体テスト専用: 次の1回�
  *   rl_install_reset() を含め他のどの関数でも 0 に戻さないこと——ソフトリセット・機種切替のハードリセットで
  *   送信回数上限やラッチが解除されないようにするため(Fable5 M3)。
  *   P1037: armed の状態(s_rl_ar_armed・s_rl_ar_arm_used・s_rl_ar_arm_gen・s_rl_ar_arm_f・s_rl_ar_disarm・
- *   s_rl_ar_map と集計値)も同じ規律で、プロセス起動時以外に初期化し直さない(例外は環境変数の解析結果のみ) */
+ *   s_rl_ar_map と集計値)も同じ規律で、プロセス起動時以外に初期化し直さない(例外は環境変数の解析結果のみ)
+ *   P1124(D-144): ユニット限定ラッチ s_nm_unit_latch_mask(と why/f)も同じ規律の対象 */
 static uint32_t s_rl_wr_sends = 0;
 static int      s_rl_wr_latched_off = 0;
+static uint8_t     s_nm_unit_latch_mask = 0;          /* 装置側ユニット。性質L(データ消失)専用の再起動までのラッチ */
+static const char* s_nm_unit_latch_why[4] = { "-", "-", "-", "-" };
+static int         s_nm_unit_latch_f[4] = { -1, -1, -1, -1 };
+static uint32_t    s_nm_unit_latch_calls = 0, s_nm_ref_unit_latched = 0, s_nm_unit_latch_fallback = 0;
+static int         s_fu_wc_discard_global = 0;        /* rl_wc_discard が全体ラッチ側で立てた(UI の discarded 表示用) */
 static uint16_t s_rl_wr_mtc_begin = 0;     /* 収集開始時の DMAC MTC */
 static uint32_t s_rl_wr_gen_begin = 0;     /* 収集開始時の USB 接続世代 */
 static uint32_t s_rl_wr_d_begin = 0;       /* 収集開始時の 'D'/'d' 受信数 */
@@ -1062,6 +1068,7 @@ static rl_wc_pend_t s_fu_wc_pend[FU_WC_PEND_MAX];   /* 直近の flush 完了確
 static uint32_t s_fu_wc_pend_n = 0;
 static int      s_fu_wc_pend_ovf = 0;       /* 一覧が溢れた(このときは cached=1 かつ未照合の全セクタを対象にする) */
 static uint32_t s_fu_wc_send_est = 0;       /* 書込みコマンド送信時点の s_fu_wc_est('W' 待ち時間の est≥10 判定用) */
+static uint8_t  s_fu_wc_unit_mask = 0;      /* P1124: 最後の rl_wc_clear 以降に ok_cached を受理した装置側ユニットのビット集合 */
 /* 集計(分母と分子) */
 static uint32_t s_nm_ok_cached = 0, s_nm_fast_nosync = 0, s_nm_sds_skip_fast = 0, s_nm_sds_cf_first = 0;
 static uint32_t s_fu_wc_dirty_set = 0, s_fu_wc_flush_req_n = 0, s_fu_wc_clr[WCC_N];
@@ -1073,6 +1080,49 @@ static int64_t  s_rl_p1_flush_ext_max_us = 0;
 static int64_t  s_fu_wr_cmd_to_W_max_us = 0, s_fu_wr_cmd_to_W_max_us_est10 = 0;
 static uint32_t s_nm_v_match_cached = 0, s_nm_v_mismatch_cached = 0;
 static uint32_t s_nm_cached_unverified = 0;   /* rl_tick で周期的に数え直す(設定画面の状態行用、原子的に読む) */
+
+/* P1124(D-145): flush 所要時間の診断プローブ(挙動変更なし)。既存の状態変数を読むだけで、送信・ラッチ・dirty・pend・
+ * s_rl_seek_t_us を書き換えない。ビン幅 20ms は 2HD 1セクタ≈20.8ms(360rpm・8セクタ/トラック)の丸め、32ビン=0〜640ms。
+ * 全件行は独立予算 FU_FH_LINE_MAX(超過は dropped で計数)。記号の根拠は .mx68k_cycles/P1124_plan.md 記号表 */
+#define P1124_FH_TAG              "[P1124-FH]"
+#define FU_FH_BIN_US              20000
+#define FU_FH_NBIN                32
+#define FU_FH_LINE_MAX            512u
+enum { FH_SKIP_NOT_DIRTY = 0, FH_SKIP_RECENT_SEND, FH_SKIP_BUSY, FH_SKIP_LATCHED_OR_INVALID, FH_SKIP_N };
+static uint32_t s_fh_hist_seek_dirty[FU_FH_NBIN + 1], s_fh_hist_seek_clean[FU_FH_NBIN + 1];
+static uint32_t s_fh_hist_cmdw_full[FU_FH_NBIN + 1], s_fh_hist_cmdw_other[FU_FH_NBIN + 1], s_fh_hist_idle[FU_FH_NBIN + 1];
+static int      s_fh_seek_dirty[4], s_fh_seek_f[4];
+static uint32_t s_fh_seek_est[4], s_fh_seek_pend_n[4];
+static uint8_t  s_fh_seek_cyl[4];
+static char     s_fh_seek_last_pend[4][24];   /* 送信時点の未確定一覧の末尾(unit:C/H/R)、空なら "-" */
+static uint32_t s_fh_seek_sent = 0, s_fh_seek_sent_dirty = 0, s_fh_seek_done_all = 0, s_fh_seek_done_dirty = 0;
+static uint32_t s_fh_cmdw_n = 0, s_fh_cmdw_est10 = 0, s_fh_idle_n = 0, s_fh_idle_skip[FH_SKIP_N];
+static uint32_t s_fh_lines = 0, s_fh_lines_dropped = 0;
+
+static void fh_hist_add(uint32_t* h, int64_t us)
+{
+    int64_t b = us < 0 ? 0 : us / FU_FH_BIN_US;
+    if (b > FU_FH_NBIN) b = FU_FH_NBIN;
+    h[b]++;
+}
+/* 非ゼロのビンだけを idx:count で並べる(溢れビンは ovf:count)。全て 0 なら "-" */
+static void fh_hist_str(char* out, size_t sz, const uint32_t* h)
+{
+    size_t o = 0;
+    out[0] = '\0';
+    for (int i = 0; i <= FU_FH_NBIN && o + 20 < sz; i++) {
+        if (!h[i]) continue;
+        if (i == FU_FH_NBIN) o += (size_t)snprintf(out + o, sz - o, "%sovf:%u", o ? "," : "", (unsigned)h[i]);
+        else                 o += (size_t)snprintf(out + o, sz - o, "%s%d:%u", o ? "," : "", i, (unsigned)h[i]);
+    }
+    if (o == 0) snprintf(out, sz, "-");
+}
+static int fh_line_ok(void)
+{
+    if (s_fh_lines >= FU_FH_LINE_MAX) { s_fh_lines_dropped++; return 0; }
+    s_fh_lines++;
+    return 1;
+}
 
 /* 判別保留を除いた柵の状態(ログ・拒否理由の分類用)。送信判断には rl_nm_fence_open を使う */
 static int rl_nm_fence_open_nohold(uint8_t us)
@@ -1134,6 +1184,34 @@ static void rl_nm_latch(const char* why)
     debug_log(P1053_TAG " latch f=%d why=%s d_events=%u gen=%u\n",
               g_mx68k_frame_num, why, (unsigned)s_rl_d_events, (unsigned)mx68k_floppyu_usb_generation());
 }
+/* P1124(D-144): normal の装置側ユニット限定の再起動までのラッチ(性質L=データ消失専用)。
+ * mask==0 は主張1上起き得ないが、起きたら安全側へ倒して全体ラッチにする。行は予算対象外(稀) */
+#define P1124_UL_TAG "[P1124-UL]"
+static void rl_nm_unit_latch(uint8_t mask, const char* why)
+{
+    if (s_rl_write_mode != WRM_NORMAL) return;
+    mask &= 0x0Fu;
+    if (mask == 0) {
+        s_nm_unit_latch_fallback++;
+        rl_nm_latch(why);
+        return;
+    }
+    uint8_t nw = (uint8_t)(mask & ~s_nm_unit_latch_mask);
+    for (uint8_t u = 0; u < 4u; u++) {
+        if (!((nw >> u) & 1u)) continue;
+        s_nm_unit_latch_why[u] = why;
+        s_nm_unit_latch_f[u] = g_mx68k_frame_num;
+    }
+    s_nm_unit_latch_mask |= mask;
+    s_nm_unit_latch_calls++;
+    uint8_t mxm = 0;
+    for (uint8_t u = 0; u < 4u; u++) if ((s_nm_unit_latch_mask >> u) & 1u) mxm |= (uint8_t)(1u << fu_status_dev_to_mx(u));
+    debug_log(P1124_UL_TAG " latch f=%d why=%s mask=0x%x new=0x%x total=0x%x mx_mask=0x%x d_events=%u gen=%u ue=%u,%u,%u,%u"
+              " global=%d\n",
+              g_mx68k_frame_num, why, (unsigned)mask, (unsigned)nw, (unsigned)s_nm_unit_latch_mask, (unsigned)mxm,
+              (unsigned)s_rl_d_events, (unsigned)mx68k_floppyu_usb_generation(),
+              (unsigned)s_nm_ue[0], (unsigned)s_nm_ue[1], (unsigned)s_nm_ue[2], (unsigned)s_nm_ue[3], s_rl_wr_latched_off);
+}
 /* 送信後に結果不明・不採用で既存ラッチへ入る経路(rl_ar_after_unknown から呼ぶ)。送信した書込みのセクタは照合しない */
 static void rl_nm_after_unknown(const char* why)
 {
@@ -1154,6 +1232,7 @@ static void rl_wc_clear(int why)
     s_fu_wc_est = 0;
     s_fu_wc_pend_n = 0;
     s_fu_wc_pend_ovf = 0;
+    s_fu_wc_unit_mask = 0;
 }
 
 /* P1089: dirty 中に flush 契機を送る(送った)ときに呼ぶ。dirty は保持し、この後の受信つき往復の成功で落とす(M1)。
@@ -1169,6 +1248,8 @@ static void rl_wc_note_trigger(int src)
 /* P1089: ok_cached を受理した。dirty を立て、照合表に対応するセクタなら未確定一覧へ加える */
 static void rl_wc_on_cached(uint8_t us_hd, int mapped, uint8_t us, uint32_t idx)
 {
+    /* P1124: mapped 判定より前に記録する(照合表外形状の ok_cached もユニット集合に含めるため) */
+    s_fu_wc_unit_mask |= (uint8_t)(1u << (us_hd & 3u));
     if (!s_fu_wc_dirty) { s_fu_wc_dirty_set++; s_fu_wc_dirty_f = g_mx68k_frame_num; }
     s_fu_wc_dirty = 1;
     s_fu_wc_est++;
@@ -1220,21 +1301,30 @@ static void rl_wc_pend_str(char* out, size_t sz)
 
 /* P1089: 装置が未 flush データを失った(失った可能性がある)。未確定セクタを uncertain にしてラッチし、dirty を落とす。
  * why: 'D' 受信=wcache_discard_D / USB 世代変化=gen_changed_dirty / bringup 前の flush 確認失敗=pre_reset_flush_fail。
- * 行は予算対象外('D' の破棄は稀かつ診断上重要。世代変化・確認失敗も同様に稀) */
-static void rl_wc_discard(const char* why)
+ * 行は予算対象外('D' の破棄は稀かつ診断上重要。世代変化・確認失敗も同様に稀)。
+ * P1124(D-144): unit_scope=1 なら失った可能性のある装置側ユニット(s_fu_wc_unit_mask)だけをラッチする('D' 受信のみ)。
+ * unit_scope=0 は従来どおり全体ラッチ(性質P: 世代変化・bringup 前の確認失敗) */
+static void rl_wc_discard(const char* why, int unit_scope)
 {
     char ps[FU_WC_PEND_MAX * 16 + 8];
     rl_wc_pend_str(ps, sizeof(ps));
     uint32_t est = s_fu_wc_est, pn = s_fu_wc_pend_n;
     int ovf = s_fu_wc_pend_ovf, fr = s_fu_wc_flush_req, src = s_fu_wc_flush_src;
+    uint8_t um = s_fu_wc_unit_mask;   /* rl_wc_clear より前に読む */
     uint32_t n = rl_wc_mark_uncertain();
     s_fu_wc_discard_sectors += n;
-    rl_nm_latch(why);
+    if (unit_scope) {
+        rl_nm_unit_latch(um, why);
+        if ((um & 0x0Fu) == 0 && s_rl_write_mode == WRM_NORMAL) s_fu_wc_discard_global = 1;   /* 全体ラッチへ退避した */
+    } else {
+        rl_nm_latch(why);
+        s_fu_wc_discard_global = 1;
+    }
     debug_log(P1089_TAG " discard f=%d why=%s est=%u pend_n=%u ovf=%d uncertain_n=%u pend=%s flush_req=%d flush_src=%s"
-              " dirty_f=%d last_cached_f=%d gen=%u d_events=%u latched=%d\n",
+              " dirty_f=%d last_cached_f=%d gen=%u d_events=%u latched=%d unit_mask=0x%x scope=%s\n",
               g_mx68k_frame_num, why, (unsigned)est, (unsigned)pn, ovf, (unsigned)n, ps, fr, WCF_NAME[src],
               s_fu_wc_dirty_f, s_fu_wc_last_cached_f, (unsigned)mx68k_floppyu_usb_generation(), (unsigned)s_rl_d_events,
-              s_rl_wr_latched_off);
+              s_rl_wr_latched_off, (unsigned)um, unit_scope ? "unit" : "global");
     rl_wc_clear(WCC_DISCARD);
 }
 
@@ -2263,7 +2353,7 @@ static void rl_reset_link_state(void)
         rl_nm_attr_reset(NM_AR_GEN, NM_CL_GEN, 0, was);
     }
     /* P1089(B-11): 抜去等の MX 起点でない切断では flush できない。dirty なら未確定セクタを uncertain にしてラッチ */
-    if (s_fu_wc_dirty) { s_fu_wc_gen_dirty++; rl_wc_discard("gen_changed_dirty"); }
+    if (s_fu_wc_dirty) { s_fu_wc_gen_dirty++; rl_wc_discard("gen_changed_dirty", 0); }
     rl_invalidate_caches();
     rl_nmf_pcn_invalidate(-1, &s_nmf_pcn_inval_all);   /* P1067: 世代変化(gen 比較でも落ちるが明示する) */
     s_rl_cf_first = 1;   /* P1051: 接続し直した装置の状態は不明。would_cache を過大に数えない側へ倒す */
@@ -3591,10 +3681,11 @@ static void rl_wr_try_send(void)
     /* 検査4: 送信回数上限・ラッチ(P1035: 上限はモード別。wponly 8 / mode1 1) */
     uint32_t send_max = rl_wr_send_max();
     int latched = s_rl_wr_latched_off;
-    int c4 = is_nm ? !latched : ((s_rl_wr_sends < send_max) && !latched);   /* P1053: normal はプロセス通算上限を持たない */
+    uint8_t us_dev = s_rl_cmd[1] & 3u;
+    int ulatched = is_nm && ((s_nm_unit_latch_mask >> us_dev) & 1u);   /* P1124(D-144): 装置側ユニット限定ラッチ */
+    int c4 = is_nm ? (!latched && !ulatched) : ((s_rl_wr_sends < send_max) && !latched);   /* P1053: normal はプロセス通算上限を持たない */
     /* 検査6(P1035、mode1のみ): 柵。装置側ユニットと C,H,R,N が環境変数の許可値と完全一致 */
     int is_w1 = (s_rl_write_mode == WRM_WRITE);
-    uint8_t us_dev = s_rl_cmd[1] & 3u;
     int f_unit = is_w1 && s_rl_wf_env_ok && (int)us_dev == s_rl_wf_unit;
     int f_chr  = is_w1 && s_rl_wf_env_ok && p[2] == s_rl_wf_chrn[0] && p[3] == s_rl_wf_chrn[1] &&
                  p[4] == s_rl_wf_chrn[2] && p[5] == s_rl_wf_chrn[3];
@@ -3675,6 +3766,10 @@ static void rl_wr_try_send(void)
         else if (!c10)                         { reason = "refused_format_verify"; s_nmf_wr_refused++; }   /* P1067 */
         else if (sds_ok && !(st3 & ST3_RY))    { reason = "refused_no_media";   s_nm_ref_no_media++; s_rl_wr_ref_no_media++; }
         else if (s_rl_wr_latched_off)          { reason = "refused_latched";    s_nm_ref_latched++; s_rl_wr_ref_latched++; }
+        /* P1124: ulatched は必ず !c9 より前に置く(!c9 は rl_nm_latch("loop") の副作用を持ち、ラッチ前に同一キーが
+         * 上限近くまで積まれていると、ラッチ後の同一キー再書込みで全体ラッチが復活してしまうため) */
+        else if (ulatched)                     { reason = "refused_unit_latched"; s_nm_ref_unit_latched++; s_nm_ref_latched++;
+                                                 s_rl_wr_ref_latched++; }
         else if (s_nm_unit_state < 0)          { reason = "refused_fence_env";  s_nm_ref_env++; }
         else if (!nm_unit)                     { reason = "refused_fence_unit"; s_nm_ref_unit++; }
         else if (!c8 && s_nm_st != NM_ST_I && rl_nm_fence_open_nohold(us_dev))
@@ -3720,6 +3815,11 @@ static void rl_wr_try_send(void)
         else if (!(st3 & ST3_RY))                   { reason = "refused_no_media";   s_rl_wr_ref_no_media++; }
         else                                        { reason = "refused_unknown";    s_rl_wr_ref_unknown++; }
     }
+    if (is_nm && strcmp(reason, "refused_unit_latched") == 0 && s_nm_ref_unit_latched == 1u) {   /* P1124: 初回の refused_unit_latched のみ(予算対象外) */
+        debug_log(P1124_UL_TAG " refuse f=%d unit=%u why=%s C=%u H=%u R=%u n=%u\n",
+                  g_mx68k_frame_num, (unsigned)us_dev, s_nm_unit_latch_why[us_dev], p[2], p[3], p[4],
+                  (unsigned)s_nm_ref_unit_latched);
+    }
     uint8_t want_log = (is_ar || is_nm) ? want_a : (is_w1 ? want_w : want);
     uint8_t mask_log = (is_ar || is_nm) ? 0xE7u : (is_w1 ? 0xA7u : 0xE7u);
     char mxs[16];
@@ -3730,7 +3830,7 @@ static void rl_wr_try_send(void)
         rl_hex(mh, sizeof(mh), lg.msr_pre, lg.polls, FU_WR_SDS_RQM_POLL_MAX);
         debug_log(P1032_TAG " precheck f=%d C=%u H=%u R=%u N=%u cmd=0x%02x us_mx=0x%02x us_dev=0x%02x"
                   " n=%u collect_n=%u expect=%u mtc_begin=0x%04x c1=%d mar0_valid=%d ocr0=0x%02x c2=%d"
-                  " relay=%d gen_begin=%u gen_now=%u d_begin=%u d_now=%u c3=%d sends=%u/%s latched=%d c4=%d"
+                  " relay=%d gen_begin=%u gen_now=%u d_begin=%u d_now=%u c3=%d sends=%u/%s latched=%d ulatched=%d c4=%d"
                   " sds_ret_tx=%d sds_msr_pre=%s sds_polls=%u sds_ret_st3=%d st3_dev=0x%02x sds_ret_post=%d"
                   " sds_msr_post=0x%02x sds_ok=%d sds_fail=%s want=0x%02x st3_masked=0x%02x RY=%d WP=%d FT=%d"
                   " decision=%s us=%lld\n",
@@ -3738,7 +3838,7 @@ static void rl_wr_try_send(void)
                   (unsigned)(p[1] & 7u), (unsigned)n, (unsigned)s_rl_wrcollect_n, (unsigned)expect,
                   (unsigned)s_rl_wr_mtc_begin, c1, s_rl_wrcollect_mar0_valid, (unsigned)s_rl_wrcollect_ocr0, c2,
                   relay, (unsigned)s_rl_wr_gen_begin, (unsigned)gen_now, (unsigned)s_rl_wr_d_begin, (unsigned)d_now,
-                  c3, (unsigned)s_rl_wr_sends, mxs, latched, c4,
+                  c3, (unsigned)s_rl_wr_sends, mxs, latched, ulatched, c4,
                   lg.ret_tx, lg.polls ? mh : "-", (unsigned)lg.polls, lg.ret_st3, (unsigned)lg.st3, lg.ret_post,
                   (unsigned)lg.msr_post, sds_ok, lg.fail, (unsigned)want_log, (unsigned)(lg.st3 & mask_log),
                   (lg.st3 & ST3_RY) ? 1 : 0, (lg.st3 & ST3_WP) ? 1 : 0, (lg.st3 & ST3_FT) ? 1 : 0,
@@ -4709,7 +4809,8 @@ static void rl_nmf_try_send(void)
     int unch = rl_nm_unit_unchanged(us);   /* 右辺は R1 で採取したこの FORMAT の収集開始時の ue */
     int a2 = relay && gen_now == s_rl_wr_gen_begin && unch;
     int latched = s_rl_wr_latched_off;
-    int a3 = !latched && !s_nmf_halt;
+    int ulatched = (s_nm_unit_latch_mask >> us) & 1u;   /* P1124(D-144): 装置側ユニット限定ラッチ */
+    int a3 = !latched && !s_nmf_halt && !ulatched;
     int a4 = s_nm_unit_state == 0 || (s_nm_unit_state == 1 && (int)us == s_nm_unit);
     int fence = rl_nm_fence_open(us);
     int a5 = fence;
@@ -4794,7 +4895,8 @@ static void rl_nmf_try_send(void)
             int pcn2 = s_nmf_pcn_valid[us] && s_nmf_pcn_ue[us] == s_nm_ue[us] && s_nmf_pcn_gen[us] == gen2 && s_nmf_pcn[us] == c;
             int run2 = !s_nmf_run_active ? (k == 0u) : (us == s_nmf_run_us && k == s_nmf_run_pos && s_nmf_chain_ok);
             c0 = relay2 && gen2 == s_rl_wr_gen_begin && rl_nm_unit_unchanged(us) && rl_nm_fence_open(us) &&
-                 !s_rl_wr_latched_off && !s_nmf_halt && !s_nmf_verify_pending && run2 && s_rl_state == RL_WR_COLLECT && pcn2;
+                 !s_rl_wr_latched_off && !((s_nm_unit_latch_mask >> us) & 1u) && !s_nmf_halt && !s_nmf_verify_pending && run2 &&
+                 s_rl_state == RL_WR_COLLECT && pcn2;
         }
     }
     int send = phase_a && fr_ok && b1 && b2 && c0;
@@ -4805,7 +4907,8 @@ static void rl_nmf_try_send(void)
         int rid_proc_fail = strcmp(rg.fail, "none") != 0 && strcmp(rg.fail, "c_without_cc") != 0 &&
                             strcmp(rg.fail, "no_c") != 0;
         if (!fr_ok)                                 ref = NMF_REF_FR_RELEASE;   /* P1123: 装置へ問い合わせていない */
-        else if (latched || s_rl_wr_latched_off)    ref = NMF_REF_LATCHED;
+        else if (latched || s_rl_wr_latched_off || ((s_nm_unit_latch_mask >> us) & 1u))
+                                                    ref = NMF_REF_LATCHED;
         else if (s_nmf_halt)                        ref = NMF_REF_HALT;
         else if (!a4)                               ref = NMF_REF_UNIT;
         else if (!a5)                               ref = NMF_REF_FENCE;
@@ -4845,7 +4948,7 @@ static void rl_nmf_try_send(void)
         else                     snprintf(ph, sizeof(ph), "-");
         debug_log(P1067_TAG " precheck f=%d phase=%s cmd=0x%02x hd_us=0x%02x us_mx=0x%02x unit=%u hd=%u N=%u SC=%u GPL=0x%02x"
                   " D=0x%02x cmd_n=%u n=%u collect_n=%u mtc_begin=0x%04x mar0_valid=%d ocr0=0x%02x ids=%s track=%u,%u k=%u"
-                  " a1=%d relay=%d gen_begin=%u gen_now=%u ue_begin=%u ue_now=%u st=%s unch=%d a2=%d latched=%d halt=%d a3=%d"
+                  " a1=%d relay=%d gen_begin=%u gen_now=%u ue_begin=%u ue_now=%u st=%s unch=%d a2=%d latched=%d ulatched=%d halt=%d a3=%d"
                   " allow_unit_state=%d allow_unit=%d a4=%d fo_valid=%d fo_ue=%u fo_gen=%u fence_open=%d a5=%d a6=%d a7=%d a7c=%d"
                   " pcn=%s pcn_valid=%d pcn_f=%d pcn_ue=%u pcn_gen=%u st0_seek=0x%02x pcn_ok=%d a8=%d"
                   " run_active=%d run_us=%u run_pos=%u run_n=%u run_ue=%u chain_ok=%d start_ok=%d order_ok=%d a9=%d a10=%d"
@@ -4858,7 +4961,7 @@ static void rl_nmf_try_send(void)
                   (unsigned)s_rl_wr_mtc_begin, s_rl_wrcollect_mar0_valid, (unsigned)s_rl_wrcollect_ocr0, idh,
                   (unsigned)c, (unsigned)hd, (unsigned)k,
                   a1, relay, (unsigned)s_rl_wr_gen_begin, (unsigned)gen_now, (unsigned)s_rl_wr_ue_begin[us],
-                  (unsigned)s_nm_ue[us], NM_ST_NAME[s_nm_st], unch, a2, latched, s_nmf_halt, a3,
+                  (unsigned)s_nm_ue[us], NM_ST_NAME[s_nm_st], unch, a2, latched, ulatched, s_nmf_halt, a3,
                   s_nm_unit_state, s_nm_unit, a4, s_nm_fo_valid[us], (unsigned)s_nm_fo_ue[us], (unsigned)s_nm_fo_gen[us],
                   fence, a5, a6, a7, a7c,
                   ph, s_nmf_pcn_valid[us], s_nmf_pcn_f[us], (unsigned)s_nmf_pcn_ue[us], (unsigned)s_nmf_pcn_gen[us],
@@ -5560,6 +5663,17 @@ static void rl_seek(void)
     /* P1123(V-3): RECAL の中継直前(上の検証・X4 失効の後、rl_send_cmd の直前)に強制READY を立てる(参照実装と同じ順序)。
      * 0xA3,0x40 の送信失敗(<0、rl_fault 済み)は既存の送信失敗経路(スタブ)へ */
     int fr = ((s_rl_cmd[0] & 0x1Fu) == 7u) ? rl_fr_on_recal(relay_after) : 0;
+    /* P1124(B-1、診断のみ): flush を伴う SEEK かを後から検証できるよう、送信直前の dirty 等を採取(送信成功後に確定) */
+    int fh_dirty = s_fu_wc_dirty, fh_f = g_mx68k_frame_num;
+    uint32_t fh_est = s_fu_wc_est, fh_pn = s_fu_wc_pend_n;
+    char fh_lp[24];
+    if (s_fu_wc_pend_n > 0) {
+        const rl_wc_pend_t* lp = &s_fu_wc_pend[s_fu_wc_pend_n - 1u];
+        snprintf(fh_lp, sizeof(fh_lp), "%u:%u/%u/%u", (unsigned)lp->us, (unsigned)(lp->idx / (FU_AR_NHEAD * FU_AR_NSEC)),
+                 (unsigned)((lp->idx / FU_AR_NSEC) % FU_AR_NHEAD), (unsigned)(lp->idx % FU_AR_NSEC + 1u));
+    } else {
+        snprintf(fh_lp, sizeof(fh_lp), "-");
+    }
     /* P1065(C-2): 検証中に中継不可になったら装置へ送らず、既存の送信失敗経路でスタブへ。
      * スタブがNot Readyの割込みを出すのでDnBは立てない */
     if (!relay_after || fr < 0 || rl_send_cmd(name) < 0) {
@@ -5569,6 +5683,14 @@ static void rl_seek(void)
     }
     s_rl_cf_first = 1;   /* P1051: ゲストの RECAL/SEEK は装置の同期フラグを立てる(app.c@2166/2170) */
     uint8_t u = s_rl_cmd[1] & 3u;
+    s_fh_seek_sent++;
+    if (fh_dirty) s_fh_seek_sent_dirty++;
+    s_fh_seek_dirty[u] = fh_dirty;
+    s_fh_seek_est[u] = fh_est;
+    s_fh_seek_pend_n[u] = fh_pn;
+    s_fh_seek_f[u] = fh_f;
+    s_fh_seek_cyl[u] = ((s_rl_cmd[0] & 0x1Fu) == 7u) ? 0u : s_rl_cmd[2];
+    memcpy(s_fh_seek_last_pend[u], fh_lp, sizeof(fh_lp));
     /* P1067: 装置へ実際に中継した後だけ PCN 記録を無効化する(次の SENSE INT まで位置は未確定)。送信できずスタブへ
      * 回した場合(上の rl_fallback_stub)は無効化しない——装置のヘッドは動いておらず、古い PCN が新しい ID 表の C と
      * 食い違うことが PCN 一致検査の拒否根拠になるため */
@@ -5792,6 +5914,21 @@ static void rl_on_c(void)
             if (s_rl_seek_t_us[u] && (seek_u < 0 || s_rl_seek_t_us[u] < best)) { seek_u = u; best = s_rl_seek_t_us[u]; }
         if (seek_u >= 0) { dt = now - best; s_rl_seek_t_us[seek_u] = 0; act = "seek_done"; }
         else             { s_rl_c_unsolicited++; act = "unsolicited"; }
+        if (seek_u >= 0) {   /* P1124(B-2、診断のみ): 送信時の dirty で2本のヒストグラムへ。dirty=1 は全件行 */
+            s_fh_seek_done_all++;
+            if (s_fh_seek_dirty[seek_u]) {
+                s_fh_seek_done_dirty++;
+                fh_hist_add(s_fh_hist_seek_dirty, dt);
+                if (fh_line_ok())
+                    debug_log(P1124_FH_TAG " seek f=%d sent_f=%d unit=%d dt_us=%lld dirty_at_seek=%d est=%u pend_n=%u last_pend=%s"
+                              " cyl=%u state=%s\n",
+                              g_mx68k_frame_num, s_fh_seek_f[seek_u], seek_u, (long long)dt, s_fh_seek_dirty[seek_u],
+                              (unsigned)s_fh_seek_est[seek_u], (unsigned)s_fh_seek_pend_n[seek_u], s_fh_seek_last_pend[seek_u],
+                              (unsigned)s_fh_seek_cyl[seek_u], RL_STATE_NAME[st]);
+            } else {
+                fh_hist_add(s_fh_hist_seek_clean, dt);
+            }
+        }
     }
     if (s_rl_c_lines < FU_LOG_LIMIT) {
         s_rl_c_lines++;
@@ -5937,7 +6074,7 @@ static void rl_p2_byte(uint8_t b)
                     rl_wc_clear(WCC_D_EJECT);
                 } else {
                     s_fu_wc_discard_D++;
-                    rl_wc_discard("wcache_discard_D");
+                    rl_wc_discard("wcache_discard_D", 1);
                 }
             }
             /* P1053: 'D'/'d' はユニット番号を持たない。P1055: ここでは記録のみ(ue は動かさない)。どのユニットを閉じるかは
@@ -5990,6 +6127,18 @@ static void rl_p2_byte(uint8_t b)
                     int64_t dw = rl_now_us() - s_rl_wr_send_t_us;
                     if (dw > s_fu_wr_cmd_to_W_max_us) s_fu_wr_cmd_to_W_max_us = dw;
                     if (s_fu_wc_send_est >= 10u && dw > s_fu_wr_cmd_to_W_max_us_est10) s_fu_wr_cmd_to_W_max_us_est10 = dw;
+                    /* P1124(B-3、診断のみ): est>=10(満杯 flush を伴う見込み)とそれ以外の2本。est>=10 は全件行 */
+                    s_fh_cmdw_n++;
+                    if (s_fu_wc_send_est >= 10u) {
+                        s_fh_cmdw_est10++;
+                        fh_hist_add(s_fh_hist_cmdw_full, dw);
+                        if (fh_line_ok())
+                            debug_log(P1124_FH_TAG " cmdw f=%d unit=%u dw_us=%lld est=%u pend_n=%u C=%u H=%u R=%u\n",
+                                      g_mx68k_frame_num, (unsigned)us_w, (long long)dw, (unsigned)s_fu_wc_send_est,
+                                      (unsigned)s_fu_wc_pend_n, s_rl_cmd[2], s_rl_cmd[3], s_rl_cmd[4]);
+                    } else {
+                        fh_hist_add(s_fh_hist_cmdw_other, dw);
+                    }
                 }
                 rl_wr_send_data();
             } else {
@@ -6142,7 +6291,7 @@ static void rl_wc_pre_reset(void)
                   g_mx68k_frame_num, (unsigned)us_hd, (unsigned)est, (unsigned)pn, ok, lg.fail, cleared,
                   (long long)(rl_now_us() - t0));
     }
-    if (!cleared) { s_fu_wc_pre_reset_fail++; rl_wc_discard("pre_reset_flush_fail"); }
+    if (!cleared) { s_fu_wc_pre_reset_fail++; rl_wc_discard("pre_reset_flush_fail", 0); }
 }
 
 static void rl_bringup(void)
@@ -6395,16 +6544,22 @@ static void rl_verify(void)
  * 触れない、N2)。この往復はエミュレーションスレッドを flush 完了まで止める(R7) */
 static void rl_wc_idle_tick(void)
 {
-    if (!s_fu_wc_dirty) return;
-    if (rl_now_us() - s_rl_wr_send_t_us < (int64_t)FU_WC_IDLE_CONFIRM_MS * 1000) return;
-    if (s_rl_state != RL_IDLE || s_rl_in_poll) return;
-    if (s_rl_wr_latched_off || !s_rl_bringup_valid || !rl_relay_ok() || !s_fu_wc_dirty) return;
+    /* P1124(B-4、診断のみ): 入口 return の理由別計数(判定式は不変) */
+    if (!s_fu_wc_dirty) { s_fh_idle_skip[FH_SKIP_NOT_DIRTY]++; return; }
+    if (rl_now_us() - s_rl_wr_send_t_us < (int64_t)FU_WC_IDLE_CONFIRM_MS * 1000) { s_fh_idle_skip[FH_SKIP_RECENT_SEND]++; return; }
+    if (s_rl_state != RL_IDLE || s_rl_in_poll) { s_fh_idle_skip[FH_SKIP_BUSY]++; return; }
+    if (s_rl_wr_latched_off || !s_rl_bringup_valid || !rl_relay_ok() || !s_fu_wc_dirty) {
+        s_fh_idle_skip[FH_SKIP_LATCHED_OR_INVALID]++;
+        return;
+    }
     uint8_t st3 = 0;
     rl_wr_sds_log_t lg;
     int64_t t0 = rl_now_us();
     uint32_t est = s_fu_wc_est, pn = s_fu_wc_pend_n;
     uint8_t us_hd = s_fu_wc_last_us;
     int ok = rl_wr_sds_fresh_us(us_hd, &st3, &lg, WCF_IDLE);
+    s_fh_idle_n++;
+    fh_hist_add(s_fh_hist_idle, rl_now_us() - t0);
     if (s_fu_wc_lines < FU_WC_LOG_LIMIT) {
         s_fu_wc_lines++;
         debug_log(P1089_TAG " idle_confirm f=%d us_hd=0x%02x est=%u pend_n=%u sds_ok=%d sds_fail=%s cleared=%d since_send_us=%lld"
@@ -6533,6 +6688,28 @@ static void rl_fast_log_sum(const char* why)
               (unsigned)s_rl_p1_timeouts, (long long)s_fu_wr_cmd_to_W_max_us, (long long)s_fu_wr_cmd_to_W_max_us_est10,
               (unsigned)s_nm_v_match_cached, (unsigned)s_nm_v_mismatch_cached, (unsigned)s_nm_cached_unverified,
               s_rl_wr_latched_off, s_nm_latch_why);
+}
+
+/* P1124(B-5): flush 所要時間プローブの集計行。分母(seek_sent・seek_done_*・ok_cached)とビン列・照合の分子を並べる */
+static void rl_fh_log_sum(const char* why)
+{
+    char hsd[512], hsc[512], hcf[512], hco[512], hid[512];
+    fh_hist_str(hsd, sizeof(hsd), s_fh_hist_seek_dirty);
+    fh_hist_str(hsc, sizeof(hsc), s_fh_hist_seek_clean);
+    fh_hist_str(hcf, sizeof(hcf), s_fh_hist_cmdw_full);
+    fh_hist_str(hco, sizeof(hco), s_fh_hist_cmdw_other);
+    fh_hist_str(hid, sizeof(hid), s_fh_hist_idle);
+    debug_log(P1124_FH_TAG " sum f=%u why=%s seek_sent=%u seek_sent_dirty=%u seek_done_all=%u seek_done_dirty=%u ok_cached=%u"
+              " c_unsolicited=%u cmdw_n=%u cmdw_est10=%u idle_n=%u bin_us=%d"
+              " hist_seek_dirty=%s hist_seek_clean=%s hist_cmdw_full=%s hist_cmdw_other=%s hist_idle=%s"
+              " idle_skip=not_dirty:%u,recent_send:%u,busy:%u,latched_or_invalid:%u lines=%u dropped=%u v_mismatch_cached=%u\n",
+              (unsigned)g_mx68k_frame_num, why, (unsigned)s_fh_seek_sent, (unsigned)s_fh_seek_sent_dirty,
+              (unsigned)s_fh_seek_done_all, (unsigned)s_fh_seek_done_dirty, (unsigned)s_nm_ok_cached,
+              (unsigned)s_rl_c_unsolicited, (unsigned)s_fh_cmdw_n, (unsigned)s_fh_cmdw_est10, (unsigned)s_fh_idle_n,
+              FU_FH_BIN_US, hsd, hsc, hcf, hco, hid,
+              (unsigned)s_fh_idle_skip[FH_SKIP_NOT_DIRTY], (unsigned)s_fh_idle_skip[FH_SKIP_RECENT_SEND],
+              (unsigned)s_fh_idle_skip[FH_SKIP_BUSY], (unsigned)s_fh_idle_skip[FH_SKIP_LATCHED_OR_INVALID],
+              (unsigned)s_fh_lines, (unsigned)s_fh_lines_dropped, (unsigned)s_nm_v_mismatch_cached);
 }
 
 static void rl_log_sum(void)
@@ -6740,7 +6917,9 @@ static void rl_log_sum(void)
                   " v_skip_err=%u v_skip_hold=%u distinct_written=%u pending_unverified=%u uncertain=%u ok_written=%u ok_unexpected=%u"
                   " sy_ok=%u sy_refused=%u sy_fail_c_fwd=%u sy_fence_closed=%u form_a=%u form_c=%u form4=%u form_other=%u"
                   " would_cache_n=%u sends=%u/- latched=%d latch_why=%s latch_calls=%u invalid_results=%u late_W=%u d_events=%u"
-                  " se_n=%u ej_supp=%u nm_err=%u/%u nm_err_limit=%u nm_err_bits=nd:%u,de:%u,or:%u,ma:%u nm_err_rej=%u\n",
+                  " se_n=%u ej_supp=%u nm_err=%u/%u nm_err_limit=%u nm_err_bits=nd:%u,de:%u,or:%u,ma:%u nm_err_rej=%u"
+                  " unit_latch_mask=0x%x unit_latch_why=%s,%s,%s,%s unit_latch_calls=%u ref_unit_latched=%u"
+                  " unit_latch_fallback=%u wc_unit_mask=0x%x\n",
                   (unsigned)g_mx68k_frame_num, ua, (unsigned)s_rl_wr_checks, (unsigned)s_nm_pass, (unsigned)s_nm_ref_need_read,
                   (unsigned)s_nm_ref_attr_hold,
                   (unsigned)s_nm_ref_loop, (unsigned)s_nm_ref_latched, (unsigned)s_nm_ref_wp, (unsigned)s_nm_ref_no_media,
@@ -6762,10 +6941,14 @@ static void rl_log_sum(void)
                   (unsigned)s_rl_d_events, (unsigned)s_rl_se_n, (unsigned)s_rl_e5_ej_supp,
                   (unsigned)s_nm_err_n, (unsigned)FU_NM_ERR_MAX, (unsigned)s_nm_err_limit,   /* P1087 */
                   (unsigned)s_nm_err_nd, (unsigned)s_nm_err_de, (unsigned)s_nm_err_or, (unsigned)s_nm_err_ma,
-                  (unsigned)s_nm_err_rej);
+                  (unsigned)s_nm_err_rej,
+                  (unsigned)s_nm_unit_latch_mask, s_nm_unit_latch_why[0], s_nm_unit_latch_why[1],   /* P1124 */
+                  s_nm_unit_latch_why[2], s_nm_unit_latch_why[3], (unsigned)s_nm_unit_latch_calls,
+                  (unsigned)s_nm_ref_unit_latched, (unsigned)s_nm_unit_latch_fallback, (unsigned)s_fu_wc_unit_mask);
         rl_nm_attr_log_sum();   /* P1055 */
     }
     if (s_rl_write_mode == WRM_NORMAL || s_fu_wc_dirty) rl_fast_log_sum("periodic");   /* P1089 */
+    if (s_rl_write_mode == WRM_NORMAL || s_fu_wc_dirty) rl_fh_log_sum("periodic");     /* P1124: P1089 sum と同じ条件 */
     if (s_rl_write_mode == WRM_NORMAL || s_fu_wc_dirty)                                 /* P1100: P1089 sum と同じ条件 */
         debug_log(P1100_TAG " sum f=%u n_total=%u zero_calls_total=%llu active=%d\n",
                   (unsigned)g_mx68k_frame_num, (unsigned)s_p1100_n_total, s_p1100_zero_total, s_p1100_active);
@@ -7728,7 +7911,9 @@ void mx68k_floppyu_fdcpt_set_write_fast_config(int fast)
 /* P1089: 設定画面の1秒周期表示用(メインスレッドから読むだけ)。宣言は EmulatorBridge.h。
  * fast: 1=高速モードが有効 / src: 0=off 1=設定 3=設定は高速だが MX68K_FLOPPYU_WRITE 優先で無視 /
  * dirty: 1=ふろっぴU君に未書込みのデータが残っている可能性 / cached_unverified: 高速で受理し未照合のセクタ数 /
- * v_mismatch_cached: 高速で受理したセクタの読み戻し不一致数 / discarded: 1=ふろっぴU君が未書込みデータを破棄した('D')ため停止中 */
+ * v_mismatch_cached: 高速で受理したセクタの読み戻し不一致数 /
+ * discarded: 1=未書込みデータの破棄で全体停止中(P1124 以降は全体ラッチ側の破棄=USB 世代変化・bringup 前の flush 確認失敗・
+ * mask=0 による全体への退避のみ。'D' によるユニット限定の停止は mx68k_floppyu_get_write_unit_stop) */
 void mx68k_floppyu_get_write_fast(int32_t* fast, int32_t* src, int32_t* dirty, int32_t* cached_unverified,
                                   int32_t* v_mismatch_cached, int32_t* discarded)
 {
@@ -7738,13 +7923,25 @@ void mx68k_floppyu_get_write_fast(int32_t* fast, int32_t* src, int32_t* dirty, i
     int dt = __atomic_load_n(&s_fu_wc_dirty, __ATOMIC_RELAXED);
     uint32_t cu = __atomic_load_n(&s_nm_cached_unverified, __ATOMIC_RELAXED);
     uint32_t vm = __atomic_load_n(&s_nm_v_mismatch_cached, __ATOMIC_RELAXED);
-    uint32_t dd = __atomic_load_n(&s_fu_wc_discard_D, __ATOMIC_RELAXED);
+    int dg = __atomic_load_n(&s_fu_wc_discard_global, __ATOMIC_RELAXED);
     if (fast)              *fast = (en && fs) ? 1 : 0;
     if (src)               *src = en ? sr : NMFAST_SRC_OFF;
     if (dirty)             *dirty = (en && dt) ? 1 : 0;
     if (cached_unverified) *cached_unverified = (int32_t)cu;
     if (v_mismatch_cached) *v_mismatch_cached = (int32_t)vm;
-    if (discarded)         *discarded = (en && dd > 0u) ? 1 : 0;
+    if (discarded)         *discarded = (en && dg) ? 1 : 0;
+}
+
+/* P1124(D-144): ユニット限定の書込み停止(MX 側ドライブ番号のビット集合)。表示専用、宣言は EmulatorBridge.h */
+void mx68k_floppyu_get_write_unit_stop(int32_t* mx_mask)
+{
+    int en = __atomic_load_n(&s_p955_enabled, __ATOMIC_RELAXED);
+    int wm = __atomic_load_n(&s_rl_write_mode, __ATOMIC_RELAXED);
+    uint8_t um = __atomic_load_n(&s_nm_unit_latch_mask, __ATOMIC_RELAXED);
+    uint8_t m = 0;
+    if (en && wm == WRM_NORMAL)
+        for (uint8_t u = 0; u < 4u; u++) if ((um >> u) & 1u) m |= (uint8_t)(1u << fu_status_dev_to_mx(u));
+    if (mx_mask) *mx_mask = (int32_t)m;
 }
 
 /* P1067: 設定画面の1秒周期表示用(メインスレッドから読むだけ)。宣言は EmulatorBridge.h。
@@ -7819,6 +8016,7 @@ void mx68k_floppyu_fdcpt_shutdown(void)
                   g_mx68k_frame_num, s_fr_status, s_fr_notified, s_fr_release_pending, (unsigned)s_fr_assert_n,
                   (unsigned)s_fr_release_n, s_fr_last_edge_us ? (long long)(rl_now_us() - s_fr_last_edge_us) : -1LL);
     }
+    if (s_p955_enabled && (s_rl_write_mode == WRM_NORMAL || s_fh_seek_sent > 0u)) rl_fh_log_sum("shutdown");   /* P1124 */
     if (!s_e5p_seen) return;
     e5p_close("shutdown");
     e5p_log_sum("shutdown");

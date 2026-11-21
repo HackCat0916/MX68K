@@ -87,9 +87,12 @@ void mx68k_set_floppyu_write_fast(bool fast);
 // P1089: 書込みモードの状態取得(設定画面の1秒周期表示用、読取りのみ)。実装は Bridge/floppyu_fdc_passthrough_probe.c。
 // fast: 1=高速モードが有効 / src: 0=off 1=設定 3=設定は高速だが環境変数 MX68K_FLOPPYU_WRITE が優先されて無視 /
 // dirty: 1=ふろっぴU君に未書込みのデータが残っている可能性 / cached_unverified: 高速で受理し読み戻しで未照合のセクタ数 /
-// v_mismatch_cached: 高速で受理したセクタの読み戻し不一致数 / discarded: 1=ふろっぴU君が未書込みデータを破棄したため停止中
+// v_mismatch_cached: 高速で受理したセクタの読み戻し不一致数 / discarded: 1=未書込みデータの破棄で全体停止中
+// (P1124 以降は USB 世代変化・bringup 前の flush 確認失敗等の全体ラッチ側のみ。'D' によるユニット停止は下の get_write_unit_stop)
 void mx68k_floppyu_get_write_fast(int32_t* fast, int32_t* src, int32_t* dirty, int32_t* cached_unverified,
                                   int32_t* v_mismatch_cached, int32_t* discarded);
+// P1124(D-144): ユニット限定の書込み停止(MX 側ドライブ番号のビット集合)。表示専用、読取りのみ
+void mx68k_floppyu_get_write_unit_stop(int32_t* mx_mask);
 // P957: ふろっぴU君 USB存在検出(読取り専用、ポートを開かない)。実装は Bridge/floppyu_usb_transport.c。
 // >=0 = VID/PID一致のUSBデバイス数 / -1 = IOKit照会失敗 / -2 = 非対応(iOS)。
 // 環境変数・通信状態とは無関係に動作する。設定画面の1秒周期表示用で、エミュレーションには影響しない。

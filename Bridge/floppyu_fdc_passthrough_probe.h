@@ -50,6 +50,9 @@ void mx68k_floppyu_get_format_status(int32_t* on, int32_t* halted, int32_t* trac
 void mx68k_floppyu_get_write_fast(int32_t* fast, int32_t* src, int32_t* dirty, int32_t* cached_unverified,
                                   int32_t* v_mismatch_cached, int32_t* discarded);
 
+/* P1124(D-144): ユニット限定の書込み停止(MX 側ドライブ番号のビット集合、表示用・読取りのみ)。EmulatorBridge.h でも Swift へ公開する。 */
+void mx68k_floppyu_get_write_unit_stop(int32_t* mx_mask);
+
 /* P1123(D-143): ゲストの OPM データ書込み($E90003)ごとに呼ぶ(m68000_bridge.c の OPM シャドウ記録から、ゲストに対して
  * read-only)。reg はアドレスラッチ($E90001)で選択済みのレジスタ番号、v は書込みデータ。ふろっぴU君の強制READY
  * (装置レジスタ0x23)中継の状態を更新する。振り分け器が無効、または MX68K_FLOPPYU_FORCE_READY=0 なら何もしない。 */
