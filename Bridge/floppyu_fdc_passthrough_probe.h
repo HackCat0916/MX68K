@@ -50,6 +50,11 @@ void mx68k_floppyu_get_format_status(int32_t* on, int32_t* halted, int32_t* trac
 void mx68k_floppyu_get_write_fast(int32_t* fast, int32_t* src, int32_t* dirty, int32_t* cached_unverified,
                                   int32_t* v_mismatch_cached, int32_t* discarded);
 
+/* P1123(D-143): ゲストの OPM データ書込み($E90003)ごとに呼ぶ(m68000_bridge.c の OPM シャドウ記録から、ゲストに対して
+ * read-only)。reg はアドレスラッチ($E90001)で選択済みのレジスタ番号、v は書込みデータ。ふろっぴU君の強制READY
+ * (装置レジスタ0x23)中継の状態を更新する。振り分け器が無効、または MX68K_FLOPPYU_FORCE_READY=0 なら何もしない。 */
+void mx68k_floppyu_fdcpt_note_opm_data(uint8_t reg, uint8_t v);
+
 #ifdef MX68K_FLOPPYU_USB_SELFTEST
 /* P1054: 単体テスト専用。観測関数(e5p_*)の呼出し前後で振り分け器の状態が同一なら1 */
 int mx68k_floppyu_fdcpt_selftest_e5p_invariance(void);
@@ -76,6 +81,14 @@ void mx68k_floppyu_fdcpt_selftest_nm_sec(int us, uint8_t c, uint8_t h, uint8_t r
 void mx68k_floppyu_fdcpt_selftest_cmd(uint8_t out[10], uint32_t* n);
 /* P1089: 単体テスト専用。normal の書込みラッチを立てる */
 void mx68k_floppyu_fdcpt_selftest_latch(void);
+/* P1123: 単体テスト専用。強制READY の状態(out = status, notified, dev_high, pending, mode[0=無効 1=参照互換 2=strict]) */
+void mx68k_floppyu_fdcpt_selftest_fr_state(int out[5]);
+/* P1123: 単体テスト専用。次の1回の強制READY解除送信を装置へ送らず戻り値 r(-1/-2/-3)として扱う(0=解除) */
+void mx68k_floppyu_fdcpt_selftest_fr_force_send_ret(int r);
+/* P1123 改訂2: 単体テスト専用。強制READY の内部状態を直接設定する(前世代からの持ち越しの模擬、装置へは送らない) */
+void mx68k_floppyu_fdcpt_selftest_fr_inject(int status, int notified, int dev_high, int pending);
+/* P1123 改訂2: 単体テスト専用。0=書込み経路入口 / 1=保留 release の flush / 2=解除送信本体 を直接呼ぶ(G-B の確認用) */
+int mx68k_floppyu_fdcpt_selftest_fr_call(int which);
 #endif
 
 #endif /* MX68K_FLOPPYU_FDC_PASSTHROUGH_PROBE_H */

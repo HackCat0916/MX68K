@@ -22,6 +22,7 @@
 #include "fpuboard_bridge.h"           /* P901: FPU ボード CZ-6BP1(MC68881)の CIR デバイス */
 #include "mx_cpu_iface.h"              /* P860: CPUコア抽象層(実装はファイル末尾の「mx_cpu_* 実装」節) */
 #include "mx_cpu_musashi.h"            /* P868: Musashiバックエンド(Musashi本体のヘッダは含めない——P867のinclude規約) */
+#include "floppyu_fdc_passthrough_probe.h"   /* P1123: OPM データ書込みフック(ふろっぴU君の強制READY 中継) */
 #include <string.h>                    /* P47-D: リセット用の memset */
 #include <stdio.h>                     /* P214-R2: プローブの1行サマリ用 snprintf */
 #include <time.h>                      /* P518: p424_now_ns() 用の clock_gettime/struct timespec */
@@ -1611,6 +1612,9 @@ static void p479_opm_shadow_note(uint32_t addr_raw, uint32_t val, int is_word) {
             if (v & 0x80) { g_opm_reg19_pmd = v & 0x7f; g_opm_reg19_pmd_written = 1; }
             else          { g_opm_reg19_amd = v & 0x7f; g_opm_reg19_amd_written = 1; }
         }
+        /* P1123(D-143): ふろっぴU君の強制READY 中継(OPM データ書込みの bit6 を見る、XEiJ+t/XM6t と同じ)。
+         * ゲストに対しては read-only(v を変更しない)。振り分け器が無効なら即 return */
+        mx68k_floppyu_fdcpt_note_opm_data(g_opm_curreg, v);
     }
 }
 

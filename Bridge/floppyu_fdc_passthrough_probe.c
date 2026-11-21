@@ -413,6 +413,10 @@ static uint32_t s_rl_bringup_poll_fail_gen = 0;
 /* SPECIFY ミラー */
 static int      s_rl_spec_capturing = 0, s_rl_spec_n = 0, s_rl_spec_valid = 0;
 static uint8_t  s_rl_spec[2];
+/* P1122(D-136): ゲストが最後に発行した SPECIFY の ND(第2パラメータ bit0、1=Non-DMA)。
+ * 中継可否に関わらず記録し、リセット(rl_install_reset)で 0 に戻す(XM6 fdc.cpp:167/:254 の ndm=FALSE 相当)。
+ * USB 再接続(rl_reset_link_state)では消さない(ゲスト側の FDC 設定は USB 断と無関係) */
+static int      s_rl_spec_nd = 0;
 /* READ DATA 完了直後のSENSE INTを0x80合成する(§1-b②) */
 static int      s_rl_synth_after_read = 0;
 /* SEEK/RECAL 保留(装置ユニット別、送信時刻。0=保留なし) */
@@ -572,13 +576,14 @@ static uint8_t     s_rl_fmt1_v_h = 0;             /* 検証対象の面(ok_forma
 enum { FM_REF_LATCHED = 0, FM_REF_ENV, FM_REF_UNIT, FM_REF_HEAD, FM_REF_PARAM, FM_REF_IDS, FM_REF_SEND_MAX, FM_REF_COLLECT,
        FM_REF_LINK, FM_REF_REENTRY, FM_REF_SDS_FAIL, FM_REF_NO_MEDIA, FM_REF_WP, FM_REF_T0, FM_REF_ST3_OTHER,
        FM_REF_RID_TIMEOUT, FM_REF_RID_IC, FM_REF_RID_C_WITHOUT_CC, FM_REF_RID_NO_C, FM_REF_RID_CHS, FM_REF_RECHECK,
-       FM_REF_SPENT, FM_REF_HALT, FM_REF_CHAIN, FM_REF_CHAIN_EPOCH, FM_REF_ORDER, FM_REF_N };
+       FM_REF_SPENT, FM_REF_HALT, FM_REF_CHAIN, FM_REF_CHAIN_EPOCH, FM_REF_ORDER, FM_REF_FR_RELEASE, FM_REF_N };
 static const char* const FM_REF_NAME[] = {
     "refused_latched", "refused_fence_env", "refused_fence_unit", "refused_fence_head", "refused_fence_param",
     "refused_fence_ids", "refused_send_max", "refused_collect", "refused_link", "refused_reentry", "refused_sds_fail",
     "refused_no_media", "refused_wp", "refused_t0", "refused_st3_other", "refused_rid_timeout", "refused_rid_ic",
     "refused_rid_c_without_cc", "refused_rid_no_c", "refused_rid_chs", "refused_recheck", "refused_spent",
-    "refused_halt", "refused_chain", "refused_chain_epoch", "refused_order" };
+    "refused_halt", "refused_chain", "refused_chain_epoch", "refused_order",
+    "refused_fr_release_fail" };   /* P1123: 入口の強制READY解除(S-2)不成立 */
 _Static_assert(sizeof(FM_REF_NAME) / sizeof(FM_REF_NAME[0]) == FM_REF_N, "FM_REF_NAME と FM_REF_* の要素数が一致しない");
 static uint32_t s_rl_fmt1_ref[FM_REF_N];
 static uint32_t s_rl_fmt1_seen, s_rl_fmt1_ok, s_rl_fmt1_nw, s_rl_fmt1_n_unexp, s_rl_fmt1_invalid;
@@ -617,14 +622,16 @@ enum { NMF_REF_MODE = 0, NMF_REF_OFF, NMF_REF_SC_ZERO, NMF_REF_HALT, NMF_REF_CHA
        NMF_REF_FENCE, NMF_REF_PARAM, NMF_REF_IDS, NMF_REF_CYL, NMF_REF_RUN_OTHER_UNIT, NMF_REF_RUN_START, NMF_REF_RUN_MAX,
        NMF_REF_ORDER, NMF_REF_COLLECT, NMF_REF_LINK, NMF_REF_NO_PCN, NMF_REF_PCN, NMF_REF_REENTRY, NMF_REF_SDS_FAIL,
        NMF_REF_NO_MEDIA, NMF_REF_WP, NMF_REF_T0, NMF_REF_ST3_OTHER, NMF_REF_RID_TIMEOUT, NMF_REF_RID_IC,
-       NMF_REF_RID_C_WITHOUT_CC, NMF_REF_RID_NO_C, NMF_REF_RID_CHS, NMF_REF_RID_N, NMF_REF_RECHECK, NMF_REF_N };
+       NMF_REF_RID_C_WITHOUT_CC, NMF_REF_RID_NO_C, NMF_REF_RID_CHS, NMF_REF_RID_N, NMF_REF_RECHECK, NMF_REF_FR_RELEASE,
+       NMF_REF_N };
 static const char* const NMF_REF_NAME[] = {
     "refused_mode", "refused_off", "refused_sc_zero", "refused_halt", "refused_chain", "refused_latched",
     "refused_fence_unit", "refused_fence_closed", "refused_param", "refused_ids", "refused_cyl", "refused_run_other_unit",
     "refused_run_start", "refused_run_max", "refused_order", "refused_collect", "refused_link", "refused_no_pcn",
     "refused_pcn", "refused_reentry", "refused_sds_fail", "refused_no_media", "refused_wp", "refused_t0",
     "refused_st3_other", "refused_rid_timeout", "refused_rid_ic", "refused_rid_c_without_cc", "refused_rid_no_c",
-    "refused_rid_chs", "refused_rid_n", "refused_recheck" };
+    "refused_rid_chs", "refused_rid_n", "refused_recheck",
+    "refused_fr_release_fail" };   /* P1123: 入口の強制READY解除(S-2)不成立 */
 _Static_assert(sizeof(NMF_REF_NAME) / sizeof(NMF_REF_NAME[0]) == NMF_REF_N, "NMF_REF_NAME と NMF_REF_* の要素数が一致しない");
 static int      s_rl_format_cfg = 0;       /* 設定値(install 直前に EmulatorBridge.c から渡される) */
 static int      s_nmf_on = 0;              /* install で確定: normal かつ(設定由来+設定 ON、または env 経路) */
@@ -775,6 +782,14 @@ static uint32_t s_rl_diag_begin, s_rl_diag_ok, s_rl_diag_hook_skip;   /* diag_ho
 static uint8_t  s_rl_rd_cmd5 = 0;
 static int      s_rl_rd_is_rdel = 0;   /* P1120: rl_exec の case 12 から来た READ DELETED DATA */
 static uint32_t s_rl_rdel_begin, s_rl_rdel_ok, s_rl_rdel_hook_skip;   /* rdel_hook_skip==rdel_ok が常に成り立つはず */
+/* P1122(D-136): READ 系受付時(rl_read_begin)にラッチする CPU 転送判定。
+ * s_rl_rd_nd = 受付時の SPECIFY ND 生値(ログ用)、s_rl_rd_ndm = ND=1 かつ受付時 DMAC CH0 MTC==0
+ * (参照2実装 XEiJ+t FUK.java:846-852 / XM6t fdc_bridger.h:840-846 の MTC==0 判定との積)。
+ * s_rl_rd_ndm=1 の間だけ払出し中(RL_RD_SUPPLY)の MSR を 0xF0(RQM|DIO|NDM|CB)にする */
+static int      s_rl_rd_nd = 0, s_rl_rd_ndm = 0;
+/* P1122: 計数(プロセス寿命)。ndm_rd=ND=1 でラッチした READ 数、sup_msr_rd/f0=払出し中の MSR 読出し総数/うち 0xF0 返却数、
+ * sup_done_cpu/dma=払出し完了(最終バイト→リザルト移行)数を転送方式別に */
+static uint32_t s_rl_ndm_rd, s_rl_sup_msr_rd, s_rl_sup_msr_f0, s_rl_sup_done_cpu, s_rl_sup_done_dma;
 /* 集計(分母と分子を併記) */
 static uint32_t s_rl_m1_ref_env, s_rl_m1_ref_unit, s_rl_m1_ref_chr, s_rl_m1_ref_max, s_rl_m1_pass;
 static uint32_t s_rl_m1_ok_written, s_rl_m1_ok_chrn_unexp, s_rl_m1_fence_reads_ok;
@@ -799,6 +814,59 @@ static uint8_t  s_rl_cf_cmd = 0;
 static uint32_t s_rl_sy_ok, s_rl_sy_refused, s_rl_sy_would_cache_n;
 static uint32_t s_rl_sy_form_a, s_rl_sy_form_c, s_rl_sy_form4, s_rl_sy_form_other;
 static uint32_t s_rl_sy_lines;
+
+/* P1123(D-143): ふろっぴU君の強制READY(装置レジスタ0x23=装置ファームの出力ピン READY、TNB:app.c:2697-2698)中継。
+ * 状態機械は参照2実装(XM6t vm/fdc_bridger.h:508-519,557-562,819-825 / XEiJ+t xeij/FUK.java:591-601,631-636,798-801)と同一:
+ *   ゲストの OPM データ書込み($E90003)の bit6=1 → status=1・notified=0(送信なし)/
+ *   bit6=0 かつ notified → status=0・notified=0・0xA3,0x00 /
+ *   割当てドライブ宛て RECALIBRATE の中継直前に status && !notified → notified=1・0xA3,0x40(RECAL より前に送る)。
+ * MX 独自の安全柵(いずれも「強制READYを立てない/早く落とす」側): S-1 assert 前の非キャッシュ SDS(装置の書込みキャッシュを
+ * 先に空にする)、S-2 書込み/FORMAT/検証 READ ID の入口で解除+Ready 変化割込み(IC=11)の装置内排出、S-3 終了時はログのみ、
+ * bringup 成立時に解除済みと確定(0x23 は送らない、改訂2)、S-5 強制READY中の読取りタイムアウトで解除+再 bringup。
+ * G-B: 現世代で bringup が成立していなければ 0x23 を一切送らない(装置の接続状態 m_initProtCount のゲート、TNB:app.c:2576-2578)。
+ * 記号・定数の根拠は .mx68k_cycles/P1123_plan.md 改訂3 の記号表・装置状態前提表。環境変数 MX68K_FLOPPYU_FORCE_READY:
+ * 未設定/"1"=参照互換(既定、任意 OPM データの bit6)、"strict"=OPM $1B へのデータのみ、"0"=無効 */
+#define P1123_FR_TAG              "[P1123-FR]"
+#define P1123_ST3_TAG             "[P1123-ST3]"
+#define FU_REG_OPM                0x23u     /* 装置の OPM レジスタ(強制READYピン)。TNB:app.c:2697、XM6t fdc_bridger.h:508、XEiJ FUK.java:591 */
+#define FU_FR_OPM_BIT6            0x40u     /* XM6t fdc_bridger.h:510、XEiJ FUK.java:593 */
+#define FU_FR_OPM_REG_CT          0x1Bu     /* strict 時のみ参照(CT1/CT2、bit6=CT2 の意味付けは [training knowledge]) */
+#define FU_FR_DRAIN_C_MS          50        /* MX 起点 release 後に'C'を待つ上限(FU_SYNC_C_WAIT_MS と同値・同用途、MX独自値) */
+#define FU_FR_SIS_MAX             6         /* 排出手順の SIS 上限 = 4ユニット分の IC=11 + 終端 0x80 1回 + 余裕1(MX独自値) */
+#define FU_FR_SETTLE_MS           30        /* READY 遷移を送ってから'C'が port2 に現れ得る静定窓(FU_SYNC_DRAIN_MS と同値、MX独自値) */
+#define FU_FR_LOG_LIMIT           256u      /* [P1123-FR] イベント行の合計上限(超過後は sum の計数のみ) */
+#define FU_FR_ST3_LOG_LIMIT       64u       /* [P1123-ST3] 行の上限(超過後は sum の st3_chg) */
+#define FU_FR_ST0_LIST_MAX        8u
+#define FR_RET_NOBRINGUP          (-4)      /* G-B 不成立で 0x23 を送らなかった(rl_fault は呼ばない、故障扱いにしない) */
+_Static_assert(FU_FR_SIS_MAX >= 6, "FU_FR_SIS_MAX は4ユニット分のIC=11+終端0x80+余裕1以上");
+enum { FR_OFF = 0, FR_REF = 1, FR_STRICT = 2 };
+static const char* const FR_MODE_NAME[3] = { "0", "1", "strict" };
+static int      s_fr_mode = FR_REF;             /* install ごとに環境変数から確定 */
+static int      s_fr_status = 0, s_fr_notified = 0;   /* 参照実装と同義 */
+static int      s_fr_dev_high = 0;              /* MX が装置へ最後に送った値が 0x40 なら1。現世代で bringup 成立済みの間だけ信頼できる(I-3) */
+static int      s_fr_release_pending = 0;       /* ゲスト起点 release を送信不可区間のため保留中 */
+static uint8_t  s_fr_set_reg = 0, s_fr_set_val = 0;   /* status を立てた bit6=1 書込みの生値 */
+static int      s_fr_set_f = -1;
+static uint8_t  s_fr_opm_last_reg = 0, s_fr_opm_last = 0;   /* 直前の OPM データ書込み(計数対象のもの) */
+static int      s_fr_opm_last_f = -1;
+static int64_t  s_fr_last_edge_us = 0;          /* assert/release の送信成功時刻。静定窓の判定に使う(N-1(a))。bringup 成立時に0 */
+static uint8_t  s_fr_st3_prev[4];
+static int      s_fr_st3_valid[4];
+/* 計数(プロセス寿命。分母と分子を併記) */
+static uint32_t s_fr_opm_wr, s_fr_opm_b6_1, s_fr_opm_b6_0, s_fr_opm_b6_1_reg1b, s_fr_strict_skip;
+static uint32_t s_fr_recal_relay, s_fr_assert_n, s_fr_assert_from_1b, s_fr_assert_skip_preflush, s_fr_assert_skip_norelay,
+                s_fr_assert_skip_nobringup, s_fr_assert_fail;
+static uint32_t s_fr_release_n, s_fr_release_fail, s_fr_defer_n, s_fr_defer_in_wrwait, s_fr_pending_cancel;
+static uint32_t s_fr_rd_while_high, s_fr_wr_entry_release, s_fr_wr_entry_settle, s_fr_wr_while_high;
+static uint32_t s_fr_drain_ok, s_fr_drain_fail, s_fr_drain_rdychg, s_fr_to_release;
+static uint32_t s_fr_ref_wr, s_fr_ref_fmt1, s_fr_ref_nmf;   /* 入口の解除不成立(fr_release_fail)で拒否した数 */
+static uint32_t s_fr_st3_chg, s_fr_e7_dedup, s_fr_lines, s_fr_lines_drop, s_fr_st3_lines;
+static uint32_t s_fr_send_nobringup, s_fr_wr_nobringup, s_fr_bringup_clear;   /* 改訂2: G-B で送らなかった数/うち書込み経路入口(異常)/成立時の確定 */
+#ifdef MX68K_FLOPPYU_USB_SELFTEST
+static int      s_st_fr_force_ret = 0;   /* 単体テスト専用: 0 以外なら次の1回の解除送信(0xA3,0x00)を装置へ送らずこの戻り値とする */
+#endif
+static int  rl_fr_send0(const char* why, int rec_edge);
+static void rl_fr_on_read_timeout(int re);
 
 /* P1037: MX68K_FLOPPYU_WRITE=armed(段階2a)。使い捨てディスクの最終セクタ C76H1R8 に段階1で書いた武装マーカーを
  * ゲストが読み、全1024B一致した後だけ、許可ユニット・許可シリンダ範囲の単一セクタ書込みを最大256回/プロセス送る。
@@ -2100,9 +2168,91 @@ static void rl_invalidate_caches(void)
     s_rl_e5c_valid = 0;
 }
 
+/* P1123: [P1123-FR] イベント行(合計 FU_FR_LOG_LIMIT 行まで)。条件付きトリガの生値をすべて併記する。extra は行末の追加欄 */
+static void rl_fr_log(const char* ev, const char* why, const char* extra)
+{
+    if (s_fr_lines >= FU_FR_LOG_LIMIT) { s_fr_lines_drop++; return; }
+    s_fr_lines++;
+    debug_log(P1123_FR_TAG " %s f=%d gen=%u why=%s fr_mode=%s status=%d notified=%d dev_high=%d pending=%d write_mode=%d"
+              " state=%s us_dev=%u opm_last_reg=0x%02x opm_last=0x%02x opm_last_f=%d%s%s\n",
+              ev, g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(), why ? why : "-", FR_MODE_NAME[s_fr_mode],
+              s_fr_status, s_fr_notified, s_fr_dev_high, s_fr_release_pending, s_rl_write_mode, RL_STATE_NAME[s_rl_state],
+              (unsigned)(s_rl_cmd[1] & 3u), (unsigned)s_fr_opm_last_reg, (unsigned)s_fr_opm_last, s_fr_opm_last_f,
+              extra ? " " : "", extra ? extra : "");
+}
+
+/* P1123 G-B(改訂2、条件1): 0x23(assert/release)を送ってよいのは、現世代で bringup が成立済みのときだけ(I-3/I-5)。
+ * 装置ファームは 0x00 ハンドシェイク〜FU_INIT(0x80,0xFE)の間に来たそれ以外のコマンドを黙殺し接続状態を 0 へ巻き戻す
+ * (TNB:app.c:2576-2578)。実装 49714eb の S-4 はこれで bringup を全滅させた(C-11)。不成立なら送らず計数・skip 行のみ。
+ * ★変異検査 M-10 はこの関数を常に 1 を返すようにして S-FR17 が FAIL することを確認する(ガードはここ1か所に集約) */
+static int rl_fr_gate_b(const char* site)
+{
+    if (s_rl_bringup_valid && s_rl_bringup_gen == mx68k_floppyu_usb_generation()) return 1;
+    s_fr_send_nobringup++;
+    char ex[128];
+    snprintf(ex, sizeof(ex), "site=%s bringup_valid=%d bringup_gen=%u fr_send_nobringup=%u", site ? site : "-",
+             s_rl_bringup_valid, (unsigned)s_rl_bringup_gen, (unsigned)s_fr_send_nobringup);
+    rl_fr_log("skip", "no_bringup", ex);
+    return 0;
+}
+
+/* P1123(S-3): install(init/hardreset)と USB 世代変化で、ゲスト側の状態(status/notified/保留)を「不明」へ戻す。
+ * s_fr_dev_high は装置側の推定値であり、ここでは 0 と確定できない(同じ装置の再接続なら High のまま)ので変えない。
+ * 次の bringup 成立時に 0 と確定させる(FU_INIT の 0x40 が装置 READY を Low へ戻す、I-3)。それまでは G-B により 0x23 を送らない */
+static void rl_fr_reset_state(const char* why)
+{
+    if (s_fr_status || s_fr_notified || s_fr_release_pending) rl_fr_log("reset", why, NULL);
+    s_fr_status = 0;
+    s_fr_notified = 0;
+    s_fr_release_pending = 0;
+}
+
+/* P1123(改訂2、案A): bringup 成立時の確定。成立=FU_INIT(0x80,0xFE,0x40)送信成功+MSR ポーリング ok。0x40 は装置が
+ * オープン済み(m_initProtCount==2)のときだけ受理され、execSoftReset(true)→initIO()→READY_SetOutMode(LOW)で装置 READY を
+ * Low へ戻す(TNB:app.c:2580-2583/698/526)ので、ここで dev_high/pending/notified/静定窓を 0 と確定する。0x23 は送らない。
+ * status(ゲストが最後に書いた bit6 の意図)は保持する(同一世代の再 bringup 後も次の RECAL で再 assert できるように。
+ * 世代変化時は rl_fr_reset_state で既にクリア済み) */
+static void rl_fr_bringup_clear(void)
+{
+    char ex[96];
+    snprintf(ex, sizeof(ex), "prev_dev_high=%d prev_pending=%d prev_notified=%d prev_last_edge=%d", s_fr_dev_high,
+             s_fr_release_pending, s_fr_notified, s_fr_last_edge_us != 0);
+    s_fr_bringup_clear++;
+    s_fr_dev_high = 0;
+    s_fr_release_pending = 0;
+    s_fr_notified = 0;
+    s_fr_last_edge_us = 0;
+    rl_fr_log("bringup_clear", "bringup_ok", ex);
+}
+
+/* P1123: 非キャッシュ SDS で得た ST3 の RDY(bit5)・WP(bit6)・TS(bit3)が、装置ユニット別に前回値から変化したときだけ
+ * [P1123-ST3] 行を出す(上限 FU_FR_ST3_LOG_LIMIT、以後は sum の st3_chg のみ)。読むだけで挙動は変えない */
+static void rl_fr_note_st3(uint8_t us_hd, uint8_t st3, const char* src)
+{
+    uint8_t u = us_hd & 3u;
+    uint8_t key = (uint8_t)(st3 & (ST3_RY | ST3_WP | 0x08u));   /* 0x08 = TS(両面)[training knowledge] */
+    if (s_fr_st3_valid[u] && s_fr_st3_prev[u] == key) return;
+    int first = !s_fr_st3_valid[u];
+    uint8_t prev = s_fr_st3_prev[u];
+    s_fr_st3_valid[u] = 1;
+    s_fr_st3_prev[u] = key;
+    s_fr_st3_chg++;
+    if (s_fr_st3_lines >= FU_FR_ST3_LOG_LIMIT) return;
+    s_fr_st3_lines++;
+    char ps[8], es[8];
+    if (first) snprintf(ps, sizeof(ps), "-"); else snprintf(ps, sizeof(ps), "0x%02x", (unsigned)prev);
+    if (s_rl_e7_sent_valid) snprintf(es, sizeof(es), "0x%02x", (unsigned)s_rl_e7_sent); else snprintf(es, sizeof(es), "-");
+    debug_log(P1123_ST3_TAG " f=%d gen=%u src=%s us_dev=%u st3_dev=0x%02x RDY=%d WP=%d TS=%d prev_key=%s dev_high=%d"
+              " e7_sent=%s chg=%u\n",
+              g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(), src, (unsigned)u, (unsigned)st3,
+              (st3 & ST3_RY) ? 1 : 0, (st3 & ST3_WP) ? 1 : 0, (st3 & 0x08u) ? 1 : 0, ps, s_fr_dev_high, es,
+              (unsigned)s_fr_st3_chg);
+}
+
 static void rl_reset_link_state(void)
 {
     e5p_close("gen");   /* P1054: 観測窓の強制終端(観測のみ) */
+    rl_fr_reset_state("gen");   /* P1123(S-3) */
     /* P1053: 世代変化で柵は閉じる(fo_gen 不一致に加え、P1055 では ue[全]++)。呼出し元が s_rl_gen_seen を更新する前に呼ぶので、
      * 閉鎖前に開いていたユニットは旧世代 s_rl_gen_seen との比較で求める。初回接続(gen_seen 無効)は世代変化ではない。
      * P1055(E5): 判別保留も破棄し、基準値を全ユニット無効化する(全閉の共通処理 rl_nm_attr_abort 経由) */
@@ -2132,15 +2282,20 @@ static void rl_log_read_end(const char* result, int fnv_valid, uint32_t fnv)
     char fh[16];
     if (fnv_valid) snprintf(fh, sizeof(fh), "0x%08x", (unsigned)fnv);
     else           snprintf(fh, sizeof(fh), "-");
+    /* P1122(D-136): 払出し途中(RL_RD_SUPPLY)で終わったときだけ払出し位置/総数、それ以外は "-" */
+    char sup[32];
+    if (s_rl_state == RL_RD_SUPPLY) snprintf(sup, sizeof(sup), "%u/%u", (unsigned)s_rl_supply_pos, (unsigned)s_rl_supply_n);
+    else                            snprintf(sup, sizeof(sup), "-");
     debug_log(P1009_TAG " read end f=%d gen=%u result=%s len=%d got=%u wait_us=%lld wait_frames=%d msr_wait=%u other_bytes=%u"
-              " C=%u H=%u R=%u N=%u us_dev=%u data_fnv=%s diag=%d rdel=%d\n",
+              " C=%u H=%u R=%u N=%u us_dev=%u data_fnv=%s diag=%d rdel=%d nd=%d xfer=%s sup=%s\n",
               g_mx68k_frame_num, (unsigned)s_rl_op_gen, result,
               s_rl_seen_r ? (int)s_rl_frame_len : -1, (unsigned)(s_rl_seen_r ? s_rl_p2_got : 0),
               (long long)(now - s_rl_op_t0_us), g_mx68k_frame_num - s_rl_op_f0,
               (unsigned)s_rl_msr_wait, (unsigned)s_rl_other_bytes,
               s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], s_rl_rd_chrn[3], (unsigned)s_rl_rd_us, fh,
               s_rl_rd_is_diag,    /* P1116: READ DATA と READ DIAG の終了を区別する */
-              s_rl_rd_is_rdel);   /* P1120: READ DELETED の終了を区別する */
+              s_rl_rd_is_rdel,    /* P1120: READ DELETED の終了を区別する */
+              s_rl_rd_nd, s_rl_rd_ndm ? "cpu" : "dma", sup);   /* P1122(D-136): 末尾追加のみ(既存フィールドは不変) */
 }
 
 static void rl_log_rid_end(const char* result, const uint8_t* res)
@@ -2242,12 +2397,14 @@ static void rl_abort_op(int re)
         rl_synth_err(0, 1);
         rl_raise_int();
         s_rl_synth_after_read = 1;
+        rl_fr_on_read_timeout(re);   /* P1123(S-5): 状態が RL_RESULT へ移った後に置く(N-2: 送信失敗時の rl_fault からの再入防止) */
     } else if (s_rl_state == RL_RID_WAIT) {
         s_rl_rid_err++;
         rl_log_rid_end(RE_NAME[re], NULL);
         if (re == RE_ABORTED) { s_rl_aborted_by_cmd++; s_rl_state = RL_IDLE; s_rl_rdnum = 0; return; }
         rl_synth_err(0, 0);
         rl_raise_int();
+        rl_fr_on_read_timeout(re);   /* P1123(S-5): 同上 */
     }
 }
 
@@ -2394,6 +2551,12 @@ static void rl_read_begin(void)
     s_rl_rd_cmd5 = p[0] & 0x1Fu;                    /* P1120: 書込み安全フックの許可リスト判定に使う */
     s_rl_rd_is_rdel = (s_rl_rd_cmd5 == 0x0Cu);      /* P1120: rl_exec の case 12 から来た READ DELETED */
     if (s_rl_rd_is_rdel) s_rl_rdel_begin++;
+    /* P1122(D-136): CPU 転送判定を受付時にラッチ(READ DATA/DIAG/DELETED 共通、XEiJ+t isReadTransCommand と同範囲)。
+     * ND と受付時 MTC==0 の両方が CPU 転送を示すときだけ 0xF0。MX は DMAC の MTC を書き換えない */
+    if (s_fr_dev_high) s_fr_rd_while_high++;   /* P1123: 強制READY下で装置へ READ 系を送った数(意図した変化、R-2) */
+    s_rl_rd_nd = s_rl_spec_nd;
+    s_rl_rd_ndm = (s_rl_rd_nd && DMA[0].MTC == 0) ? 1 : 0;
+    if (s_rl_rd_nd) s_rl_ndm_rd++;
     s_rl_rd_d_begin = s_rl_d_events;
     memcpy(s_rl_rd_ue_begin, s_nm_ue, sizeof(s_rl_rd_ue_begin));   /* P1055: 4ユニット分(s_rl_rd_us の設定順に依存しない) */
     s_rl_rd_gen_begin = mx68k_floppyu_usb_generation();
@@ -2688,6 +2851,7 @@ static uint8_t rl_supply_byte(void)
         s_rl_synth_after_read = 1;
         s_rl_verify_pending = 1;
         s_rl_verify_n = s_rl_supply_n;
+        if (s_rl_rd_ndm) s_rl_sup_done_cpu++; else s_rl_sup_done_dma++;   /* P1122(D-136): 払出し完了を転送方式別に数える */
     }
     return b;
 }
@@ -2837,6 +3001,7 @@ static int rl_wr_sds_fresh_us(uint8_t us_hd, uint8_t* st3, rl_wr_sds_log_t* lg, 
     if (lg->ret_post < 1) { lg->fail = "msr_post_rx"; return 0; }
     if ((lg->msr_post & 0xF0u) != 0x80u) { lg->fail = "msr_not_idle"; return 0; }
     *st3 = lg->st3;
+    rl_fr_note_st3(us_hd, lg->st3, "wr_sds");   /* P1123: 観測のみ */
     return 1;
 }
 
@@ -2863,6 +3028,16 @@ static void rl_wr_fail_unknown(const char* outcome)
 /* P1032: 書込みコマンド(MTC設定+コマンド9B)を1回の port1 送信で送る。tx = B0 <n&FF> B1 <n>>8> 83 c0 … 83 c8 */
 static int rl_send_write_cmd(uint32_t n)
 {
+    /* P1123(最終アサーション、I-1): 強制READY中(または解除保留中)は書込み系を装置へ送らない。通常は入口の解除(S-2)で
+     * 成立しないので wr_while_high は常に0のはず。-1 は呼出し元3箇所とも「未接続=何も届いていない」として合成エラーへ倒し、
+     * データ相('W' 応答)へは進まない */
+    if (s_fr_dev_high || s_fr_release_pending) {
+        s_fr_wr_while_high++;
+        char ex[48];
+        snprintf(ex, sizeof(ex), "cmd=0x%02x n=%u", (unsigned)s_rl_cmd[0], (unsigned)n);
+        rl_fr_log("wr_while_high", "send_write_cmd", ex);
+        return -1;
+    }
     uint8_t tx[22];
     char th[2 * 22 + 4];
     size_t k = 0;
@@ -3048,6 +3223,255 @@ out:
     return ok;
 }
 
+/* ===========================================================================
+ *  P1123(D-143): 強制READY(装置レジスタ0x23)の送信・解除・排出
+ * =========================================================================== */
+/* 0xA3,0x00(解除)の送信本体。成功で dev_high=0・保留解除・SDS キャッシュ全無効化(I-4)。rec_edge=1 なら静定窓の起点を記録する。
+ * 戻り値は rl_p1 と同じ。ただし G-B 不成立(現世代で bringup 未成立)なら送らず FR_RET_NOBRINGUP(rl_fault は呼ばない。
+ * dev_high・保留はそのまま=次の bringup 成立時に確定させる) */
+static int rl_fr_send0(const char* why, int rec_edge)
+{
+    static const uint8_t TX[2] = { FU_WR | FU_REG_OPM, 0x00 };
+    if (!rl_fr_gate_b(why)) return FR_RET_NOBRINGUP;
+    int was_high = s_fr_dev_high;
+    int64_t t0 = rl_now_us();
+    int r;
+#ifdef MX68K_FLOPPYU_USB_SELFTEST
+    if (s_st_fr_force_ret != 0) {   /* 単体テスト専用: 送信失敗の注入(-2/-3 は rl_p1 と同じく故障停止へ) */
+        r = s_st_fr_force_ret;
+        s_st_fr_force_ret = 0;
+        if (r == -2 || r == -3) rl_fault("fr_release", r);
+    } else
+#endif
+    r = rl_p1("fr_release", TX, sizeof(TX), NULL, 0);
+    int64_t us = rl_now_us() - t0;
+    char ex[96];
+    snprintf(ex, sizeof(ex), "ret=%d was_high=%d rec_edge=%d us=%lld", r, was_high, rec_edge, (long long)us);
+    if (r < 0) {   /* -2/-3 は rl_p1 内で故障停止済み。dev_high・保留はそのまま(次の bringup 成立時に確定させる) */
+        s_fr_release_fail++;
+        rl_fr_log("release_fail", why, ex);
+        return r;
+    }
+    s_fr_dev_high = 0;
+    s_fr_release_pending = 0;
+    memset(s_rl_sds_valid, 0, sizeof(s_rl_sds_valid));   /* I-4: 遷移前の ST3 をキャッシュから返さない */
+    if (rec_edge) s_fr_last_edge_us = rl_now_us();
+    s_fr_release_n++;
+    rl_fr_log("release", why, ex);
+    return r;
+}
+
+/* 装置内の排出手順(MX 起点 release の同期版。do_send=0 は静定窓内の「送信なし」版、N-1(a))。P1051 同期 SEEK の吸収機構と同型:
+ *  1) 再入中(s_rl_in_poll)なら始めない  2) s_rl_sync_active=1 で'C'をゲストへ渡さない(do_send なら 0xA3,0x00 を送る)
+ *  3) port2 の'C'を FU_FR_DRAIN_C_MS まで待つ(来なくても次へ)
+ *  4) SIS(83 08 03→ST0、01→MSR、RQM|DIO なら 03→PCN)を最大 FU_FR_SIS_MAX 回。IC=11(Ready 変化、ユニット2/3 分を含む)は読み捨て、
+ *     0x80(保留割込みなし)で成立。それ以外の ST0(ゲストのシーク完了など)は不成立(fail-closed)。★読んだ割込みは装置から消えて
+ *     失われる(既存の同期 SEEK と同じ性質)ので drain 行に ST0・PCN を必ず出す
+ *  5) FU_SYNC_DRAIN_MS まで'c'を吸収して s_rl_sync_active=0
+ * 戻り値: 1=成立 / 0=不成立 */
+static int rl_fr_drain_run(int do_send, const char* why)
+{
+    static const uint8_t TX_SI[]   = { FU_WR | FU_REG_DATA, 0x08, FU_REG_DATA };
+    static const uint8_t TX_MSR[]  = { FU_REG_MSR };
+    static const uint8_t TX_DATA[] = { FU_REG_DATA };
+    int64_t t0 = rl_now_us();
+    int64_t c_wait_us = 0, drain_us = 0;
+    uint8_t st0_list[FU_FR_ST0_LIST_MAX];
+    uint32_t st0_n = 0, sis = 0, rdychg = 0;
+    int send_ret = -9, ok = 0, have_pcn = 0;
+    uint8_t fail_st0 = 0, pcn = 0;
+    const char* fail = "none";
+    if (s_rl_in_poll) { fail = "reentry"; goto log; }   /* port2 を読めないので手順を始めない(装置へ何も送らない) */
+    /* G-B: 送信なし版も SIS を装置へ送るので、bringup 未成立なら始めない(送信あり版は rl_fr_send0 内で判定) */
+    if (!do_send && !rl_fr_gate_b(why)) { fail = "nobringup"; goto log; }
+    s_rl_sync_active = 1;
+    s_rl_sync_c = 0;
+    s_rl_sync_cc = 0;
+    if (do_send) {
+        send_ret = rl_fr_send0(why, 1);
+        if (send_ret < 0) { fail = (send_ret == FR_RET_NOBRINGUP) ? "nobringup" : "send"; goto out; }
+    }
+    {
+        int64_t tw = rl_now_us(), deadline = tw + (int64_t)FU_FR_DRAIN_C_MS * 1000;
+        while (s_rl_sync_c == 0u && rl_now_us() < deadline) {
+            rl_poll();
+            if (s_rl_sync_c > 0u) break;
+            rl_sync_sleep();
+        }
+        c_wait_us = rl_now_us() - tw;
+    }
+    for (;;) {
+        if (sis >= (uint32_t)FU_FR_SIS_MAX) { fail = "sis_limit"; goto out; }
+        uint8_t st0 = 0x80, msr = 0, p = 0;
+        int hp = 0;
+        int r = rl_p1("fr_sense_st0", TX_SI, sizeof(TX_SI), &st0, 1);
+        if (r >= 1) r = rl_p1("fr_sense_msr", TX_MSR, 1, &msr, 1);
+        if (r >= 1 && (msr & 0xC0u) == 0xC0u) {
+            r = rl_p1("fr_sense_pcn", TX_DATA, 1, &p, 1);
+            hp = (r >= 1);
+        }
+        sis++;
+        if (r < 1) { fail = "st0_rx"; goto out; }   /* -2/-3 は rl_p1 内で故障停止済み */
+        if (st0_n < FU_FR_ST0_LIST_MAX) st0_list[st0_n++] = st0;
+        if ((st0 & 0xC0u) == 0xC0u) { rdychg++; s_fr_drain_rdychg++; continue; }   /* Ready 変化: 読み捨て */
+        if (st0 == 0x80u) break;                                                   /* 保留割込みなし: 成立 */
+        fail = "other_st0"; fail_st0 = st0; pcn = p; have_pcn = hp;                 /* fail-closed(この割込みは失われる) */
+        goto out;
+    }
+    {
+        int64_t td = rl_now_us(), dend = td + (int64_t)FU_SYNC_DRAIN_MS * 1000;
+        for (;;) {
+            rl_poll();
+            if (s_rl_sync_c > 0u && s_rl_sync_cc > 0u) break;
+            if (rl_now_us() >= dend) break;
+            rl_sync_sleep();
+        }
+        drain_us = rl_now_us() - td;
+    }
+    ok = 1;
+out:
+    s_rl_sync_active = 0;
+log:
+    if (ok) s_fr_drain_ok++; else s_fr_drain_fail++;
+    {
+        char sl[FU_FR_ST0_LIST_MAX * 3 + 4], ex[320], ph[8];
+        size_t o = 0;
+        sl[0] = '\0';
+        for (uint32_t i = 0; i < st0_n; i++) o += (size_t)snprintf(sl + o, sizeof(sl) - o, "%s%02X", i ? "," : "", st0_list[i]);
+        if (o == 0) snprintf(sl, sizeof(sl), "-");
+        if (have_pcn) snprintf(ph, sizeof(ph), "%u", (unsigned)pcn); else snprintf(ph, sizeof(ph), "-");
+        snprintf(ex, sizeof(ex), "result=%s fail=%s send=%d send_ret=%d c_seen=%u cc_seen=%u c_wait_us=%lld sis=%u rdychg=%u"
+                 " st0_list=%s fail_st0=0x%02x fail_pcn=%s drain_us=%lld us=%lld drain_ok=%u drain_fail=%u",
+                 ok ? "ok" : "fail", fail, do_send, send_ret, (unsigned)s_rl_sync_c, (unsigned)s_rl_sync_cc,
+                 (long long)c_wait_us, (unsigned)sis, (unsigned)rdychg, sl, (unsigned)fail_st0, ph, (long long)drain_us,
+                 (long long)(rl_now_us() - t0), (unsigned)s_fr_drain_ok, (unsigned)s_fr_drain_fail);
+        rl_fr_log("drain", why, ex);
+    }
+    return ok;
+}
+
+/* S-2(書込み/FORMAT/検証 READ ID の入口、装置への最初の問合せより前): 強制READY中または解除保留中なら同期 release+排出し、
+ * 保守側として status/notified も落とす。そうでなくても直近 FU_FR_SETTLE_MS 以内に READY 遷移を送っていれば、送信なしで
+ * 排出手順だけ行う(N-1(a))。戻り値: 1=装置へ問い合わせてよい(I-1 成立)/ 0=不成立(呼出し元は装置へ送らず拒否する) */
+static int rl_fr_wr_entry(const char* site)
+{
+    if (s_fr_dev_high || s_fr_release_pending) {
+        s_fr_wr_entry_release++;
+        uint32_t nb0 = s_fr_send_nobringup;
+        int ok = rl_fr_drain_run(1, site);
+        /* G-B 不成立=拒否(fail-closed)。書込み経路は中継可能(bringup 成立済み)のときしか来ないはずなので異常として数える */
+        if (s_fr_send_nobringup != nb0) s_fr_wr_nobringup++;
+        s_fr_status = 0;
+        s_fr_notified = 0;
+        return ok && !s_fr_dev_high && !s_fr_release_pending;
+    }
+    if (s_fr_last_edge_us != 0 && rl_now_us() - s_fr_last_edge_us < (int64_t)FU_FR_SETTLE_MS * 1000) {
+        s_fr_wr_entry_settle++;
+        uint32_t nb0 = s_fr_send_nobringup;
+        int ok = rl_fr_drain_run(0, site);
+        if (s_fr_send_nobringup != nb0) s_fr_wr_nobringup++;
+        return ok;
+    }
+    return 1;
+}
+
+/* ゲスト起点 release の送信不可区間: 装置実行中(RD_WAIT/RID_WAIT/書込み待ち)・書込みデータ収集中(N-1(b))・同期手順中・
+ * 再入中・中継不可。RD_SUPPLY は含めない(装置は送信を終えており port1 は空いている、M-5) */
+static int rl_fr_guest_busy(void)
+{
+    return rl_op_needs_device() || s_rl_state == RL_WR_COLLECT || s_rl_in_poll || s_rl_sync_active || !rl_relay_ok();
+}
+
+/* ゲスト起点 release(R-OPM、参照実装と同一)。送信不可区間なら保留し、rl_tick/次の rl_start で送る。
+ * この release が生む Ready 変化割込みは参照実装と同じくゲストへ渡す(R-7a) */
+static void rl_fr_release_guest(const char* why)
+{
+    if (rl_fr_guest_busy()) {
+        s_fr_release_pending = 1;
+        s_fr_defer_n++;
+        if (rl_in_write_wait()) s_fr_defer_in_wrwait++;   /* S-2 により本来起きない(異常計数) */
+        rl_fr_log("defer", why, NULL);
+        return;
+    }
+    if (rl_fr_send0(why, 1) < 0) s_fr_release_pending = 1;   /* 次に中継可能になった時点で再送 */
+}
+
+/* 保留中のゲスト起点 release を送れる時点で送る(rl_tick と rl_start から) */
+static void rl_fr_flush_pending(const char* site)
+{
+    if (!s_fr_release_pending) return;
+    if (rl_fr_guest_busy()) return;
+    (void)rl_fr_send0(site, 1);   /* 失敗なら保留のまま */
+}
+
+/* V-3: 割当てドライブ宛て RECALIBRATE の中継直前。戻り値: 1=assert 送信済み / 0=送らなかった / <0=0xA3,0x40 の送信失敗
+ * (rl_fault 済み。呼出し元は既存の送信失敗経路=スタブへ) */
+static int rl_fr_on_recal(int relay_after)
+{
+    if (s_fr_mode == FR_OFF) return 0;
+    s_fr_recal_relay++;
+    if (!s_fr_status || s_fr_notified) return 0;
+    if (!relay_after) { s_fr_assert_skip_norelay++; rl_fr_log("skip", "norelay", NULL); return 0; }
+    if (!rl_fr_gate_b("recal_assert")) {   /* G-B/I-3: S-1 の SDS も含め、bringup 未成立なら何も送らない */
+        s_fr_assert_skip_nobringup++;
+        return 0;
+    }
+    /* S-1(無条件、書込みモードによらず): 非キャッシュ SDS で装置の書込みキャッシュを強制READYを立てる前に flush 完了させる
+     * (C-4: flush は成否によらずキャッシュを空にする → I-2)。得た ST3 は偽装前の実 RY として assert 行へ出す */
+    uint8_t st3 = 0;
+    rl_wr_sds_log_t lg;
+    int64_t t0 = rl_now_us();
+    if (!rl_wr_sds_fresh_us(s_rl_cmd[1], &st3, &lg, WCF_CMD)) {
+        s_fr_assert_skip_preflush++;
+        char ex[64];
+        snprintf(ex, sizeof(ex), "sds_fail=%s", lg.fail);
+        rl_fr_log("skip", "preflush", ex);
+        return 0;   /* RECAL は従来どおり中継する */
+    }
+    /* 保留 release の取消し(S-c)。新しい bit6=1 書込み以後の assert が優先(参照実装の「先に release→後で assert」と同じ最終状態)。
+     * S-1 が不成立で assert しない場合は保留を残す(tick で送られる)ため、取消しは S-1 成立後に置く */
+    if (s_fr_release_pending) {
+        s_fr_release_pending = 0;
+        s_fr_pending_cancel++;
+        rl_fr_log("cancel", "assert", NULL);
+    }
+    static const uint8_t TX[2] = { FU_WR | FU_REG_OPM, FU_FR_OPM_BIT6 };
+    int r = rl_p1("fr_assert", TX, sizeof(TX), NULL, 0);
+    char ex[160];
+    snprintf(ex, sizeof(ex), "ret=%d pre_st3=0x%02x pre_RY=%d set_reg=0x%02x set_val=0x%02x set_f=%d us=%lld",
+             r, (unsigned)st3, (st3 & ST3_RY) ? 1 : 0, (unsigned)s_fr_set_reg, (unsigned)s_fr_set_val, s_fr_set_f,
+             (long long)(rl_now_us() - t0));
+    if (r < 0) {
+        s_fr_assert_fail++;
+        rl_fr_log("assert_fail", "recal", ex);
+        return r;
+    }
+    s_fr_notified = 1;
+    s_fr_dev_high = 1;
+    s_fr_assert_n++;
+    if (s_fr_set_reg == FU_FR_OPM_REG_CT) s_fr_assert_from_1b++;
+    memset(s_rl_sds_valid, 0, sizeof(s_rl_sds_valid));   /* I-4(M-1(b)) */
+    s_fr_last_edge_us = rl_now_us();
+    rl_fr_log("assert", "recal", ex);
+    return 1;
+}
+
+/* S-5: 強制READY中の読取り/READ ID のタイムアウト・途切れ。rl_abort_op の既存処理(合成エラー・割込み・RL_RESULT 遷移)の後に
+ * 呼ぶ。装置 FDC が実行相に残っている可能性があるので排出手順は行わず解除だけ送り、次の受付時に FU_INIT から戻す */
+static void rl_fr_on_read_timeout(int re)
+{
+    if (re != RE_TIMEOUT && re != RE_STALL) return;
+    if (!s_fr_dev_high) return;
+    s_fr_to_release++;
+    int r = rl_fr_send0("read_timeout", 1);
+    if (r >= 0) { s_fr_status = 0; s_fr_notified = 0; }
+    s_rl_bringup_valid = 0;
+    rl_rebringup_arm("fr_timeout");
+    char ex[48];
+    snprintf(ex, sizeof(ex), "re=%s ret=%d to_release=%u", RE_NAME[re], r, (unsigned)s_fr_to_release);
+    rl_fr_log("to_release", "read_timeout", ex);
+}
+
 /* P1051: 1書込み1行(mode1/armed、送信の有無によらず出す)。decision=sent|send_fail|sync_refused|no_sync */
 static void rl_sync_log(const rl_sync_log_t* lg, const char* precheck, const char* decision, int would,
                         int cf_first0, uint8_t cf_cmd0, int send_ret)
@@ -3136,6 +3560,16 @@ static void rl_wr_try_send(void)
             if (s_rl_state != st_before) ar_drained = 0;
         }
         if (s_rl_ar_armed && mx68k_floppyu_usb_generation() != s_rl_ar_arm_gen) rl_ar_disarm("gen_changed");
+    }
+    /* P1123(S-2): 装置への最初の問合せ(検査10の検証 READ ID・非キャッシュ SDS・同期 SEEK)より前に、強制READYを解除して
+     * Ready 変化割込みを装置内で排出する(送信前検査の ST3 RY・高速モードの SDS キャッシュ・検証 READ ID を実 Ready 下で評価する)。
+     * rl_nmf_verify も入口で同じ判定を持つが、順序を決定的にするため外側で先に行う。不成立なら装置へ一切送らず NW で拒否 */
+    if (!rl_fr_wr_entry("wr")) {
+        s_fr_ref_wr++;
+        rl_fr_log("refuse", "fr_release_fail", "site=wr decision=refused_fr_release_fail");
+        rl_synth_err(0x02u, 1);
+        rl_raise_int();
+        return;
     }
     /* 検査10(P1067、normal のみ): normal FORMAT の検証予約が残っていれば、この書込みを装置へ送る前に先に検証する
      * (最終トラック C76H1 の検証が後続の SEEK に依存するため)。ユニットを問わない。同期手順(rl_wr_sync_*)より前に
@@ -3641,6 +4075,10 @@ static int rl_fmt1_verify(int at_seek)
     else if (s_rl_d_events != s_rl_fmt1_v_d)     { skip = "d_event"; skip_why = "verify_skipped_d_event"; }
     else if (s_rl_fmt1_seek_n != s_rl_fmt1_v_seek) { skip = "seek"; skip_why = "verify_skipped_seek"; }   /* SEEK 起動では seek_n++ より前に呼ぶので常に等しい(多重防御) */
     else if (s_rl_in_poll)                       { skip = "reentry"; skip_why = "verify_skipped_reentry"; }
+    /* P1123(S-2): 早期 skip(装置へ問い合わせない)の後、最初の検証 READ ID の前で強制READYを解除・排出する。不成立なら
+     * 検証せず停止し、中継不可(post=0 → 呼出し元はスタブ)として返す */
+    int fr_fail = 0;
+    if (!skip && !rl_fr_wr_entry("fmt1_verify")) { skip = "fr_release"; skip_why = "verify_skipped_fr_release"; fr_fail = 1; }
     s_rl_fmt1_verify_pending = 0;
     char cond[352];
     snprintf(cond, sizeof(cond), "us_dev=%u allow_unit=%d relay=%d gen=%u/%u d=%u/%u seek_n=%u/%u in_poll=%d"
@@ -3651,7 +4089,7 @@ static int rl_fmt1_verify(int at_seek)
     if (skip) {
         s_rl_fmt1_verify_skipped++;
         rl_fmt1_halt(skip_why);   /* P1066: 検証できなかったトラックの次へ書込みを進めない */
-        int post = rl_relay_ok();
+        int post = fr_fail ? 0 : rl_relay_ok();   /* P1123: 解除不成立は「検証後に中継不可」と同じ扱い */
         if (!post) s_rl_fmt1_relay_lost_n++;
         if (s_rl_fmt1_lines < FU_AR_LOG_LIMIT) {
             s_rl_fmt1_lines++;
@@ -3836,7 +4274,11 @@ static void rl_fmt1_try_send(void)
     uint8_t st3 = 0;
     uint8_t want = (uint8_t)(0x20u | (p[1] & 7u));   /* FT=0・WP=0・RY=1・US/HD エコー一致 */
     int sds_ok = 0, st3_eq = 0, b1_t0 = 0, b1 = 0, rid_ok = 0, rid_ic_ok = 0, rid_chs = 0, b2 = 0, c0 = 0;
-    if (phase_a) {
+    /* P1123(S-2): Phase B の最初の問合せ(非キャッシュ SDS)より前に強制READYを解除・排出する。Phase A 不成立(装置へ触れない)
+     * なら解除しない(不要な遷移を作らない)。Phase 0 の検証は rl_fmt1_verify 自身の入口で同じ判定を行う */
+    int fr_ok = phase_a ? rl_fr_wr_entry("fmt1") : 1;
+    if (!fr_ok) s_fr_ref_fmt1++;
+    if (phase_a && fr_ok) {
         sds_ok = rl_wr_sds_fresh(&st3, &sl);
         st3_eq = sds_ok && ((st3 & 0xE7u) == want);
         /* T0 整合(ドライブの Track 0 センサー=記録IDと独立な物理信号)。本サイクルの許可Cは常に0なので実質 T0=1 必須 */
@@ -3862,13 +4304,15 @@ static void rl_fmt1_try_send(void)
                  !s_rl_fmt1_halt && !s_rl_fmt1_verify_pending && f_chain_now && f_epoch_now;
         }
     }
-    int send = phase_a && b1 && b2 && c0;
+    int send = phase_a && fr_ok && b1 && b2 && c0;
 
     /* 拒否理由(優先順で1つ。ログ・計数用で、送信判断には使わない) */
     int ref = -1;
     if (!send) {
         int rid_proc_fail = strcmp(rg.fail, "none") != 0 && strcmp(rg.fail, "c_without_cc") != 0 &&
                             strcmp(rg.fail, "no_c") != 0;   /* 期限切れ・通信失敗・アイドル非復帰(手順不成立) */
+        if (!fr_ok)                                ref = FM_REF_FR_RELEASE;   /* P1123: 装置へ問い合わせていない */
+        else
         if (latched)                               ref = FM_REF_LATCHED;
         else if (s_rl_fmt1_halt)                   ref = FM_REF_HALT;          /* P1066 */
         else if (!f5)                              ref = FM_REF_ENV;
@@ -4031,6 +4475,9 @@ static int rl_nmf_verify(int trig, int* post_relay)
     else if (gen != s_nmf_v_gen)  { skip = "gen";          skip_why = "verify_skipped_gen"; }
     else if (!unit_ok)            { skip = "unit_changed"; skip_why = "verify_skipped_unit_changed"; }
     else if (s_rl_in_poll)        { skip = "reentry";      skip_why = "verify_skipped_reentry"; }
+    /* P1123(S-2): 早期 skip の後、最初の検証 READ ID の前で強制READYを解除・排出する。不成立なら検証せず停止・中継不可 */
+    int fr_fail = 0;
+    if (!skip && !rl_fr_wr_entry("nmf_verify")) { skip = "fr_release"; skip_why = "verify_skipped_fr_release"; fr_fail = 1; }
     s_nmf_verify_pending = 0;
     char cond[384];
     snprintf(cond, sizeof(cond), "unit=%u relay=%d gen=%u/%u ue=%u/%u st=%s in_poll=%d trigger=%s guest_cmd=0x%02x"
@@ -4041,7 +4488,7 @@ static int rl_nmf_verify(int trig, int* post_relay)
     if (skip) {
         s_nmf_verify_skipped++;
         rl_nmf_halt(skip_why);   /* 検証できなかったトラックの次へ書込みを進めない */
-        int post = rl_relay_ok();
+        int post = fr_fail ? 0 : rl_relay_ok();   /* P1123: 解除不成立は「検証後に中継不可」と同じ扱い */
         if (!post) s_nmf_relay_lost_n++;
         if (post_relay) *post_relay = post;
         if (s_nmf_v_lines < FU_AR_LOG_LIMIT) {
@@ -4317,7 +4764,11 @@ static void rl_nmf_try_send(void)
     uint8_t want = (uint8_t)(0x20u | (p[1] & 7u));   /* FT=0・WP=0・RY=1・US/HD エコー一致 */
     int sds_ok = 0, st3_eq = 0, t0ok = 0, b1 = 0, rid_ok = 0, rid_ic_ok = 0, rid_chs = 0, rid_n = 0, b2 = 0, c0 = 0;
     int ry0_close = 0;
-    if (phase_a) {
+    /* P1123(S-2): Phase B の最初の問合せより前に強制READYを解除・排出する(Phase 0 の検証・C77 吸収は装置へ送る前に済んでおり、
+     * 検証は rl_nmf_verify 自身の入口で同じ判定を行う)。Phase A 不成立なら解除しない */
+    int fr_ok = phase_a ? rl_fr_wr_entry("nmf") : 1;
+    if (!fr_ok) s_fr_ref_nmf++;
+    if (phase_a && fr_ok) {
         sds_ok = rl_wr_sds_fresh(&st3, &sl);
         st3_eq = sds_ok && ((st3 & 0xE7u) == want);
         /* T0 整合: C=0 では T0=1、C≥1 では T0=0(位置の特定にはならないが矛盾を検出する) */
@@ -4346,14 +4797,15 @@ static void rl_nmf_try_send(void)
                  !s_rl_wr_latched_off && !s_nmf_halt && !s_nmf_verify_pending && run2 && s_rl_state == RL_WR_COLLECT && pcn2;
         }
     }
-    int send = phase_a && b1 && b2 && c0;
+    int send = phase_a && fr_ok && b1 && b2 && c0;
 
     /* 拒否理由(優先順で1つ。ログ・計数用で、送信判断には使わない) */
     int ref = -1;
     if (!send) {
         int rid_proc_fail = strcmp(rg.fail, "none") != 0 && strcmp(rg.fail, "c_without_cc") != 0 &&
                             strcmp(rg.fail, "no_c") != 0;
-        if (latched || s_rl_wr_latched_off)         ref = NMF_REF_LATCHED;
+        if (!fr_ok)                                 ref = NMF_REF_FR_RELEASE;   /* P1123: 装置へ問い合わせていない */
+        else if (latched || s_rl_wr_latched_off)    ref = NMF_REF_LATCHED;
         else if (s_nmf_halt)                        ref = NMF_REF_HALT;
         else if (!a4)                               ref = NMF_REF_UNIT;
         else if (!a5)                               ref = NMF_REF_FENCE;
@@ -5003,6 +5455,7 @@ static void rl_rid_begin(void)
 {
     s_rl_rid_begin++;
     s_rl_rp_total++;
+    if (s_fr_dev_high) s_fr_rd_while_high++;   /* P1123: 強制READY下の READ ID(意図した変化) */
     s_rl_op_gen = mx68k_floppyu_usb_generation();
     s_rl_op_t0_us = rl_now_us();
     s_rl_op_f0 = g_mx68k_frame_num;
@@ -5067,6 +5520,7 @@ static void rl_sds(void)
             s_rl_sds_val[key] = st3;
             s_rl_sds_t[key] = now;
             s_rl_sds_usb++;
+            rl_fr_note_st3(s_rl_cmd[1], st3, "guest_sds");   /* P1123: 観測のみ */
             /* P1037: armed・許可ユニットのゲスト SDS で RY=0 を見た回数(計数のみ。誤停止を避けるためラッチしない、H-4-0 で観測) */
             if (s_rl_write_mode == WRM_ARMED && s_rl_ar_env_ok && (int)(key & 3u) == s_rl_ar_unit && !(st3 & ST3_RY))
                 s_rl_ar_ry0_sds++;
@@ -5103,9 +5557,12 @@ static void rl_seek(void)
     }
     const char* name = (s_rl_cmd[0] & 0x1Fu) == 7u ? "recal" : "seek";
     s_rl_fmt1_seek_n++;   /* P1064: 送信後に SEEK/RECAL が1回でもあれば検証 READ ID を行わない(送信の成否によらず数える) */
+    /* P1123(V-3): RECAL の中継直前(上の検証・X4 失効の後、rl_send_cmd の直前)に強制READY を立てる(参照実装と同じ順序)。
+     * 0xA3,0x40 の送信失敗(<0、rl_fault 済み)は既存の送信失敗経路(スタブ)へ */
+    int fr = ((s_rl_cmd[0] & 0x1Fu) == 7u) ? rl_fr_on_recal(relay_after) : 0;
     /* P1065(C-2): 検証中に中継不可になったら装置へ送らず、既存の送信失敗経路でスタブへ。
      * スタブがNot Readyの割込みを出すのでDnBは立てない */
-    if (!relay_after || rl_send_cmd(name) < 0) {
+    if (!relay_after || fr < 0 || rl_send_cmd(name) < 0) {
         rl_fallback_stub();
         rl_c_irq_flush("seek_fallback");
         return;
@@ -5203,6 +5660,10 @@ static void rl_start(uint8_t first, uint8_t second_mx)
     s_rl_us_mx = second_mx & 7u;
     s_rl_state = RL_IDLE;
     s_rl_rdnum = 0;
+    /* P1123: 保留中のゲスト起点 release を、このコマンドを装置へ送る前に送る。ただし assert が起き得る RECAL では送らず、
+     * rl_fr_on_recal の保留取消し(S-c)に任せる(assert しなかった場合は保留が残り rl_tick で送る) */
+    if (s_fr_release_pending && !(cmd == 7u && s_fr_mode != FR_OFF && s_fr_status && !s_fr_notified))
+        rl_fr_flush_pending("start");
     s_rl_relay_hist[cmd]++;
     s_rl_wrnum = (uint32_t)P954_CMD_TABLE[cmd] - 1u;   /* 保留経路は CMD_TABLE>=1 のコマンドだけ */
     if (s_rl_wrnum == 0) rl_exec();
@@ -5687,6 +6148,11 @@ static void rl_wc_pre_reset(void)
 static void rl_bringup(void)
 {
     uint32_t gen = mx68k_floppyu_usb_generation();
+    /* ★transport の 0x00 ハンドシェイクと FU_INIT(0x80,0xFE)の間に port1 コマンドを置かないこと。装置ファームは
+     * 接続状態 m_initProtCount!=2 の間に来たそれ以外のコマンドを黙殺して 0 へ巻き戻し、直後の FU_INIT を無効化する
+     * (TNB:app.c:2576-2578)。P1123 実装 49714eb がここに置いた強制READY解除(S-4)で bringup が全滅した(改訂2で削除、I-5)。
+     * 下の rl_wc_pre_reset は dirty 時のみで、dirty は世代変化で破棄されるため初回 bringup(状態1)の前には走らない。
+     * (変異検査 M-9 の挿入点: ここへ 49714eb 相当の 0xA3,0x00 送信を G-B を通さず置くと S-FR8 が FAIL すること) */
     if (s_fu_wc_dirty) rl_wc_pre_reset();   /* P1089(B-11): ⌘R・再 bringup の FU_INIT より前 */
     if (s_rl_bringup_poll_fail_gen != gen) {
         s_rl_bringup_poll_fail_gen = gen;
@@ -5792,6 +6258,7 @@ static void rl_bringup(void)
         s_rl_bringup_gen = gen;
         s_rl_bringup_poll_fail_n = 0;
         s_rl_rebringup_pending = 0;   /* P1087(D): tick 経由でも inline 経由でも再 bringup が済めば予約は不要 */
+        rl_fr_bringup_clear();        /* P1123(改訂2): FU_INIT の 0x40 で装置 READY は Low。強制READY を解除済みと確定 */
     } else if (s_rl_bringup_poll_fail_n >= (uint32_t)BRINGUP_FAIL_LIMIT && !(s_rl_fault_valid && s_rl_fault_gen == gen)) {
         rl_fault("bringup_poll_limit", -2);
     }
@@ -5804,6 +6271,8 @@ static void rl_spec_capture(uint8_t b)
     if (s_rl_spec_n < 2) return;
     s_rl_spec_capturing = 0;
     s_rl_spec_valid = 1;
+    /* P1122(D-136): ND は中継可否に関わらず記録する(実機 FDC は SPECIFY を常に受け取る)。ND=0 なら 0 へ戻す */
+    s_rl_spec_nd = (s_rl_spec[1] & 1u) ? 1 : 0;
     if (!rl_relay_ok()) return;
     uint8_t tx[6] = { FU_WR | FU_REG_DATA, 0x03, FU_WR | FU_REG_DATA, s_rl_spec[0], FU_WR | FU_REG_DATA, s_rl_spec[1] };
     char th[2 * 6 + 4];
@@ -5869,7 +6338,13 @@ static uint8_t rl_msr(void)
     if (s_rl_wrnum > 0u) return p1009_core_msr(s_rl_wrnum, 0);
     switch (s_rl_state) {
     case RL_RD_WAIT: case RL_RID_WAIT: return 0x10u;
-    case RL_RD_SUPPLY:                 return p1009_core_msr(0, FU_RESULT_LEN);   /* rdnum=7 → 0xD0 */
+    case RL_RD_SUPPLY:
+        /* P1122(D-136): CPU 転送(受付時 ND=1 かつ MTC==0)の払出し中は NDM(bit5)付きの 0xF0
+         * (Inside X68000 書籍p.397 図11、XEiJ+t FUK.java:359-360 / XM6t fdc_bridger.h:240-241 の SoftReceive)。
+         * それ以外(DMA)は従来どおり rdnum=7 → 0xD0。計数は実際に返した値の分岐で行う(rl_msr の呼出し元は p955_route_read のみ) */
+        s_rl_sup_msr_rd++;
+        if (s_rl_rd_ndm) { s_rl_sup_msr_f0++; return 0xF0u; }
+        return p1009_core_msr(0, FU_RESULT_LEN);
     case RL_RESULT:                    return p1009_core_msr(0, s_rl_rdnum);
     case RL_WR_COLLECT:                return 0x90u;   /* P1031: 実行フェーズ・ホスト→FDC(XM6t/XEiJ の Command中 0x90) */
     case RL_WR_WAIT_W: case RL_WR_WAIT_DONE: case RL_WR_RESULT:
@@ -5962,6 +6437,7 @@ static void rl_tick(void)
     rl_poll();
     rl_rid_poll(0);
     rl_wr_result_poll(0, "poll");   /* P1032 */
+    rl_fr_flush_pending("tick");    /* P1123: 保留中のゲスト起点 release(送信不可区間を抜けていれば送る) */
     rl_wc_idle_tick();              /* P1089(B-6) */
     if (s_nm_fast && (g_mx68k_frame_num % 30) == 0) rl_wc_recount_unverified();   /* P1089(B-12) */
     /* P1028: 完了点を通らずに保留が残った場合の安全網(発火件数は reraise_tick で可視化) */
@@ -6062,6 +6538,10 @@ static void rl_fast_log_sum(const char* why)
 static void rl_log_sum(void)
 {
     char hr[256], hs[256], hf[256];
+    /* P1122(D-136): 払出し途中で停滞していれば位置/総数(RD_SUPPLY にはタイムアウトが無いため sum 行で可視化) */
+    char sup_cur[32];
+    if (s_rl_state == RL_RD_SUPPLY) snprintf(sup_cur, sizeof(sup_cur), "%u/%u", (unsigned)s_rl_supply_pos, (unsigned)s_rl_supply_n);
+    else                            snprintf(sup_cur, sizeof(sup_cur), "-");
     rl_hist_str(hr, sizeof(hr), s_rl_relay_hist);
     rl_hist_str(hs, sizeof(hs), s_rl_stub_hist);
     rl_hist_str(hf, sizeof(hf), s_rl_refused_hist);
@@ -6079,7 +6559,8 @@ static void rl_log_sum(void)
               " dnb_set=%u dnb_clr_sense=%u dnb_clr_timeout=%u dnb_clr_disc=%u dnb_clr_fault=%u dnb_clr_other=%u"
               " dnb_busy_reads=%u dnb_sense_no_se=%u dnb_mask_now=0x%02x result_discarded=%u/%u"
               " rebringup_inline=%u/%u/%u diag_begin=%u diag_ok=%u diag_hook_skip=%u se_rd_n=%u ejg_supp=%u"
-              " rdel_begin=%u rdel_ok=%u rdel_hook_skip=%u\n",
+              " rdel_begin=%u rdel_ok=%u rdel_hook_skip=%u"
+              " ndm_rd=%u ndm_msr=%u/%u sup_done=cpu:%u,dma:%u sup_cur=%s wr_sends=%u\n",
               (unsigned)g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(),
               s_rl_last_mode == 1 ? "relay" : "stub", s_rl_reason ? s_rl_reason : "-", hr, hs, hf,
               (unsigned)s_rl_read_begin, (unsigned)s_rl_read_ok, (unsigned)s_rl_read_err[RE_TIMEOUT],
@@ -6111,7 +6592,9 @@ static void rl_log_sum(void)
               (unsigned)s_rl_rebringup_ok, (unsigned)s_rl_rebringup_fail, (unsigned)s_rl_rebringup_skip,   /* P1087(D): ok/fail/skip */
               (unsigned)s_rl_diag_begin, (unsigned)s_rl_diag_ok, (unsigned)s_rl_diag_hook_skip,   /* P1116 */
               (unsigned)s_rl_se_rd_n, (unsigned)s_rl_e5_ej_supp,   /* P1117: nm sum の ej_supp と別名 */
-              (unsigned)s_rl_rdel_begin, (unsigned)s_rl_rdel_ok, (unsigned)s_rl_rdel_hook_skip);   /* P1120 */
+              (unsigned)s_rl_rdel_begin, (unsigned)s_rl_rdel_ok, (unsigned)s_rl_rdel_hook_skip,   /* P1120 */
+              (unsigned)s_rl_ndm_rd, (unsigned)s_rl_sup_msr_f0, (unsigned)s_rl_sup_msr_rd,          /* P1122(D-136) */
+              (unsigned)s_rl_sup_done_cpu, (unsigned)s_rl_sup_done_dma, sup_cur, (unsigned)s_rl_wr_sends);
     /* P1052: 既存の集計行の書式は変えず、別の1行で出す */
     debug_log(P1052_TAG " sum f=%u D=%u d=%u pend_set=%u coalesced=%u raised=%u masked=%u deferred_irq1=%u"
               " deferred_cdef=%u deferred_wr=%u defer_streak_max=%u requeued=%u requeued_ext=%u inflight=%d acked=%u"
@@ -6317,6 +6800,32 @@ static void rl_log_sum(void)
         }
         s_p1028_ring_dumped_seq = last;
     }
+    /* P1123: 強制READY の分母・分子(常に出す)。assert_n=0 の原因(キルスイッチ/OPM 書込み0件/bit6=1 が0件/RECAL 未中継/
+     * 事前 flush 失敗/中継不可)を fr_mode・opm_wr・opm_b6_1(_reg1b)・recal_relay・assert_skip_* で一意に区別する。
+     * wr_while_high は常に0の不変条件(I-1)。ar_ry0_sds は強制READY中は RY=1(偽装)のため数えられない(挙動不変) */
+    debug_log(P1123_FR_TAG " sum f=%u gen=%u fr_mode=%s status=%d notified=%d dev_high=%d pending=%d"
+              " opm_wr=%u opm_b6_1=%u opm_b6_0=%u opm_b6_1_reg1b=%u strict_skip=%u recal_relay=%u"
+              " assert_n=%u assert_from_1b=%u assert_skip_preflush=%u assert_skip_norelay=%u assert_skip_nobringup=%u assert_fail=%u"
+              " release_n=%u release_fail=%u defer_n=%u defer_in_wrwait=%u pending_cancel=%u"
+              " rd_while_high=%u wr_entry_release=%u wr_entry_settle=%u wr_while_high=%u"
+              " drain_ok=%u drain_fail=%u drain_rdychg=%u to_release=%u fr_ref_wr=%u fr_ref_fmt1=%u fr_ref_nmf=%u"
+              " st3_chg=%u e7_dedup=%u sds_usb=%u sds_cache=%u ar_ry0_sds=%u lines=%u lines_drop=%u"
+              " fr_send_nobringup=%u wr_nobringup=%u bringup_clear=%u\n",
+              (unsigned)g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(), FR_MODE_NAME[s_fr_mode],
+              s_fr_status, s_fr_notified, s_fr_dev_high, s_fr_release_pending,
+              (unsigned)s_fr_opm_wr, (unsigned)s_fr_opm_b6_1, (unsigned)s_fr_opm_b6_0, (unsigned)s_fr_opm_b6_1_reg1b,
+              (unsigned)s_fr_strict_skip, (unsigned)s_fr_recal_relay,
+              (unsigned)s_fr_assert_n, (unsigned)s_fr_assert_from_1b, (unsigned)s_fr_assert_skip_preflush,
+              (unsigned)s_fr_assert_skip_norelay, (unsigned)s_fr_assert_skip_nobringup, (unsigned)s_fr_assert_fail,
+              (unsigned)s_fr_release_n, (unsigned)s_fr_release_fail, (unsigned)s_fr_defer_n, (unsigned)s_fr_defer_in_wrwait,
+              (unsigned)s_fr_pending_cancel,
+              (unsigned)s_fr_rd_while_high, (unsigned)s_fr_wr_entry_release, (unsigned)s_fr_wr_entry_settle,
+              (unsigned)s_fr_wr_while_high,
+              (unsigned)s_fr_drain_ok, (unsigned)s_fr_drain_fail, (unsigned)s_fr_drain_rdychg, (unsigned)s_fr_to_release,
+              (unsigned)s_fr_ref_wr, (unsigned)s_fr_ref_fmt1, (unsigned)s_fr_ref_nmf,
+              (unsigned)s_fr_st3_chg, (unsigned)s_fr_e7_dedup, (unsigned)s_rl_sds_usb, (unsigned)s_rl_sds_cache,
+              (unsigned)s_rl_ar_ry0_sds, (unsigned)s_fr_lines, (unsigned)s_fr_lines_drop,
+              (unsigned)s_fr_send_nobringup, (unsigned)s_fr_wr_nobringup, (unsigned)s_fr_bringup_clear);
     e5p_log_sum("periodic");   /* P1054 */
 }
 
@@ -6563,6 +7072,9 @@ static void rl_install_reset(void)
     s_rl_rd_cmd5 = 0;
     s_rl_rd_is_rdel = 0;
     s_rl_spec_capturing = 0;
+    s_rl_spec_nd = 0;              /* P1122(D-136): リセットで DMA モードへ戻す(s_rl_spec[]/s_rl_spec_valid は bringup 再送用に保持) */
+    s_rl_rd_nd = 0;
+    s_rl_rd_ndm = 0;
     s_rl_verify_pending = 0;
     s_rl_c_irq_live = 0;           /* P1028: リセットで保留中の割込みは無効になる */
     s_rl_c_irq_deferred = 0;
@@ -6817,7 +7329,7 @@ static void rl_e7_write(uint8_t data)
     } else {
         v = (uint8_t)((data & 0x7Cu) | (assigned ? (uint8_t)(d - s_p955_base) : 0u));
     }
-    if (s_rl_e7_sent_valid && v == s_rl_e7_sent) return;
+    if (s_rl_e7_sent_valid && v == s_rl_e7_sent) { s_fr_e7_dedup++; return; }   /* P1123: 計数のみ(送信挙動は不変) */
     uint8_t tx[2] = { FU_WR | FU_REG_E7, v };
     /* P1089: $E94007 は装置側の値が変化したときだけ flush 契機(FW: app.c:2684-2687)。前回送信値が不明(無効化済み)の
      * 送信は装置側で変化しないことがあるので契機にしない(dirty を保持する安全側) */
@@ -7091,6 +7603,23 @@ void mx68k_floppyu_fdcpt_install(const char *site, int enabled, int32_t assigned
     if (MemWriteTable[P949_FDC_TABLE_IDX] != mx68k_floppyu_fdc_pt_write)
         s_p958_orig_write = MemWriteTable[P949_FDC_TABLE_IDX];
 
+    /* P1123(S-3): 強制READY のモードを install ごとに確定し、ゲスト側の状態を「不明」へ戻す(装置へは何も送らない)。
+     * 振り分け器を無効へ戻す install で装置 READY が High のまま残る場合はログのみ(R-12、既存 P1089 B-11 N3 と同じ判断) */
+    {
+        const char* fe = getenv("MX68K_FLOPPYU_FORCE_READY");
+        int unknown = 0;
+        if (fe == NULL || strcmp(fe, "1") == 0) s_fr_mode = FR_REF;
+        else if (strcmp(fe, "strict") == 0)      s_fr_mode = FR_STRICT;
+        else if (strcmp(fe, "0") == 0)           s_fr_mode = FR_OFF;
+        else                                     { s_fr_mode = FR_REF; unknown = 1; }   /* 未知値は既定(参照互換)へ */
+        if (!effective && s_fr_dev_high) rl_fr_log("install_off_dev_high_logonly", reason, NULL);
+        rl_fr_reset_state("install");
+        if (effective) {
+            char ex[96];
+            snprintf(ex, sizeof(ex), "env=%.12s unknown_value=%d", fe ? fe : "unset", unknown);
+            rl_fr_log("env", site ? site : "(null)", ex);
+        }
+    }
     s_p949_enabled = effective;
     s_p955_enabled = effective;
     const char *table;
@@ -7237,6 +7766,33 @@ void mx68k_floppyu_get_format_status(int32_t* on, int32_t* halted, int32_t* trac
     if (src)       *src = en ? sr : NMF_SRC_OFF;
 }
 
+/* P1123(V-2): ゲストの OPM データ書込み($E90003、レジスタ番号 reg はアドレスラッチ $E90001 で選択済みの値)ごとに
+ * m68000_bridge.c の OPM シャドウ記録(c68k・Musashi の両経路)から呼ばれる。参照2実装と同じく bit6 を見て強制READY 状態を
+ * 更新する(参照互換はレジスタ番号を見ない。strict は $1B のみ)。振り分け器無効・キルスイッチ 0 なら何もしない */
+void mx68k_floppyu_fdcpt_note_opm_data(uint8_t reg, uint8_t v)
+{
+    if (!s_p955_enabled || s_fr_mode == FR_OFF) return;
+    s_fr_opm_wr++;
+    s_fr_opm_last_reg = reg;
+    s_fr_opm_last = v;
+    s_fr_opm_last_f = g_mx68k_frame_num;
+    int b6 = (v & FU_FR_OPM_BIT6) != 0;
+    if (b6) { s_fr_opm_b6_1++; if (reg == FU_FR_OPM_REG_CT) s_fr_opm_b6_1_reg1b++; }
+    else    s_fr_opm_b6_0++;
+    if (s_fr_mode == FR_STRICT && reg != FU_FR_OPM_REG_CT) { s_fr_strict_skip++; return; }   /* 計数のみ */
+    if (b6) {   /* XM6t fdc_bridger.h:510-513、XEiJ FUK.java:593-595(送信なし) */
+        s_fr_status = 1;
+        s_fr_notified = 0;
+        s_fr_set_reg = reg;
+        s_fr_set_val = v;
+        s_fr_set_f = g_mx68k_frame_num;
+    } else if (s_fr_notified) {   /* XM6t :515-519、XEiJ :597-601 */
+        s_fr_notified = 0;
+        s_fr_status = 0;
+        rl_fr_release_guest("opm");
+    }
+}
+
 /* P1054: mx68k_shutdown から呼ぶ。開いている観測窓を閉じ、累積要約を出す(振り分け器を一度も有効にしていなければ何もしない) */
 void mx68k_floppyu_fdcpt_shutdown(void)
 {
@@ -7253,6 +7809,15 @@ void mx68k_floppyu_fdcpt_shutdown(void)
                   g_mx68k_frame_num, (unsigned)s_fu_wc_est, (unsigned)s_fu_wc_pend_n, s_fu_wc_pend_ovf, ps, s_fu_wc_flush_req,
                   WCF_NAME[s_fu_wc_flush_src], s_fu_wc_dirty_f, s_fu_wc_last_cached_f,
                   (long long)(rl_now_us() - s_rl_wr_send_t_us));
+    }
+    /* P1123(S-3/R-12): 装置 READY が High のまま終了する場合もログのみ(上と同じ理由で port1 往復を加えない)。
+     * I-2 により High 中の装置書込みキャッシュは空。次にホスト(MX または参照実装)がオープンして FU_INIT(0x40=深いリセット)を
+     * 送った時点、または装置の電源再投入で解除される(R-12、carrier 通知による遅延深リセットは未検証) */
+    if (s_fr_dev_high) {
+        debug_log(P1123_FR_TAG " shutdown_dev_high_logonly f=%d status=%d notified=%d pending=%d assert_n=%u release_n=%u"
+                  " last_edge_age_us=%lld\n",
+                  g_mx68k_frame_num, s_fr_status, s_fr_notified, s_fr_release_pending, (unsigned)s_fr_assert_n,
+                  (unsigned)s_fr_release_n, s_fr_last_edge_us ? (long long)(rl_now_us() - s_fr_last_edge_us) : -1LL);
     }
     if (!s_e5p_seen) return;
     e5p_close("shutdown");
@@ -7488,5 +8053,32 @@ void mx68k_floppyu_fdcpt_selftest_cmd(uint8_t out[10], uint32_t* n)
 void mx68k_floppyu_fdcpt_selftest_latch(void)
 {
     rl_nm_latch("selftest");
+}
+
+/* P1123 T-1 fr-*: 強制READY の状態(読取りのみ)。out = status, notified, dev_high, pending, mode */
+void mx68k_floppyu_fdcpt_selftest_fr_state(int out[5])
+{
+    out[0] = s_fr_status; out[1] = s_fr_notified; out[2] = s_fr_dev_high; out[3] = s_fr_release_pending; out[4] = s_fr_mode;
+}
+
+/* P1123 T-1 fr-*: 次の1回の解除送信(0xA3,0x00)を装置へ送らず戻り値 r(-1/-2/-3)として扱う(0=解除) */
+void mx68k_floppyu_fdcpt_selftest_fr_force_send_ret(int r)
+{
+    s_st_fr_force_ret = r;
+}
+
+/* P1123 改訂2 T-1 fr-8/fr-17: 前世代からの持ち越しを模して強制READY の内部状態を直接設定する(装置へは何も送らない) */
+void mx68k_floppyu_fdcpt_selftest_fr_inject(int status, int notified, int dev_high, int pending)
+{
+    s_fr_status = status; s_fr_notified = notified; s_fr_dev_high = dev_high; s_fr_release_pending = pending;
+}
+
+/* P1123 改訂2 T-1 fr-17(G-B): 送信経路を直接呼ぶ。which: 0=書込み経路入口 rl_fr_wr_entry / 1=保留 release の flush
+ * (rl_tick と同じ rl_fr_flush_pending)/ 2=解除送信本体 rl_fr_send0(ゲスト起点・タイムアウト経路の共通送信点)。戻り値はそのまま */
+int mx68k_floppyu_fdcpt_selftest_fr_call(int which)
+{
+    if (which == 0) return rl_fr_wr_entry("selftest_wr_entry");
+    if (which == 1) { rl_fr_flush_pending("selftest_tick"); return 0; }
+    return rl_fr_send0("selftest_send0", 1);
 }
 #endif /* MX68K_FLOPPYU_USB_SELFTEST */
