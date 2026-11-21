@@ -337,6 +337,10 @@ static int p955_int_fifo_pop(void) {
 #define FU_P1_TIMEOUT_MS      100       /* 同期往復1回の上限(XM6t実測最大2.6msの約40倍) */
 #define FU_SDS_CACHE_MS       500       /* XM6t fdc_bridger.h:588-616 */
 #define FU_E5_CACHE_MS        500       /* XM6t fdc_bridger.h:365-397 */
+/* P1125(D-146): READ 待ち中の $E94005 読出しで READ 完了を待つ上限。FU_READ_DEADLINE_MS+500ms。通常は rl_poll 内の
+ * rl_check_timeouts が先に打ち切るので、これは rl_poll が早期 return して打切り判定が動かない場合の保険 */
+#define FU_E5_RDWAIT_CAP_MS   3500
+#define P1125_TAG             "[P1125-RDE5]"
 #define FU_SEEK_C_TIMEOUT_MS  3000
 #define FU_DNB_TIMEOUT_MS     3000      /* P1010: 合成DnBの強制解除上限(FU_SEEK_C_TIMEOUT_MSと同値) */
 #define P1010_TAG             "[P1010-DNB]"
@@ -474,6 +478,13 @@ static uint32_t s_rl_p1_calls, s_rl_p1_timeouts, s_rl_p1_errs, s_rl_int_raised, 
 static uint32_t s_rl_blk_hist[4], s_rl_relay_frames;
 static int64_t  s_rl_blk_us_max = 0;
 static uint32_t s_rl_rp_e5_rd, s_rl_rp_e5_wr, s_rl_rp_e7_wr, s_rl_rp_cmd_wr, s_rl_rp_msr_rd, s_rl_rp_total;
+/* P1125(D-146): READ 待ち(RL_RD_WAIT)中の $E94005 読出しの計数。total は分母(NOBIT/NORELAY の分岐より前で数える)。
+ * 恒等式: total = waited_ok + supp + cache_hit + nobit + norelay(waited_ok は待った後に問い合わせた/再判定でキャッシュに当たった分)。
+ * frames_done は rl_read_frame_done() を通るたびに増える READ 完了の通し番号(待ちの成否判定に使う) */
+static uint32_t s_rl_rd_e5r_total, s_rl_rd_e5r_waited_ok, s_rl_rd_e5r_supp, s_rl_rd_e5r_cache_hit;
+static uint32_t s_rl_rd_e5r_nobit, s_rl_rd_e5r_norelay, s_rl_rd_frames_done;
+static uint32_t s_rl_rde5_lines, s_rl_rde5_n, s_rl_rde5_p1_fail;
+static int64_t  s_rl_rd_e5r_wait_max_us, s_rl_rde5_p1_us_max;
 static uint32_t s_rl_retry_same_chr, s_rl_refused_lines, s_rl_c_lines, s_rl_sds_lines, s_rl_aborted_by_cmd;
 static uint32_t s_rl_result_discarded;   /* P1018: 新規コマンドで未読 RL_RESULT を破棄した回数(分母は s_p955_cmd_start) */
 
@@ -1638,8 +1649,10 @@ static uint32_t s_rl_fi_lines;
 #define E5P_WIN_DETAIL_MAX    64u     /* open/ev/rd 行を出す窓の数 */
 #define E5P_RD_PER_WIN_MAX    48u     /* 1窓あたりの rd 行上限 */
 #define E5P_WINSUM_MAX        256u
-enum { E5P_SRC_USB = 0, E5P_SRC_CACHE, E5P_SRC_WRWAIT, E5P_SRC_NOBIT, E5P_SRC_NORELAY, E5P_SRC_USBFAIL, E5P_SRC_N };
-static const char* const E5P_SRC_NAME[E5P_SRC_N] = { "usb", "cache", "wrwait", "nobit", "norelay", "usbfail" };
+/* P1125: E5P_SRC_RDWAIT は既存の添字を変えないよう末尾に追加(READ 待ち中で待てなかった/打ち切られたため、装置へ問い合わせず
+ * キー一致のキャッシュか0を返した読出し) */
+enum { E5P_SRC_USB = 0, E5P_SRC_CACHE, E5P_SRC_WRWAIT, E5P_SRC_NOBIT, E5P_SRC_NORELAY, E5P_SRC_USBFAIL, E5P_SRC_RDWAIT, E5P_SRC_N };
+static const char* const E5P_SRC_NAME[E5P_SRC_N] = { "usb", "cache", "wrwait", "nobit", "norelay", "usbfail", "rdwait" };
 static int      s_e5p_seen = 0;               /* 振り分け器が一度でも有効になったか(shutdown 時の sum 行の要否) */
 static uint8_t  s_e5p_last_val[16];
 static int      s_e5p_last_f[16] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
@@ -1693,7 +1706,7 @@ static void e5p_close(const char* why)
     debug_log(P1054_TAG " win_sum win=%u why=%s f_open=%d f_close=%d n_ev=%u nD=%u nd=%u coalesced_delta=%u acked_delta=%u"
               " reads=%u reads_assigned=%u by_src=usb:%u,cache:%u,wrwait:%u,nobit:%u,norelay:%u,usbfail:%u multibit=%u"
               " unit_read_mask=0x%x first=%s last=%s pre=%s changed_mask=0x%x changed_within=0x%x"
-              " outside_reads_since_prev=%u lines_dropped=%u\n",
+              " outside_reads_since_prev=%u lines_dropped=%u rdwait=%u\n",
               (unsigned)s_e5p_win, why, s_e5p_f_open, g_mx68k_frame_num, (unsigned)s_e5p_n_ev,
               (unsigned)s_e5p_nD, (unsigned)s_e5p_nd, (unsigned)(s_rl_fi_coalesced - s_e5p_co0),
               (unsigned)(s_rl_fi_acked - s_e5p_ack0), (unsigned)s_e5p_reads, (unsigned)s_e5p_reads_assigned,
@@ -1701,7 +1714,8 @@ static void e5p_close(const char* why)
               (unsigned)s_e5p_by_src[E5P_SRC_WRWAIT], (unsigned)s_e5p_by_src[E5P_SRC_NOBIT],
               (unsigned)s_e5p_by_src[E5P_SRC_NORELAY], (unsigned)s_e5p_by_src[E5P_SRC_USBFAIL],
               (unsigned)s_e5p_multibit, (unsigned)s_e5p_unit_mask, fs, ls, ps, (unsigned)changed,
-              (unsigned)s_e5p_changed_within, (unsigned)s_e5p_outside_at_open, (unsigned)s_e5p_lines_dropped);
+              (unsigned)s_e5p_changed_within, (unsigned)s_e5p_outside_at_open, (unsigned)s_e5p_lines_dropped,
+              (unsigned)s_e5p_by_src[E5P_SRC_RDWAIT]);   /* P1125: 既存フィールドの後ろへ末尾追加 */
 }
 
 /* 'D'/'d' 受信時(既存処理の後)に呼ぶ */
@@ -1794,13 +1808,14 @@ static void e5p_log_sum(const char* why)
 {
     debug_log(P1054_TAG " sum f=%d why=%s wins=%u wins_logged=%u open_now=%d reads_total=%u"
               " by_src=usb:%u,cache:%u,wrwait:%u,nobit:%u,norelay:%u,usbfail:%u rd_lines=%u rd_dropped=%u"
-              " win_sum_lines=%u win_sum_dropped=%u\n",
+              " win_sum_lines=%u win_sum_dropped=%u rdwait=%u\n",
               g_mx68k_frame_num, why, (unsigned)s_e5p_win, (unsigned)s_e5p_wins_logged, s_e5p_open,
               (unsigned)s_e5p_reads_total, (unsigned)s_e5p_by_src_total[E5P_SRC_USB],
               (unsigned)s_e5p_by_src_total[E5P_SRC_CACHE], (unsigned)s_e5p_by_src_total[E5P_SRC_WRWAIT],
               (unsigned)s_e5p_by_src_total[E5P_SRC_NOBIT], (unsigned)s_e5p_by_src_total[E5P_SRC_NORELAY],
               (unsigned)s_e5p_by_src_total[E5P_SRC_USBFAIL], (unsigned)s_e5p_rd_lines_total,
-              (unsigned)s_e5p_rd_dropped_total, (unsigned)s_e5p_winsum_lines, (unsigned)s_e5p_winsum_dropped);
+              (unsigned)s_e5p_rd_dropped_total, (unsigned)s_e5p_winsum_lines, (unsigned)s_e5p_winsum_dropped,
+              (unsigned)s_e5p_by_src_total[E5P_SRC_RDWAIT]);   /* P1125: 末尾追加 */
 }
 
 /* ===========================================================================
@@ -2837,6 +2852,9 @@ static void rl_nm_on_read_ok(uint32_t n)
 /* 'R'フレーム完了(進行中READ宛て) */
 static void rl_read_frame_done(void)
 {
+    /* P1125: 3つの出口(短フレーム/n==0/RD_SUPPLY)のどれでも、フレームは受信済みで装置ファームはメインループへ戻っている
+     * (TNB:app.c:2297-2312)。出口ごとの数え漏らしを避けるため入口で数える */
+    s_rl_rd_frames_done++;
     uint32_t len = s_rl_frame_len;
     if (len < FU_RESULT_LEN) {
         s_rl_read_err[RE_SHORT]++;
@@ -6737,7 +6755,8 @@ static void rl_log_sum(void)
               " dnb_busy_reads=%u dnb_sense_no_se=%u dnb_mask_now=0x%02x result_discarded=%u/%u"
               " rebringup_inline=%u/%u/%u diag_begin=%u diag_ok=%u diag_hook_skip=%u se_rd_n=%u ejg_supp=%u"
               " rdel_begin=%u rdel_ok=%u rdel_hook_skip=%u"
-              " ndm_rd=%u ndm_msr=%u/%u sup_done=cpu:%u,dma:%u sup_cur=%s wr_sends=%u\n",
+              " ndm_rd=%u ndm_msr=%u/%u sup_done=cpu:%u,dma:%u sup_cur=%s wr_sends=%u"
+              " rd_e5r=%u/%u/%u/%u wait_max_us=%lld rde5_p1_fail=%u rde5_p1_us_max=%lld rd_e5r_nb_nr=%u/%u\n",
               (unsigned)g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(),
               s_rl_last_mode == 1 ? "relay" : "stub", s_rl_reason ? s_rl_reason : "-", hr, hs, hf,
               (unsigned)s_rl_read_begin, (unsigned)s_rl_read_ok, (unsigned)s_rl_read_err[RE_TIMEOUT],
@@ -6771,7 +6790,11 @@ static void rl_log_sum(void)
               (unsigned)s_rl_se_rd_n, (unsigned)s_rl_e5_ej_supp,   /* P1117: nm sum の ej_supp と別名 */
               (unsigned)s_rl_rdel_begin, (unsigned)s_rl_rdel_ok, (unsigned)s_rl_rdel_hook_skip,   /* P1120 */
               (unsigned)s_rl_ndm_rd, (unsigned)s_rl_sup_msr_f0, (unsigned)s_rl_sup_msr_rd,          /* P1122(D-136) */
-              (unsigned)s_rl_sup_done_cpu, (unsigned)s_rl_sup_done_dma, sup_cur, (unsigned)s_rl_wr_sends);
+              (unsigned)s_rl_sup_done_cpu, (unsigned)s_rl_sup_done_dma, sup_cur, (unsigned)s_rl_wr_sends,
+              /* P1125(D-146): total/waited_ok/supp/cache_hit、待ち時間・待った後の問合せの失敗数と所要時間の最大、nobit/norelay */
+              (unsigned)s_rl_rd_e5r_total, (unsigned)s_rl_rd_e5r_waited_ok, (unsigned)s_rl_rd_e5r_supp,
+              (unsigned)s_rl_rd_e5r_cache_hit, (long long)s_rl_rd_e5r_wait_max_us, (unsigned)s_rl_rde5_p1_fail,
+              (long long)s_rl_rde5_p1_us_max, (unsigned)s_rl_rd_e5r_nobit, (unsigned)s_rl_rd_e5r_norelay);
     /* P1052: 既存の集計行の書式は変えず、別の1行で出す */
     debug_log(P1052_TAG " sum f=%u D=%u d=%u pend_set=%u coalesced=%u raised=%u masked=%u deferred_irq1=%u"
               " deferred_cdef=%u deferred_wr=%u defer_streak_max=%u requeued=%u requeued_ext=%u inflight=%d acked=%u"
@@ -7472,22 +7495,116 @@ static void rl_e5_write(void)
     rl_invalidate_caches();   /* $E94005 読出しキャッシュと SDS キャッシュ(bit5 の排出を含む)を破棄 */
 }
 
+/* P1125(D-146): READ 待ち中の $E94005 読出しで、READ 完了を待った結果 */
+enum { RDE5_DONE = 0, RDE5_ABORT, RDE5_REENTRY, RDE5_CAP, RDE5_NORELAY, RDE5_N };
+static const char* const RDE5_EXIT_NAME[RDE5_N] = { "done", "abort", "reentry", "cap", "norelay" };
+
+/* P1125: RL_RD_WAIT を抜けるまで rl_poll を回して待つ(rl_fr_drain_run の'C'待ちと同じ形)。
+ * DONE=READ のフレームを受け取った(装置ファームはメインループへ戻っている、TNB:app.c:2297-2312)/
+ * ABORT=打切り(RE_TIMEOUT/RE_STALL/RE_DISCONNECT 等)/REENTRY=再入中で port2 を読めないので待たない/
+ * CAP=FU_E5_RDWAIT_CAP_MS に達しても RD_WAIT のまま。t0_us・t1_us には待ちの開始・終了時刻(生値)を返す */
+static int rl_e5_wait_read_done(int64_t* t0_us, int64_t* t1_us)
+{
+    int64_t t0 = rl_now_us();
+    *t0_us = t0;
+    if (s_rl_in_poll) { *t1_us = t0; return RDE5_REENTRY; }
+    uint32_t done0 = s_rl_rd_frames_done;
+    int64_t cap = (int64_t)FU_E5_RDWAIT_CAP_MS * 1000;
+    while (s_rl_state == RL_RD_WAIT && rl_now_us() - t0 < cap) {
+        rl_poll();
+        if (s_rl_state != RL_RD_WAIT) break;
+        rl_sync_sleep();
+    }
+    *t1_us = rl_now_us();
+    if (s_rl_rd_frames_done != done0) return RDE5_DONE;
+    if (s_rl_state == RL_RD_WAIT) return RDE5_CAP;
+    return RDE5_ABORT;
+}
+
+/* P1125: [P1125-RDE5] 行。1件1行・上限 FU_LOG_LIMIT。待った後の問合せが失敗した行(p1_ret<0、-99=問い合わせていない を除く)は
+ * 稀で診断上最も重要なので上限の対象外(P1057 の排出行と同じ扱い)。rl_p1 の失敗時は rl_fault の行より後に出るので、
+ * fault 行とは同じ f= で突き合わせる。e5c_valid/e5c_key は待ちに入る前の値、state_after は待ちを出た直後の状態 */
+static void rl_rde5_log(uint8_t dev_ctrl, int e5c_valid0, uint8_t e5c_key0, int ex, const char* state_after,
+                        int64_t t0, int64_t t1, int p1_ret, int64_t p1_us, int src, uint8_t val)
+{
+    uint32_t n = ++s_rl_rde5_n;
+    int p1_failed = (p1_ret < 0 && p1_ret != -99);
+    if (!p1_failed && s_rl_rde5_lines >= FU_LOG_LIMIT) return;
+    if (!p1_failed) s_rl_rde5_lines++;
+    debug_log(P1125_TAG " f=%d key=0x%x dev_ctrl=0x%02x e5c_valid=%d e5c_key=0x%02x exit=%s state_after=%s wait_us=%lld"
+              " p1_ret=%d p1_us=%lld src=%s val=0x%02x n=%u t0_us=%lld t1_us=%lld\n",
+              g_mx68k_frame_num, (unsigned)(dev_ctrl & 0x0Fu), (unsigned)dev_ctrl, e5c_valid0, (unsigned)e5c_key0,
+              RDE5_EXIT_NAME[ex], state_after, (long long)(t1 - t0), p1_ret, (long long)p1_us, E5P_SRC_NAME[src],
+              (unsigned)val, (unsigned)n, (long long)t0, (long long)t1);
+}
+
 /* P1009 §1-g: $E94005 読出しの装置寄与。P1054: どの分岐で返したかを *src に返す(戻り値・分岐順は不変) */
 static uint8_t rl_e5_read(int* src)
 {
     if (rl_in_read_phase()) s_rl_rp_e5_rd++;
-    if ((s_p955_dev_ctrl & 0x0Fu) == 0u) { *src = E5P_SRC_NOBIT; return 0; }
-    if (!rl_relay_ok()) { *src = E5P_SRC_NORELAY; return 0; }
+    int in_rd = (s_rl_state == RL_RD_WAIT);
+    if (in_rd) s_rl_rd_e5r_total++;   /* P1125: 分母(NOBIT/NORELAY の分岐より前) */
+    if ((s_p955_dev_ctrl & 0x0Fu) == 0u) { if (in_rd) s_rl_rd_e5r_nobit++; *src = E5P_SRC_NOBIT; return 0; }
+    if (!rl_relay_ok()) { if (in_rd) s_rl_rd_e5r_norelay++; *src = E5P_SRC_NORELAY; return 0; }
     /* P1032: 書込み待ち中は装置へ問い合わせず、最後のキャッシュ値(経過時間を問わない)、無ければ0 */
     if (rl_in_write_wait()) { s_rl_wr_supp_e5r++; *src = E5P_SRC_WRWAIT; return s_rl_e5c_valid ? s_rl_e5c_val : 0u; }
     int64_t now = rl_now_us();
     if (s_rl_e5c_valid && s_rl_e5c_key == s_p955_dev_ctrl && now - s_rl_e5c_t < (int64_t)FU_E5_CACHE_MS * 1000) {
+        if (in_rd) s_rl_rd_e5r_cache_hit++;
         s_rl_e5_cache++;
         *src = E5P_SRC_CACHE;
         return s_rl_e5c_val;
     }
     static const uint8_t TX[] = { FU_REG_E5 };
     uint8_t v = 0;
+    if (s_rl_state == RL_RD_WAIT) {
+        /* P1125(D-146): 装置ファームは READ DATA 実行中(先読みを含む)port1 へ応答しない(TNB:app.c:2195-2217,1717-1880)。
+         * 参照2実装と同じく、装置が応答できるようになる(READ 完了)まで待ってから実値を読む
+         * (XM6t fdc_bridger.h:402 / XEiJ+t FUK.java:484-498)。待っている間はエミュレーションスレッドが止まる */
+        uint8_t dev_ctrl0 = s_p955_dev_ctrl, e5c_key0 = s_rl_e5c_key;
+        int e5c_valid0 = s_rl_e5c_valid;
+        int64_t t0 = 0, t1 = 0;
+        int ex = rl_e5_wait_read_done(&t0, &t1);
+        const char* st_after = RL_STATE_NAME[s_rl_state];
+        if (t1 - t0 > s_rl_rd_e5r_wait_max_us) s_rl_rd_e5r_wait_max_us = t1 - t0;
+        if (ex == RDE5_DONE && !rl_relay_ok()) ex = RDE5_NORELAY;
+        if (ex != RDE5_DONE) {
+            /* 待てなかった/打ち切られた: 装置へ問い合わせず、キーが一致するキャッシュ(経過時間を問わない)か0。
+             * 別ドライブの値を返すほうが0より悪いのでキーを確かめる(WRWAIT 分岐はキーを見ないが本サイクルでは触らない) */
+            s_rl_rd_e5r_supp++;
+            *src = E5P_SRC_RDWAIT;
+            v = (s_rl_e5c_valid && s_rl_e5c_key == s_p955_dev_ctrl) ? s_rl_e5c_val : 0u;
+            rl_rde5_log(dev_ctrl0, e5c_valid0, e5c_key0, ex, st_after, t0, t1, -99, -1, *src, v);
+            return v;
+        }
+        s_rl_rd_e5r_waited_ok++;
+        now = rl_now_us();   /* 待った分だけ古くなるので取り直す(下の再判定と s_rl_e5c_t の記録に使う) */
+        /* 待ち中にキャッシュが更新される経路は通常無いが、念のため再判定する */
+        if (s_rl_e5c_valid && s_rl_e5c_key == s_p955_dev_ctrl && now - s_rl_e5c_t < (int64_t)FU_E5_CACHE_MS * 1000) {
+            s_rl_e5_cache++;
+            *src = E5P_SRC_CACHE;
+            rl_rde5_log(dev_ctrl0, e5c_valid0, e5c_key0, ex, st_after, t0, t1, -99, -1, *src, s_rl_e5c_val);
+            return s_rl_e5c_val;
+        }
+        int64_t tp = rl_now_us();
+        int r = rl_p1("e5_read", TX, 1, &v, 1);   /* W-a: 失敗(-2/-3)は従来どおり rl_p1 内で故障停止 */
+        int64_t p1_us = rl_now_us() - tp;
+        if (p1_us > s_rl_rde5_p1_us_max) s_rl_rde5_p1_us_max = p1_us;
+        if (r < 1) {
+            s_rl_rde5_p1_fail++;
+            *src = E5P_SRC_USBFAIL;
+            rl_rde5_log(dev_ctrl0, e5c_valid0, e5c_key0, ex, st_after, t0, t1, r, p1_us, *src, 0u);   /* 失敗時も必ず出す */
+            return 0;
+        }
+        rl_rde5_log(dev_ctrl0, e5c_valid0, e5c_key0, ex, st_after, t0, t1, r, p1_us, E5P_SRC_USB, v);
+        *src = E5P_SRC_USB;
+        s_rl_e5_usb++;
+        s_rl_e5c_valid = 1;
+        s_rl_e5c_key = s_p955_dev_ctrl;
+        s_rl_e5c_val = v;
+        s_rl_e5c_t = now;
+        return v;
+    }
     if (rl_p1("e5_read", TX, 1, &v, 1) < 1) { *src = E5P_SRC_USBFAIL; return 0; }
     *src = E5P_SRC_USB;
     s_rl_e5_usb++;
