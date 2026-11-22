@@ -494,7 +494,8 @@ static uint32_t s_rl_result_discarded;   /* P1018: 新規コマンドで未読 R
 #define WR_BUF_CAP            1024u     /* 128<<3。N>3 は事前条件で拒否する */
 /* P1032/P1035: MX68K_FLOPPYU_WRITE の値。"dryrun"→DRYRUN、"wponly"→WPONLY、"1"→WRITE(段階1、柵つき)、それ以外→OFF
  * P1037: "armed"→ARMED(段階2a、武装マーカー付き使い捨てディスク限定の連続書込み)
- * P1053: "normal"→NORMAL(段階2b-1、武装なしの通常利用。交換後READ柵+同一キー連続書込み検知+読み戻し照合)
+ * P1053: "normal"→NORMAL(段階2b-1、武装なしの通常利用。交換後READ柵+同一キー連続書込み検知+読み戻し照合。
+ *        P1131 以降、交換後READ柵は観測専用で送信判断に使わない)
  * P1064: "fmt1"→FMT1(単一トラック限定の実FORMAT送信。WRITE DATA は装置へ送らない) */
 enum { WRM_OFF = 0, WRM_DRYRUN = 1, WRM_WPONLY = 2, WRM_WRITE = 3, WRM_ARMED = 4, WRM_NORMAL = 5, WRM_FMT1 = 6 };
 static int      s_rl_write_mode = WRM_OFF;
@@ -616,10 +617,12 @@ static int      s_st_fmt1_force_ret = 0;   /* 単体テスト専用: 0 以外な
 #endif
 
 /* P1067: normal モード(設定 UI 由来)の FORMAT(WRITE ID)。設定「Allow FORMAT on FloppyU disks」が ON のときだけ、
- * 柵が開いたユニットの物理フォーマット済み標準2HD(1024B×8)ディスクへ送る。fmt1 の状態変数・関数本体には手を入れず、
- * 状態は s_nmf_* として別に持つ。記号・定数の根拠は .mx68k_cycles/P1067_plan.md 第3版。
- * 位置の根拠: C≥1 で物理位置を示す証拠は READ ID(媒体に記録された C/H)だけ。PCN==ID表C はゲストが直前に SEEK した
- * 意図との整合検査(PCN は装置 FDC のソフトウェアカウンタでヘッドの物理位置を測らない)、T0 は C=0 以外では矛盾検出のみ */
+ * 標準2HD(1024B×8)形式の FORMAT を装置へ送る。fmt1 の状態変数・関数本体には手を入れず、状態は s_nmf_* として別に持つ。
+ * 記号・定数の根拠は .mx68k_cycles/P1067_plan.md 第3版・P1131_plan.md。
+ * P1131: 旧形式を問わず書く(送信前の位置確認[MX 内部 READ ID による媒体記録の C/H/N 照合]と交換後READ柵を撤廃。
+ * 参照実装と同水準)。位置の手がかりは PCN==ID表C(ゲストが直前に SEEK した意図との整合検査。PCN は装置 FDC の
+ * ソフトウェアカウンタでヘッドの物理位置を測らない)と T0(C=0 以外では矛盾検出のみ)だけで、走行中の n トラックずれは
+ * 送信前には検出できない(送信後の検証 READ ID で C/H 不一致として現れる見込み) */
 #define P1067_TAG                 "[P1067-NMF]"
 #define FU_NMF_RUNS_PER_EPOCH     2u        /* 同一ユニット・同一エポックで開始してよい走行数(走行開始 C0H0 時にのみ判定) */
 #define FU_NMF_MAX_CYL            76u       /* 2HD のシリンダ 0..76(FU_AR_NCYL-1) */
@@ -628,24 +631,29 @@ enum { NMF_SRC_OFF = 0, NMF_SRC_CONFIG = 1, NMF_SRC_ENV = 2, NMF_SRC_IGNORED = 3
 static const char* const NMF_SRC_NAME[4] = { "off", "config", "env", "ignored" };
 enum { NMF_VSRC_SEEK = 0, NMF_VSRC_FMT, NMF_VSRC_WRITE };
 static const char* const NMF_VSRC_NAME[3] = { "seek", "fmt", "write" };
-/* 拒否理由(全理由を sum 行へ 0 件も含めて出す)。列挙と NMF_REF_NAME は同じ順 */
+/* 拒否理由(全理由を sum 行へ 0 件も含めて出す)。列挙と NMF_REF_NAME は同じ順。
+ * P1131: 交換後READ柵の撤去で refused_fence_closed(到達しなくなった)を削除し、同じ位置に refused_unit_changed
+ * (通常経路でこの FORMAT の収集開始後にユニットの ue が進んだ、または判別保留中)を置く。refused_first_xfer(G-FT の
+ * 通常経路への拡張)と refused_not_drained(判定前の port2 読み切り不成立)は FR_RELEASE の後に追加する */
 enum { NMF_REF_MODE = 0, NMF_REF_OFF, NMF_REF_SC_ZERO, NMF_REF_HALT, NMF_REF_CHAIN, NMF_REF_LATCHED, NMF_REF_UNIT,
-       NMF_REF_FENCE, NMF_REF_PARAM, NMF_REF_IDS, NMF_REF_CYL, NMF_REF_RUN_OTHER_UNIT, NMF_REF_RUN_START, NMF_REF_RUN_MAX,
+       NMF_REF_UNIT_CHANGED, NMF_REF_PARAM, NMF_REF_IDS, NMF_REF_CYL, NMF_REF_RUN_OTHER_UNIT, NMF_REF_RUN_START, NMF_REF_RUN_MAX,
        NMF_REF_ORDER, NMF_REF_COLLECT, NMF_REF_LINK, NMF_REF_NO_PCN, NMF_REF_PCN, NMF_REF_REENTRY, NMF_REF_SDS_FAIL,
        NMF_REF_NO_MEDIA, NMF_REF_WP, NMF_REF_T0, NMF_REF_ST3_OTHER, NMF_REF_RID_TIMEOUT, NMF_REF_RID_IC,
        NMF_REF_RID_C_WITHOUT_CC, NMF_REF_RID_NO_C, NMF_REF_RID_CHS, NMF_REF_RID_N, NMF_REF_RECHECK, NMF_REF_FR_RELEASE,
+       NMF_REF_FIRST_XFER, NMF_REF_NOT_DRAINED,
        /* P1126: 未フォーマット媒体(ブランク)経路の拒否理由。既存値は動かさず末尾へ追加 */
        NMF_REF_BLANK_ENV_INVALID, NMF_REF_BLANK_FAST_MODE, NMF_REF_BLANK_SWAP, NMF_REF_BLANK_FIRST_XFER,
        NMF_REF_BLANK_NOT_BLANK, NMF_REF_BLANK_RID_FAST, NMF_REF_BLANK_SLICE_END, NMF_REF_BLANK_PROBE,
        NMF_REF_N };
 static const char* const NMF_REF_NAME[] = {
     "refused_mode", "refused_off", "refused_sc_zero", "refused_halt", "refused_chain", "refused_latched",
-    "refused_fence_unit", "refused_fence_closed", "refused_param", "refused_ids", "refused_cyl", "refused_run_other_unit",
+    "refused_fence_unit", "refused_unit_changed", "refused_param", "refused_ids", "refused_cyl", "refused_run_other_unit",
     "refused_run_start", "refused_run_max", "refused_order", "refused_collect", "refused_link", "refused_no_pcn",
     "refused_pcn", "refused_reentry", "refused_sds_fail", "refused_no_media", "refused_wp", "refused_t0",
     "refused_st3_other", "refused_rid_timeout", "refused_rid_ic", "refused_rid_c_without_cc", "refused_rid_no_c",
     "refused_rid_chs", "refused_rid_n", "refused_recheck",
     "refused_fr_release_fail",     /* P1123: 入口の強制READY解除(S-2)不成立 */
+    "refused_first_xfer", "refused_not_drained",   /* P1131: G-FT(通常経路)/判定前の port2 読み切り不成立 */
     "refused_blank_env_invalid", "refused_blank_fast_mode", "refused_blank_swap", "refused_blank_first_xfer",
     "refused_blank_not_blank", "refused_blank_rid_fast", "refused_blank_slice_end", "refused_blank_probe" };   /* P1126 */
 _Static_assert(sizeof(NMF_REF_NAME) / sizeof(NMF_REF_NAME[0]) == NMF_REF_N, "NMF_REF_NAME と NMF_REF_* の要素数が一致しない");
@@ -1085,9 +1093,11 @@ static uint32_t s_rl_ar_marker_reads, s_rl_ar_arm_ref[AR_REF_N], s_rl_ar_pass, s
                 s_rl_ar_w_lines, s_rl_ar_r_lines, s_rl_ar_v_lines, s_rl_ar_arm_lines, s_rl_ar_w_seq, s_rl_ar_disarm_calls,
                 s_rl_ar_read_err_skip, s_rl_ar_ref_drain;
 
-/* P1053: MX68K_FLOPPYU_WRITE=normal(段階2b-1)。武装なしの通常利用の書込み中継。柵は (1) 交換後READ柵(ユニット別、
- * 基準点スナップショット比較)、(2) 同一キー連続書込み検知(時間軸つき)、(3) 読み戻し照合ラッチ。プロセス通算の送信上限は持たない。
- * 記号・定数の根拠は .mx68k_cycles/P1053_plan.md の記号表。いずれも参照実装(XEiJ/XM6t)には無い MX 独自の安全側上乗せ */
+/* P1053: MX68K_FLOPPYU_WRITE=normal(段階2b-1)。武装なしの通常利用の書込み中継。機構は (1) 交換後の読取り成功の記録
+ * (ユニット別、基準点スナップショット比較。P1131 以降は観測専用で送信判断に使わない)、(2) 同一キー連続書込み検知(時間軸つき)、
+ * (3) 読み戻し照合ラッチ。プロセス通算の送信上限は持たない。交換の検出は (1) ではなく、1コマンド内の送信判定と 'W' 受理(G4)に
+ * 共通の述語 rl_nm_unit_unchanged が受け持つ。記号・定数の根拠は .mx68k_cycles/P1053_plan.md・P1131_plan.md の記号表。
+ * (2)(3) は参照実装(XEiJ/XM6t)には無い MX 独自の安全側上乗せ */
 #define P1053_TAG                 "[P1053-NM]"
 #define P1053_FENCE_TAG           "[P1053-FENCE]"
 #define FU_WR_LOOP_MAX            32u       /* 同一キー(us,C,H,R,N)への連続送信の上限。33回目を拒否しラッチ(P1036 実測最大2) */
@@ -1102,7 +1112,7 @@ static uint32_t s_rl_ar_marker_reads, s_rl_ar_arm_ref[AR_REF_N], s_rl_ar_pass, s
 #define FU_NM_ERR_MAX             64u
 static int      s_nm_unit_state = 0;        /* MX68K_FLOPPYU_WRITE_UNIT: 0=未設定(全ユニット許可) 1=有効値 -1=不正値(全拒否) */
 static int      s_nm_unit = -1;
-/* 交換後READ柵(装置側ユニット別)。P1055: 開 ⇔ 判別保留中でない && fo_valid && fo_ue==ue[u] && fo_gen==USB世代。
+/* 交換後READ柵の記録(装置側ユニット別、P1131 以降は観測専用)。P1055: 開 ⇔ 判別保留中でない && fo_valid && fo_ue==ue[u] && fo_gen==USB世代。
  * ue[u] はユニット別エポック(増加のみ)。'D'/'d' は装置共通の s_rl_d_events を進めるが、柵はそれと比較しない(U-9 解消) */
 static int      s_nm_fo_valid[4];
 static uint32_t s_nm_fo_ue[4], s_nm_fo_gen[4];
@@ -1135,7 +1145,8 @@ static const char* const NM_AR_NAME[NM_AR_N] = { "noread", "multi_D", "nd", "amb
 static int      s_nm_st = NM_ST_I;
 /* P1059: c3('W'送信判定)とG4('W'受理条件)で同一の述語を使う(乖離の再発を構造的に防ぐ、P1059 Code
  * Investigation案A)。normalモード限定、収集開始時点から見て当該ユニットが変化していないか。
- * 書込み専用(c3/G4専用)で、読出し側の rl_nm_fence_open() とは別機構 */
+ * 書込み専用で、読出し側の rl_nm_fence_open()(P1131 以降は観測専用)とは別機構。P1131 以降、normal の WRITE DATA の
+ * c3・同期シーク手順(e)・G4、通常 nfmt の a2・C0 がこの述語で交換を止める(柵の撤去後はこれが唯一の交換検出) */
 static int rl_nm_unit_unchanged(uint8_t us)
 {
     return s_nm_ue[us] == s_rl_wr_ue_begin[us] && s_nm_st == NM_ST_I;
@@ -1186,10 +1197,13 @@ static uint8_t  s_nm_cur_us = 0;
 static uint32_t s_nm_cur_idx = 0, s_nm_cur_ue = 0, s_nm_cur_gen = 0;
 static const char* s_nm_latch_why = "-";    /* normal で再起動までラッチした最初の理由 */
 static int      s_nm_sy_fail_pending = 0;   /* 同期手順失敗後、次のゲストFDCコマンド開始まで1 */
-static uint32_t s_nm_pass, s_nm_ref_need_read, s_nm_ref_loop, s_nm_ref_latched, s_nm_ref_wp, s_nm_ref_no_media,
+/* P1131: s_nm_ref_need_read(交換後READ柵による拒否)は柵の撤去で削除。s_nm_ref_unit_changed は収集中の ue 変化、
+ * s_nm_ref_first_xfer は G-FT、s_nm_sy_unit_changed は同期シーク手順(e)のユニット不変検査(旧 sy_fence_closed)の不成立 */
+static uint32_t s_nm_pass, s_nm_ref_loop, s_nm_ref_latched, s_nm_ref_wp, s_nm_ref_no_media,
                 s_nm_ref_drain, s_nm_ref_unit, s_nm_ref_env, s_nm_ref_unknown, s_nm_ok_written, s_nm_ok_unexp,
+                s_nm_ref_unit_changed, s_nm_ref_first_xfer,
                 s_nm_v_match, s_nm_v_mismatch, s_nm_v_skip_epoch, s_nm_v_unmapped, s_nm_v_skip_err, s_nm_v_skip_hold,
-                s_nm_sy_fence_closed, s_nm_sy_fail_c_fwd, s_nm_latch_calls,
+                s_nm_sy_unit_changed, s_nm_sy_fail_c_fwd, s_nm_latch_calls,
                 s_nm_w_lines, s_nm_fence_lines, s_nm_v_lines, s_nm_w_seq;
 /* P1087: 装置の整った異常終了の素通し総数(上限 FU_NM_ERR_MAX)・上限到達件数・第2段で落ちた数・ST1 ビット別内訳 */
 static uint32_t s_nm_err_n = 0, s_nm_err_limit = 0, s_nm_err_rej = 0;
@@ -1286,7 +1300,8 @@ static int fh_line_ok(void)
     return 1;
 }
 
-/* 判別保留を除いた柵の状態(ログ・拒否理由の分類用)。送信判断には rl_nm_fence_open を使う */
+/* 判別保留を除いた柵の状態(ログ用)。P1131 以降、rl_nm_fence_open/_nohold/rl_nm_open_mask はいずれも観測専用で、
+ * 送信判断には使わない(呼出し元はログ・閉鎖記録の was ビット列・selftest のスナップショットだけ) */
 static int rl_nm_fence_open_nohold(uint8_t us)
 {
     us &= 3u;
@@ -3046,7 +3061,8 @@ static void rl_read_frame_done(void)
     rl_log_read_end("ok", 1, s_rl_frame_fnv);
     /* P1116/P1120: 書込み安全フックは READ DATA のときだけ適用する(許可リスト)。READ DATA 以外
      * (DIAG: 要求 CHRN のセクタとは限らない[P1116]、DELETED: DDAM セクタが ST2=0 で読め、柵が開くと後続の
-     * WRITE DATA が DDAM→DAM へ書き換え得る[P1120])は書込み安全フックへ流さない。新しい読取り系コマンドを
+     * WRITE DATA が DDAM→DAM へ書き換え得る[P1120]。P1131 以降、柵は観測専用だが、読み戻し照合への流入を
+     * 避けるため方針は維持する)は書込み安全フックへ流さない。新しい読取り系コマンドを
      * 中継に加えても、ここに明示しない限りフック対象外になる(既定で安全側)。
      * P1129(D-137): READ DATA でも R<EOT の受理形(s_rl_rd_multi)は同じ方針で対象外にする(新しい受理形は明示するまでフック対象外) */
     if (s_rl_rd_cmd5 == 0x06u && !s_rl_rd_multi) {
@@ -3389,6 +3405,8 @@ typedef struct {
     uint8_t  pcn;
     uint32_t gen0, gen1;
     const char* fail;
+    uint32_t nm_ue_begin, nm_ue_now;   /* P1131: 手順(e)のユニット不変検査の生値(収集開始時/手順終了時の ue[us]) */
+    int      nm_st;                    /* P1131: 手順終了時の判別保留状態(NM_ST_*) */
 } rl_sync_log_t;
 
 /* P1051: 同期手順中の port2 読出し待ち。眠った時間はフレームのブロック時間へ計上する(M3) */
@@ -3409,8 +3427,10 @@ static void rl_sync_sleep(void)
  *   (d) port2 を FU_SYNC_DRAIN_MS まで読み、'C'を見ていれば'c'を要求する
  *   (e) 'D'無し・USB世代不変・ラッチ無し・状態不変・armed なら武装中を再検査する
  * 実行中は s_rl_sync_active を立て、'C'はゲストへ渡さない(rl_on_c で吸収)。port2 は手順内から rl_poll() で読む。
- * P1053: 第2引数をモード種別へ一般化。normal は (e) の最後に柵を再検査する。手順中に柵が閉じる経路は 'D'/'d' と世代変化だけで、
- * どちらも先の d_event/gen 検査で止まるため、この分岐は到達しない設計(多重防御。到達したら sy_fence_closed に数える) */
+ * P1053: 第2引数をモード種別へ一般化。P1058 で d_event 検査はユニット別判定へ移したため normal では通らない。
+ * P1131: normal では d_event 検査の代わりに、(e) の最後のユニット不変検査(rl_nm_unit_unchanged、c3/G4 と同じ述語)が
+ * 手順中(port2 を rl_poll() で読む区間)に届いた 'D' による交換・判別保留を止める。旧版の交換後READ柵の再検査は、
+ * normal ではこの検出を唯一担っていた(到達しない設計ではなかった)。不成立は fail=unit_changed・sy_unit_changed に数える */
 static int rl_wr_sync_seek(rl_sync_log_t* lg, int mode)
 {
     int is_ar = (mode == WRM_ARMED);
@@ -3510,10 +3530,13 @@ static int rl_wr_sync_seek(rl_sync_log_t* lg, int mode)
     else if (mx68k_floppyu_usb_generation() != s_rl_wr_gen_begin)       lg->fail = "gen";
     else if (s_rl_wr_latched_off || (is_ar && !s_rl_ar_armed))          lg->fail = "latched";
     else if (s_rl_state != state0 || s_rl_state != RL_WR_COLLECT)       lg->fail = "state";
-    else if (is_nm && !rl_nm_fence_open(us))                            { lg->fail = "fence_closed"; s_nm_sy_fence_closed++; }
+    else if (is_nm && !rl_nm_unit_unchanged(us))                        { lg->fail = "unit_changed"; s_nm_sy_unit_changed++; }
     else                                                                ok = 1;
 out:
     s_rl_sync_active = 0;
+    lg->nm_ue_begin = s_rl_wr_ue_begin[us];
+    lg->nm_ue_now = s_nm_ue[us];
+    lg->nm_st = s_nm_st;
     lg->c_seen = s_rl_sync_c;
     lg->cc_seen = s_rl_sync_cc;
     lg->d_delta = s_rl_d_events - d0;
@@ -3789,7 +3812,8 @@ static void rl_sync_log(const rl_sync_log_t* lg, const char* precheck, const cha
               " attempted=%d msr_after_seek=0x%02x msr_ret=%d c_wait_us=%lld c_seen=%u via=%s sis_iter=%u sis_st0_list=%s"
               " rdychg_n=%u rdychg_target=%u pcn=%s cc_seen=%u drain_us=%lld d_delta=%u gen=%u/%u sync_us=%lld"
               " would_cache=%d cf_first=%d cf_cmd=0x%02x send_ret=%d"
-              " sends=%u sync_ok=%u sync_refused=%u would_cache_n=%u form_a=%u form_c=%u form4=%u form_other=%u\n",
+              " sends=%u sync_ok=%u sync_refused=%u would_cache_n=%u form_a=%u form_c=%u form4=%u form_other=%u"
+              " nm_ue_begin=%u nm_ue_now=%u nm_st=%s\n",
               g_mx68k_frame_num, s_rl_write_mode, p[2], p[3], p[4], p[5], (unsigned)p[0], (unsigned)(p[1] & 7u),
               precheck, decision, lg->attempted ? lg->fail : "-",
               lg->attempted, (unsigned)lg->msr_after_seek, lg->msr_ret, (long long)lg->c_wait_us, (unsigned)lg->c_seen,
@@ -3797,7 +3821,8 @@ static void rl_sync_log(const rl_sync_log_t* lg, const char* precheck, const cha
               (unsigned)lg->cc_seen, (long long)lg->drain_us, (unsigned)lg->d_delta, (unsigned)lg->gen0,
               (unsigned)lg->gen1, (long long)lg->us, would, cf_first0, (unsigned)cf_cmd0, send_ret,
               (unsigned)s_rl_wr_sends, (unsigned)s_rl_sy_ok, (unsigned)s_rl_sy_refused, (unsigned)s_rl_sy_would_cache_n,
-              (unsigned)s_rl_sy_form_a, (unsigned)s_rl_sy_form_c, (unsigned)s_rl_sy_form4, (unsigned)s_rl_sy_form_other);
+              (unsigned)s_rl_sy_form_a, (unsigned)s_rl_sy_form_c, (unsigned)s_rl_sy_form4, (unsigned)s_rl_sy_form_other,
+              (unsigned)lg->nm_ue_begin, (unsigned)lg->nm_ue_now, NM_ST_NAME[lg->nm_st]);   /* P1131 */
 }
 
 /* P1064: 書込みコマンド送信成功後の WAIT_W 突入時の状態初期化(rl_wr_try_send から抽出、rl_fmt1_try_send と共用) */
@@ -3849,7 +3874,8 @@ static void rl_wr_try_send(void)
      * rl_abort_op(RE_DISCONNECT) は走らず、rl_check_timeouts も書込み待ちを持たない。'C' は rl_on_c で発行保留になるだけ。
      * 想定と違って状態が変わった/読み切れない(再入中)なら送らない(安全側) */
     int is_ar = (s_rl_write_mode == WRM_ARMED);
-    int is_nm = (s_rl_write_mode == WRM_NORMAL);   /* P1053: normal も同じ読み切りを行う(未読 'D'/'d' で柵を閉じてから判定) */
+    int is_nm = (s_rl_write_mode == WRM_NORMAL);   /* P1053: normal も同じ読み切りを行う(未読 'D'/'d' を判定より前に処理する。
+                                                    * P1131 以降は、'D' による判別保留・ue 前進を c3 と 'W' 受理[G4]の両方に同じく反映させるため) */
     int ar_drained = 1;
     if (is_ar || is_nm) {
         int st_before = s_rl_state;
@@ -3872,7 +3898,7 @@ static void rl_wr_try_send(void)
     }
     /* 検査10(P1067、normal のみ): normal FORMAT の検証予約が残っていれば、この書込みを装置へ送る前に先に検証する
      * (最終トラック C76H1 の検証が後続の SEEK に依存するため)。ユニットを問わない。同期手順(rl_wr_sync_*)より前に
-     * 評価し、以下の検査(c3・c8 等)は検証の後の状態で評価する。検証が ok でなければ停止済み(rl_nmf_halt)で、この書込みは拒否 */
+     * 評価し、以下の検査(c3・c9 等)は検証の後の状態で評価する。検証が ok でなければ停止済み(rl_nmf_halt)で、この書込みは拒否 */
     int c10 = 1;
     if (is_nm && s_nmf_verify_pending) c10 = rl_nmf_verify(NMF_VSRC_WRITE, NULL);
     /* P1070 X2: normal WRITE DATA で完走記録を失効(c10 の検証で完走した場合もここで消える) */
@@ -3885,8 +3911,11 @@ static void rl_wr_try_send(void)
     int relay = rl_relay_ok();
     uint32_t gen_now = mx68k_floppyu_usb_generation();
     uint32_t d_now = s_rl_d_events;
+    /* P1131: ユニット不変の判定はここで1回だけ採取し、c3 と理由分類で共用する(下の RY=0 閉鎖は理由分類より前に ue を
+     * 進めるので、理由分類で rl_nm_unit_unchanged を再評価すると理由が変わってしまう) */
+    int nm_unch = is_nm ? rl_nm_unit_unchanged(s_rl_cmd[1] & 3u) : 1;
     int c3 = relay && (gen_now == s_rl_wr_gen_begin) &&
-             (is_nm ? rl_nm_unit_unchanged(s_rl_cmd[1] & 3u) : (d_now == s_rl_wr_d_begin));   /* P1058: normal はユニット別エポックで判定 */
+             (is_nm ? nm_unch : (d_now == s_rl_wr_d_begin));   /* P1058: normal はユニット別エポックで判定 */
     /* 検査4: 送信回数上限・ラッチ(P1035: 上限はモード別。wponly 8 / mode1 1) */
     uint32_t send_max = rl_wr_send_max();
     int latched = s_rl_wr_latched_off;
@@ -3908,18 +3937,23 @@ static void rl_wr_try_send(void)
     int a_mark  = is_ar && p[2] == FU_AR_MARK_CHRN[0] && p[3] == FU_AR_MARK_CHRN[1] &&
                   p[4] == FU_AR_MARK_CHRN[2] && p[5] == FU_AR_MARK_CHRN[3];
     int c7 = !is_ar || (a_unit && a_range && !a_mark && s_rl_ar_armed && ar_drained);
-    /* 検査8・9(P1053、normalのみ): 許可ユニット(未設定=全許可・不正値=全拒否)・交換後READ柵・同一キー連続書込み検知・読み切り成立。
-     * c9 の候補値 loop_next は「この書込みを送れば同一キーの何回目か」(時間 FU_WR_LOOP_RESET_MS 超過で1へ戻る) */
+    /* 検査8・9(P1053、normalのみ): 許可ユニット(未設定=全許可・不正値=全拒否)・同一キー連続書込み検知・読み切り成立。
+     * c9 の候補値 loop_next は「この書込みを送れば同一キーの何回目か」(時間 FU_WR_LOOP_RESET_MS 超過で1へ戻る)。
+     * P1131: 交換後READ柵(旧 c8)は撤去した(参照実装と同水準。収集中の交換は c3 が止める)。代わりに先行転送ゲート G-FT
+     * (nm_ft)を入れる: 最後の bringup 以降に転送群コマンドのリザルトを受領済みであること(書込みが装置の「深いリセット後の
+     * 最初の転送」になり、直前に FDC がソフトリセットされる状態を避ける、TNB:app.c:2151-2160)。USB 再接続をまたぐ交換
+     * ('D' も FDD 割込みも出ない)で柵が世代変化によって閉じていた役目を、「bringup 後に転送リザルト1回」が部分的に代わる */
     int nm_unit = is_nm && (s_nm_unit_state == 0 || (s_nm_unit_state == 1 && (int)us_dev == s_nm_unit));
-    int c8 = is_nm && rl_nm_fence_open(us_dev);
+    int nm_ft = !is_nm || rl_ft_ok(gen_now);
+    int nm_fo_obs = is_nm && rl_nm_fence_open(us_dev);   /* 観測専用(w 行の fence_open=、旧 c8 と同じ時点の値) */
     uint8_t nm_key[5] = { us_dev, p[2], p[3], p[4], p[5] };
     int64_t nm_now = rl_now_us();
     int nm_same = is_nm && s_nm_loop_valid && memcmp(nm_key, s_nm_loop_key, 5) == 0;
     int nm_time_reset = nm_same && (nm_now - s_nm_loop_t_us) > (int64_t)FU_WR_LOOP_RESET_MS * 1000;
     uint32_t loop_next = (nm_same && !nm_time_reset) ? s_nm_loop_cnt + 1u : 1u;
     int c9 = loop_next <= FU_WR_LOOP_MAX;
-    int cn = !is_nm || (nm_unit && c8 && c9 && ar_drained && c10);
-    /* 検査5: 非キャッシュ SDS。検査1〜4(mode1 は検査6も、armed は検査7も、normal は検査8・9も)が全て成立したときだけ
+    int cn = !is_nm || (nm_unit && nm_ft && c9 && ar_drained && c10);
+    /* 検査5: 非キャッシュ SDS。検査1〜4(mode1 は検査6も、armed は検査7も、normal は検査8・9・G-FT も)が全て成立したときだけ
      * 装置へ問い合わせる。柵が不成立なら装置へ一切問い合わせない */
     rl_wr_sds_log_t lg;
     memset(&lg, 0, sizeof(lg));
@@ -3954,7 +3988,7 @@ static void rl_wr_try_send(void)
     uint8_t want_a = (uint8_t)(0x20u | (s_rl_cmd[1] & 7u));   /* P1037 armed: FT=0・WP=0・RY=1・US/HD一致 */
     int send;
     if (is_nm)          /* P1053 normal(armed と同じ ST3 等式: FT=0・WP=0・RY=1・US/HD一致) */
-        send = c1 && c2 && c3 && c4 && c8 && c9 && nm_unit && ar_drained && c10 && sds_ok && ((st3 & 0xE7u) == want_a);
+        send = c1 && c2 && c3 && c4 && nm_ft && c9 && nm_unit && ar_drained && c10 && sds_ok && ((st3 & 0xE7u) == want_a);
     else if (is_ar)     /* P1037 armed(WP=1 のディスクへは送らない。マスク 0xE7 で WP を見る) */
         send = c1 && c2 && c3 && c4 && c7 && sds_ok && ((st3 & 0xE7u) == want_a);
     else if (!is_w1)    /* wponly: 送信判断はこの単一の正論理等式のみ(FT=0・WP=1・RY=1・US/HD一致。T0/TS は問わない) */
@@ -3962,7 +3996,7 @@ static void rl_wr_try_send(void)
     else                /* P1035 mode1: FT=0・RY=1・US/HD一致(WPは問わない)+柵 */
         send = c1 && c2 && c3 && c4 && c6 && sds_ok && ((st3 & 0xA7u) == want_w);
     if (is_ar && sds_ok && !(st3 & ST3_RY)) rl_ar_disarm("ry0_at_write");   /* 書込み直前に媒体が無い=交換途中の疑い */
-    if (is_nm && sds_ok && !(st3 & ST3_RY)) {   /* P1053: 当該ユニットの柵を閉じる(以後 READ 成功まで拒否) */
+    if (is_nm && sds_ok && !(st3 & ST3_RY)) {   /* P1053: 当該ユニットの ue を進める(以後のコマンドの c3/G4 に効く。P1131: 柵の記録は観測のみ) */
         uint8_t was = rl_nm_open_mask();
         rl_nm_fence_close(us_dev, NM_CL_RY0, 1, 1, was, NULL);
     }
@@ -3981,10 +4015,13 @@ static void rl_wr_try_send(void)
                                                  s_rl_wr_ref_latched++; }
         else if (s_nm_unit_state < 0)          { reason = "refused_fence_env";  s_nm_ref_env++; }
         else if (!nm_unit)                     { reason = "refused_fence_unit"; s_nm_ref_unit++; }
-        else if (!c8 && s_nm_st != NM_ST_I && rl_nm_fence_open_nohold(us_dev))
-                                               { reason = "refused_attr_hold";  s_nm_ref_attr_hold++; }   /* P1055: 判別保留中のみが原因 */
-        else if (!c8)                          { reason = "refused_need_read";  s_nm_ref_need_read++; }
-        else if (!c9)                          { reason = "refused_loop";       s_nm_ref_loop++; s_nm_loop_trip++;
+        /* P1131: 旧 c8(交換後READ柵)の分岐の位置に、判別保留(c3 の述語の st 項)・収集中の ue 変化(nm_unch)・G-FT を置く。
+         * いずれも !c9(rl_nm_latch("loop") の副作用あり)と refused_unknown より前(後ろに置くと refused_unknown に化けるか、
+         * 送る予定のない書込みで loop ラッチが立つ)。!c3 では分類しない(c3 はリンク断・世代変化を含むため) */
+        else if (s_nm_st != NM_ST_I)           { reason = "refused_attr_hold";  s_nm_ref_attr_hold++; }   /* P1055: 判別保留中 */
+        else if (!nm_unch)                     { reason = "refused_unit_changed"; s_nm_ref_unit_changed++; }
+        else if (!nm_ft)                       { reason = "refused_first_xfer"; s_nm_ref_first_xfer++; }
+        else if (!c9)                        { reason = "refused_loop";       s_nm_ref_loop++; s_nm_loop_trip++;
                                                  rl_nm_latch("loop"); }
         else if (!ar_drained)                  { reason = "refused_drain";      s_nm_ref_drain++; }
         else if (!(c1 && c2 && c3) || !sds_ok) { reason = "refused_unknown";    s_nm_ref_unknown++; s_rl_wr_ref_unknown++; }
@@ -4088,7 +4125,9 @@ static void rl_wr_try_send(void)
     }
     if (is_nm) {
         /* P1053: 1書込み1行(専用予算、送信の有無によらず出す)。派生値 fence_open をその生値(スナップショットと現在値)と
-         * 同じ行に出す。loop_key は直前に装置へ送った書込みのキー、loop_cnt はこの書込みを送れば同一キーの何回目か */
+         * 同じ行に出す。loop_key は直前に装置へ送った書込みのキー、loop_cnt はこの書込みを送れば同一キーの何回目か。
+         * P1131: fence_open は観測値(送信判断に使わない)。ft=G-FT の判定とその生値 ft_seen/ft_gen/ft_src/ft_cmd、
+         * fi_pending/fi_inflight はゲストへの FDD 割込みの未発行/未受理(判別保留の打切り後に書込みが通る場合の観測欄、送信条件ではない) */
         uint32_t seq = ++s_nm_w_seq;
         if (s_nm_w_lines < FU_AR_LOG_LIMIT) {
             char lk[32], df[16], ua[8];
@@ -4104,15 +4143,18 @@ static void rl_wr_try_send(void)
             debug_log(P1053_TAG " w seq=%u f=%d us_mx=0x%02x us_dev=%u C=%u H=%u R=%u N=%u allow_unit=%s f_unit=%d"
                       " fo_valid=%d fo_ue=%u ue=%u hold=%d fo_gen=%u d_now=%u gen_now=%u fence_open=%d loop_key=%s loop_cnt=%u/%u"
                       " loop_age_ms=%lld loop_time_reset=%d drained=%d latched=%d sends=%u/- sds_ok=%d st3_dev=0x%02x"
-                      " decision=%s data_fnv=%s c3=%d d_begin=%u sds_fail=%s ue_begin=%u c3n=%d c10=%d\n",
+                      " decision=%s data_fnv=%s c3=%d d_begin=%u sds_fail=%s ue_begin=%u c3n=%d c10=%d"
+                      " unch=%d ft=%d ft_seen=%d ft_gen=%u ft_src=%s ft_cmd=0x%02x fi_pending=%d fi_inflight=%d\n",
                       (unsigned)seq, g_mx68k_frame_num, (unsigned)s_rl_us_mx, (unsigned)us_dev, p[2], p[3], p[4], p[5], ua,
                       nm_unit, s_nm_fo_valid[us_dev], (unsigned)s_nm_fo_ue[us_dev], (unsigned)s_nm_ue[us_dev],
                       s_nm_st != NM_ST_I ? 1 : 0, (unsigned)s_nm_fo_gen[us_dev],
-                      (unsigned)d_now, (unsigned)gen_now, c8, lk, (unsigned)loop_next, (unsigned)FU_WR_LOOP_MAX,
+                      (unsigned)d_now, (unsigned)gen_now, nm_fo_obs, lk, (unsigned)loop_next, (unsigned)FU_WR_LOOP_MAX,
                       s_nm_loop_valid ? (long long)((nm_now - s_nm_loop_t_us) / 1000) : -1LL, nm_time_reset, ar_drained,
                       s_rl_wr_latched_off, (unsigned)s_rl_wr_sends, sds_ok, (unsigned)lg.st3, reason, df,
                       /* P1057: s64型(refused_unknown)の真因確定用。c3='D'/'d'収集一致、d_begin=収集開始時点のd計数、sds_fail=SDS失敗理由 */
-                      c3, (unsigned)s_rl_wr_d_begin, lg.fail, (unsigned)s_rl_wr_ue_begin[us_dev], c3, c10);
+                      c3, (unsigned)s_rl_wr_d_begin, lg.fail, (unsigned)s_rl_wr_ue_begin[us_dev], c3, c10,
+                      nm_unch, nm_ft, s_rl_ft_seen, (unsigned)s_rl_ft_gen, FT_SRC_NAME[s_rl_ft_src], (unsigned)s_rl_ft_cmd,
+                      s_rl_fdd_int_pending, s_rl_fi_inflight);   /* P1131 */
         }
     }
     /* P1051: mode1/armed は送信直前に同期手順。would_cache は挿入 SEEK が無かった場合に装置がキャッシュ経路を選ぶか。
@@ -4930,7 +4972,8 @@ static void rl_nmf_refuse(int ref, int in_run_same)
     rl_raise_int();
 }
 
-/* P1070: C77H0 判定の生値(Phase 0 拒否時は Phase A の値が未計算なので -1) */
+/* P1070: C77H0 判定の生値(Phase 0 拒否時は Phase A の値が未計算なので -1)。
+ * P1131: a5 欄は吸収条件の項そのもの(通常経路では「判別保留でない」、ブランク経路では従来の a5)。fence は観測値 */
 typedef struct {
     int phase0, ld, cand, ld_match, run_act, a1, relay, unch, a2, a3, a4, a5, a6, a7, a8, a10, pcn_valid, fence, latched;
     uint8_t us, c, hd, pcn;
@@ -4967,11 +5010,13 @@ static void rl_nmf_c77_log(const rl_nmf_c77_log_t* g)
 }
 
 /* P1126: 「最後の確認以降このユニットのディスクが変わっていない」の検査項。Phase A(a5)と送信直前再検査(c0)の両方が
- * この1関数を呼ぶ(片側だけ式を変える乖離を構造的に防ぐ)。ブランク無効時は交換後READ柵そのもの。
- * ブランク有効時(a5b): 判別保留中でなく、かつ k=0(走行開始)または走行開始時(C0H0 送信時)の ue と現在の ue が一致 */
+ * この1関数を呼ぶ(片側だけ式を変える乖離を構造的に防ぐ)。
+ * P1131: 通常 nfmt(ブランク無効時)は交換後READ柵を持たない(参照実装と同水準)。常に1を返す。1コマンド内の交換は
+ * a2/C0 の unch(rl_nm_unit_unchanged)が止め、走行中の交換は a8 の PCN 記録の ue 束縛・検証・判別保留が止める。
+ * ブランク有効時(a5b、凍結中で不変): 判別保留中でなく、かつ k=0(走行開始)または走行開始時(C0H0 送信時)の ue と現在の ue が一致 */
 static int rl_nmf_fence_term(int blank, uint8_t us, uint32_t k)
 {
-    if (!blank) return rl_nm_fence_open(us);
+    if (!blank) return 1;
     return s_nm_st == NM_ST_I && (k == 0u || (s_nmf_run_blank && s_nm_ue[us] == s_nmf_run_ue));
 }
 
@@ -5048,10 +5093,23 @@ static void rl_nmfb_log_pre(const rl_nmfb_pre_t* g)
               p1w, g->p1w ? s_p1w_ovf : -1, s_nmfb_mode_name, g->decision);
 }
 
+/* port2 の読み切り(rl_wr_try_send の判定前の読み切りと同形)。再入中なら不成立、poll の後で s_rl_state が変われば不成立。
+ * 'D' を読めば判別保留(以後の rl_nm_unit_unchanged が0)になる */
+static int rl_nmf_drain(void)
+{
+    int st_before = s_rl_state;
+    if (s_rl_in_poll) return 0;
+    rl_poll();
+    return s_rl_state == st_before;
+}
+
 /* 収集完了時(rl_collect_done 経由、Core DMA ch0 の最終バイト書込みコールバック内で同期実行)。
- * Phase 0(検証予約・停止・連鎖)→Phase A(装置へ触れない検査)→Phase B(非キャッシュ SDS・同期 READ ID)→C0(再検査)→送信→
- * 同期'W'待ち。判定に使った生値は1 FORMAT につき1行の precheck 行へ全て出す(送信の有無に関わらず)。
- * ヘッドを動かすコマンドは挿入しない(rl_wr_sync_seek は呼ばない)。位置はゲスト自身の SEEK の結果(PCN 記録)で照合する */
+ * Phase 0(検証予約・停止・連鎖)→読み切り(a12)→Phase A(装置へ触れない検査)→Phase B(非キャッシュ SDS。ブランク経路のみ
+ * 同期 READ ID)→読み切り(drained2)→C0(再検査)→送信→同期'W'待ち。判定に使った生値は1 FORMAT につき1行の precheck 行へ
+ * 全て出す(送信の有無に関わらず)。ヘッドを動かすコマンドは挿入しない(rl_wr_sync_seek は呼ばない)。位置はゲスト自身の
+ * SEEK の結果(PCN 記録)で照合する。P1131: 通常経路では送信前の位置確認(MX 内部 READ ID の C/H/N 照合)を撤廃した
+ * (参照実装と同水準。旧形式を問わず書く)。その READ ID の drain が兼ねていた送信前の port2 読み切りは、a12・drained2 の
+ * 二段で置き換える(未読 'D' を残したまま WRITE ID を送り、'W' 待ちで G4 が受理しない食い違い[P1058 型]を防ぐ) */
 static void rl_nmf_try_send(void)
 {
     const uint8_t* p = s_rl_cmd;   /* [0]cmd [1]HD/US(装置座標) [2]N [3]SC [4]GPL [5]D */
@@ -5115,6 +5173,9 @@ static void rl_nmf_try_send(void)
         return;
     }
 
+    /* P1131(V-8 一段目): Phase A の最初の評価より前に port2 を読み切る(未読の 'D' を判別保留へ反映してから unch を採る) */
+    int a12 = rl_nmf_drain();
+
     /* Phase A: 装置へ一切触れない検査 */
     int a1 = (n == s_rl_wrcollect_n) && (n == (uint32_t)p[3] * 4u) && (n == (uint32_t)s_rl_wr_mtc_begin) &&
              (s_rl_wrcollect_mar0_valid == 1) && ((s_rl_wrcollect_ocr0 & 0x80u) == 0u);
@@ -5126,9 +5187,9 @@ static void rl_nmf_try_send(void)
     int ulatched = (s_nm_unit_latch_mask >> us) & 1u;   /* P1124(D-144): 装置側ユニット限定ラッチ */
     int a3 = !latched && !s_nmf_halt && !ulatched;
     int a4 = s_nm_unit_state == 0 || (s_nm_unit_state == 1 && (int)us == s_nm_unit);
-    int fence = rl_nm_fence_open(us);
+    int fence = rl_nm_fence_open(us);                     /* P1131: 観測専用(precheck・c77 行の fence_open=、送信判断に使わない) */
     int a5b = blank ? rl_nmf_fence_term(1, us, k) : -1;   /* P1126: ログ用(ブランク無効時は評価しない) */
-    int a5 = rl_nmf_fence_term(blank, us, k);             /* P1126: ブランク無効時は fence と同値 */
+    int a5 = rl_nmf_fence_term(blank, us, k);             /* P1131: ブランク無効時は常に1(柵の撤去) */
     int a6 = (s_rl_cmd_n == 6u) && p[0] == 0x4Du && p[2] == 3u && p[3] == 8u && p[4] == 0x74u && p[5] == 0xE5u;
     int a7 = (n == 32u);
     for (uint32_t i = 0; a7 && i < 8u; i++)
@@ -5147,11 +5208,12 @@ static void rl_nmf_try_send(void)
     int order_ok = run_act && !other && k == s_nmf_run_pos;
     int a9 = start_ok || order_ok;
     int a10 = !s_rl_in_poll;
-    /* P1126(G-FT): ブランク経路では、最後の bringup 以降に転送群コマンドのリザルトを装置から受領済みであること
-     * (WRITE ID が装置の「深いリセット後の最初の転送」になり FDC が SOFTWARE RESET される状態を避ける、TNB:app.c:2151-2160) */
+    /* P1126(G-FT): 最後の bringup 以降に転送群コマンドのリザルトを装置から受領済みであること
+     * (WRITE ID が装置の「深いリセット後の最初の転送」になり FDC が SOFTWARE RESET される状態を避ける、TNB:app.c:2151-2160)。
+     * P1131: ブランク経路だけでなく通常経路にも適用する(交換後READ柵が暗黙に保証していた「書く前に READ のリザルトを受領済み」の代わり) */
     int ft = rl_ft_ok(gen_now);
-    int a11 = !blank || ft;
-    int phase_a = a1 && a2 && a3 && a4 && a5 && a6 && a7c && a8 && a9 && a10 && a11;
+    int a11 = ft;
+    int phase_a = a1 && a2 && a3 && a4 && a5 && a6 && a7c && a8 && a9 && a10 && a11 && a12;
 
     /* P1070(V-4): 直前に完走した走行の直後の C77H0 を、装置へ一切送らず正常終了で返す(XEiJ/XM6 と同じ扱い)。
      * SDS・READ ID・WRITE ID のいずれも送らない。走行状態・連鎖・送信記録・検証予約・PCN 記録・照合表は変えない
@@ -5160,12 +5222,17 @@ static void rl_nmf_try_send(void)
     if (cand) {
         s_nmf_c77_cand++;
         int ld_match = ld && us == s_nmf_ld_us && s_nm_ue[us] == s_nmf_ld_ue && gen_now == s_nmf_ld_gen;
-        int absorb = ld_match && !run_act && a1 && a2 && a3 && a4 && a5 && a6 && a8 && a10;
+        /* P1131(V-5'): 旧 a5(交換後READ柵)の項を、通常経路では「判別保留でない」に置き換える(a2 の unch にも含まれるが、
+         * 吸収の条件式だけで読めるように明示する)。「完走した同じディスク」への固定は ld_match(us・ue・gen が完走記録と一致)と
+         * a2 が担う。ブランク側は文字どおり不変(ブランク走行は完走しないので到達しない)。a12(判定前の読み切り)も要求する
+         * (読み切りで状態が変わった/再入中なら吸収しない、安全側) */
+        int a5x = blank ? a5 : (s_nm_st == NM_ST_I);
+        int absorb = ld_match && !run_act && a1 && a2 && a3 && a4 && a5x && a6 && a8 && a10 && a12;
         uint8_t res[FU_RESULT_LEN] = { 0 };   /* rl_fmt_dryrun_complete と同形(IC=00、C=H=R=0、N=コマンドの N) */
         res[0] = p955_st_dev_to_mx((uint8_t)(p[1] & 0x07u));
         res[6] = p[2];
         if (absorb) s_nmf_absorbed++;
-        rl_nmf_c77_log_t g = { 0, ld, cand, ld_match, run_act, a1, relay, unch, a2, a3, a4, a5, a6, a7, a8, a10,
+        rl_nmf_c77_log_t g = { 0, ld, cand, ld_match, run_act, a1, relay, unch, a2, a3, a4, a5x, a6, a7, a8, a10,
                                s_nmf_pcn_valid[us], fence, latched, us, c, hd, s_nmf_pcn[us], n, gen_now,
                                absorb ? res : NULL, absorb ? "absorbed" : "not_absorbed" };
         rl_nmf_c77_log(&g);
@@ -5186,7 +5253,9 @@ static void rl_nmf_try_send(void)
     rg.ret_tx = -9; rg.ret_post = -9; rg.fail = "skipped";
     uint8_t st3 = 0;
     uint8_t want = (uint8_t)(0x20u | (p[1] & 7u));   /* FT=0・WP=0・RY=1・US/HD エコー一致 */
-    int sds_ok = 0, st3_eq = 0, t0ok = 0, b1 = 0, rid_ok = 0, rid_ic_ok = 0, rid_chs = 0, rid_n = 0, b2 = 0, c0 = 0;
+    int sds_ok = 0, st3_eq = 0, t0ok = 0, b1 = 0, rid_ok = 0, b2 = 0, c0 = 0;
+    const int rid_ic_ok = 0, rid_chs = 0, rid_n = 0;   /* P1131: 位置確認の撤廃後は評価しない(precheck 行の書式維持のため既定値を出す) */
+    int drained2 = 1, unch2 = -1;   /* P1131: C0 直前の読み切り・C0 時点の unch(C0 を評価しなければ 1/-1 のまま) */
     int ry0_close = 0;
     rl_nmfb_try_t nmfb_tr[FU_BLANK_SIG_N];   /* P1126: ブランク署名の試行(ブランク有効時のみ使う) */
     memset(nmfb_tr, 0, sizeof(nmfb_tr));
@@ -5205,18 +5274,15 @@ static void rl_nmf_try_send(void)
         /* T0 整合: C=0 では T0=1、C≥1 では T0=0(位置の特定にはならないが矛盾を検出する) */
         t0ok = sds_ok && (((st3 & ST3_T0) != 0u) == (c == 0u));
         b1 = st3_eq && t0ok;
-        if (sds_ok && !(st3 & ST3_RY)) {   /* WRITE DATA 側(rl_wr_try_send)と同じ能動閉鎖。経路間で非対称を作らない */
+        if (sds_ok && !(st3 & ST3_RY)) {   /* WRITE DATA 側(rl_wr_try_send)と同じ能動閉鎖(ue を進める)。経路間で非対称を作らない */
             uint8_t was = rl_nm_open_mask();
             rl_nm_fence_close(us, NM_CL_RY0, 1, 1, was, NULL);
             ry0_close = 1;
         }
         if (b1 && !blank) {
-            rid_ok = rl_fmt1_readid_fresh(p[1], &rg);   /* ゲストの FORMAT の US/HD バイトそのもの */
-            const uint8_t* r = rg.res;
-            rid_ic_ok = rg.res_valid && r[0] == (p[1] & 7u) && r[1] == 0u && r[2] == 0u;
-            rid_chs = rg.res_valid && r[3] == c && r[4] == hd;   /* C≥1 で唯一の物理位置の証拠 */
-            rid_n = rg.res_valid && r[6] == 3u;                  /* 既に 1024B でフォーマット済み(他物理形式・ブランクは拒否) */
-            b2 = rid_ok && rid_ic_ok && rid_chs && rid_n;
+            /* P1131(V-1): 通常経路の送信前の位置確認(READ ID の IC/C/H/N 照合)は撤廃(READ ID を送らない)。
+             * 撤廃後に残る物理位置の手がかりは b1 の T0 整合だけ(走行中の n トラックずれは検出できない、R-1) */
+            b2 = 1;
         } else if (b1) {
             /* P1126(V-4): 最大 FU_BLANK_SIG_N 回の READ ID を連続実行し、全回がブランク署名(IC=01・ST1=MA[ND 併記可]・ST2=0)
              * かつ物理下限以上の所要時間のときだけ b2b=1。1回でも不一致ならその時点で打ち切る(以後の READ ID は送らない)。
@@ -5237,18 +5303,23 @@ static void rl_nmf_try_send(void)
             b2 = nmfb_b2b;
         }
         if (b1 && b2) {
+            /* P1131(V-8 二段目): C0 の直前(SDS・強制READY 解除・ブランク経路の READ ID の後)に port2 を読み切る。
+             * 残り窓(ここ〜WRITE ID 送信)に届いた 'D' は、同期 'W' 待ちで読まれて G4 が判定する(R-14) */
+            drained2 = rl_nmf_drain();
             /* C0: Phase B 中の rl_poll() で 'D'/'d'・世代変化・ラッチ・状態変化・PCN 無効化を読んだ可能性があるので再評価する。
-             * P1126: 柵の項は Phase A と同じ rl_nmf_fence_term、ブランク経路では G-FT も再評価する(無効時は既存式と同値) */
+             * P1126: 柵の項は Phase A と同じ rl_nmf_fence_term(P1131: 通常経路では常に1)。G-FT も再評価する */
             int relay2 = rl_relay_ok();
             uint32_t gen2 = mx68k_floppyu_usb_generation();
             int pcn2 = s_nmf_pcn_valid[us] && s_nmf_pcn_ue[us] == s_nm_ue[us] && s_nmf_pcn_gen[us] == gen2 && s_nmf_pcn[us] == c;
             int run2 = !s_nmf_run_active ? (k == 0u) : (us == s_nmf_run_us && k == s_nmf_run_pos && s_nmf_chain_ok);
-            c0 = relay2 && gen2 == s_rl_wr_gen_begin && rl_nm_unit_unchanged(us) && rl_nmf_fence_term(blank, us, k) &&
-                 (!blank || rl_ft_ok(gen2)) &&
+            unch2 = rl_nm_unit_unchanged(us);
+            c0 = drained2 && relay2 && gen2 == s_rl_wr_gen_begin && unch2 && rl_nmf_fence_term(blank, us, k) &&
+                 rl_ft_ok(gen2) &&
                  !s_rl_wr_latched_off && !((s_nm_unit_latch_mask >> us) & 1u) && !s_nmf_halt && !s_nmf_verify_pending && run2 &&
                  s_rl_state == RL_WR_COLLECT && pcn2;
         }
     }
+    (void)rid_ok;   /* P1131: 通常経路の位置確認の撤廃で、ブランク経路の試行結果の写しとしてのみ残る(判定には使わない) */
     rl_p1w_end();   /* P1127(V-7): 区間記録の唯一の終了点(ブランク無効時は開始していないので何もしない) */
     /* P1126(V-7): プローブは全ゲートが成立しても送らない */
     int send = phase_a && fr_ok && b1 && b2 && c0 && (s_nmf_blank != NMFB_PROBE);
@@ -5263,11 +5334,15 @@ static void rl_nmf_try_send(void)
             s_nmfb_probe_would_send++;
         }
         else if (!fr_ok)                            ref = NMF_REF_FR_RELEASE;   /* P1123: 装置へ問い合わせていない */
+        else if (!a12)                              ref = NMF_REF_NOT_DRAINED;  /* P1131: 一段目の読み切り不成立(装置非接触) */
         else if (latched || s_rl_wr_latched_off || ((s_nm_unit_latch_mask >> us) & 1u))
                                                     ref = NMF_REF_LATCHED;
         else if (s_nmf_halt)                        ref = NMF_REF_HALT;
         else if (!a4)                               ref = NMF_REF_UNIT;
-        else if (!a5)                               ref = blank ? NMF_REF_BLANK_SWAP : NMF_REF_FENCE;   /* P1126 */
+        /* P1126: ブランク経路は従来どおり。P1131: 通常経路は旧 refused_fence_closed の位置で unch 不成立(収集開始後の
+         * ue 前進・判別保留)を refused_unit_changed に分類する(!a2 の refused_link へ落として「リンク切れ」と誤読させない) */
+        else if (blank && !a5)                      ref = NMF_REF_BLANK_SWAP;
+        else if (!blank && !unch)                   ref = NMF_REF_UNIT_CHANGED;
         else if (!a6)                               ref = NMF_REF_PARAM;
         else if (!a7)                               ref = NMF_REF_IDS;
         else if (!a7c)                              ref = NMF_REF_CYL;
@@ -5280,12 +5355,13 @@ static void rl_nmf_try_send(void)
         else if (!pcn_v)                            ref = NMF_REF_NO_PCN;
         else if (!a8)                               ref = NMF_REF_PCN;
         else if (!a10)                              ref = NMF_REF_REENTRY;
-        else if (!a11)                              ref = NMF_REF_BLANK_FIRST_XFER;   /* P1126: ブランク無効時は a11=1 */
+        else if (!a11)                              ref = blank ? NMF_REF_BLANK_FIRST_XFER : NMF_REF_FIRST_XFER;   /* P1126/P1131 */
         else if (!sds_ok)                           ref = NMF_REF_SDS_FAIL;
         else if (!(st3 & ST3_RY))                   ref = NMF_REF_NO_MEDIA;
         else if (st3 & ST3_WP)                      ref = NMF_REF_WP;
         else if (!t0ok)                             ref = NMF_REF_T0;
         else if (!b1)                               ref = NMF_REF_ST3_OTHER;
+        else if (b2 && !drained2)                   ref = NMF_REF_NOT_DRAINED;   /* P1131: 二段目の読み切り不成立 */
         else if (blank) {
             /* P1126: ブランク経路の Phase B 分類(最後に実施した試行の値で)。既存の RID_IC/RID_CHS/RID_N へは分類しない */
             if (nmfb_id_seen)                              ref = NMF_REF_BLANK_NOT_BLANK;   /* フォーマット済みの兆候が最優先 */
@@ -5296,12 +5372,9 @@ static void rl_nmf_try_send(void)
             else if (!nmfb_b2b)                            ref = NMF_REF_BLANK_NOT_BLANK;
             else                                           ref = NMF_REF_RECHECK;
         }
-        else if (rid_proc_fail)                     ref = NMF_REF_RID_TIMEOUT;
-        else if (!rid_ic_ok)                        ref = NMF_REF_RID_IC;
-        else if (strcmp(rg.fail, "c_without_cc") == 0) ref = NMF_REF_RID_C_WITHOUT_CC;
-        else if (strcmp(rg.fail, "no_c") == 0)      ref = NMF_REF_RID_NO_C;
-        else if (!rid_chs)                          ref = NMF_REF_RID_CHS;
-        else if (!rid_n)                            ref = NMF_REF_RID_N;
+        /* P1131(V-1): 通常経路の rid_* 分岐は位置確認の撤廃で削除(NMF_REF_RID_* は fmt1・ブランク経路が使うので残す)。
+         * C0 で不成立になった通常経路の FORMAT は、C0 時点の unch(Phase B 中・二段目の読み切りで読んだ 'D' 等)を先に見る */
+        else if (unch2 == 0)                        ref = NMF_REF_UNIT_CHANGED;
         else                                        ref = NMF_REF_RECHECK;
     }
 
@@ -5319,10 +5392,12 @@ static void rl_nmf_try_send(void)
                   " allow_unit_state=%d allow_unit=%d a4=%d fo_valid=%d fo_ue=%u fo_gen=%u fence_open=%d a5=%d a6=%d a7=%d a7c=%d"
                   " pcn=%s pcn_valid=%d pcn_f=%d pcn_ue=%u pcn_gen=%u st0_seek=0x%02x pcn_ok=%d a8=%d"
                   " run_active=%d run_us=%u run_pos=%u run_n=%u run_ue=%u chain_ok=%d start_ok=%d order_ok=%d a9=%d a10=%d"
+                  " a11=%d ft=%d ft_seen=%d ft_gen=%u ft_src=%s ft_cmd=0x%02x a12=%d"
                   " sds_ret_tx=%d sds_msr_pre=%s sds_polls=%u sds_ok=%d sds_fail=%s st3_dev=0x%02x want=0x%02x st3_masked=0x%02x"
                   " FT=%d WP=%d RY=%d T0=%d t0ok=%d b1=%d ry0_close=%d"
                   " rid_ushd=0x%02x rid_ret_tx=%d rid_polls=%u rid_msr_seq=%s rid_res=%s rid_c=%u rid_cc=%u rid_us=%lld"
-                  " rid_fail=%s rid_ic_ok=%d rid_chs=%d rid_n=%d b2=%d c0=%d pos_ok=%d state=%s decision=%s us=%lld\n",
+                  " rid_fail=%s rid_ic_ok=%d rid_chs=%d rid_n=%d b2=%d drained2=%d unch2=%d c0=%d pos_check=%s pos_ok=%d"
+                  " state=%s decision=%s us=%lld\n",
                   g_mx68k_frame_num, phase_a ? "B" : "A", p[0], p[1], (unsigned)s_rl_us_mx, (unsigned)us, (unsigned)hd,
                   p[2], p[3], p[4], p[5], (unsigned)s_rl_cmd_n, (unsigned)n, (unsigned)s_rl_wrcollect_n,
                   (unsigned)s_rl_wr_mtc_begin, s_rl_wrcollect_mar0_valid, (unsigned)s_rl_wrcollect_ocr0, idh,
@@ -5335,11 +5410,14 @@ static void rl_nmf_try_send(void)
                   (unsigned)s_nmf_pcn_st0[us], pcn_v, a8,
                   run_act, (unsigned)s_nmf_run_us, (unsigned)s_nmf_run_pos, (unsigned)run_n, (unsigned)s_nmf_run_ue,
                   s_nmf_chain_ok, start_ok, order_ok, a9, a10,
+                  a11, ft, s_rl_ft_seen, (unsigned)s_rl_ft_gen, FT_SRC_NAME[s_rl_ft_src], (unsigned)s_rl_ft_cmd, a12,   /* P1131 */
                   sl.ret_tx, sl.polls ? sh : "-", (unsigned)sl.polls, sds_ok, sl.fail, (unsigned)st3, (unsigned)want,
                   (unsigned)(st3 & 0xE7u), (st3 & ST3_FT) ? 1 : 0, (st3 & ST3_WP) ? 1 : 0, (st3 & ST3_RY) ? 1 : 0,
                   (st3 & ST3_T0) ? 1 : 0, t0ok, b1, ry0_close,
                   (unsigned)p[1], rg.ret_tx, (unsigned)rg.polls, rg.msr_n ? rmh : "-", rh, (unsigned)rg.c, (unsigned)rg.cc,
-                  (long long)rg.us, rg.fail, rid_ic_ok, rid_chs, rid_n, b2, c0, (a8 && b1 && b2) ? 1 : 0,
+                  (long long)rg.us, rg.fail, rid_ic_ok, rid_chs, rid_n, b2, drained2, unch2, c0, blank ? "blank" : "off",
+                  /* P1131: 通常経路では b2=b1 なので pos_ok は a8 && b1 と同値 */
+                  (a8 && b1 && b2) ? 1 : 0,
                   RL_STATE_NAME[s_rl_state], send ? "sent" : NMF_REF_NAME[ref], (long long)(rl_now_us() - t0));
     }
     if (s_nmf_blank != NMFB_OFF) {   /* P1126 */
@@ -7349,20 +7427,22 @@ static void rl_log_sum(void)
         else                           snprintf(ua, sizeof(ua), "bad");
         uint32_t fce = 0;   /* P1055: 閉鎖記録の合計(新3項 attr_unit/attr_all/outside_change を含む全種別) */
         for (int k = 0; k < NM_CL_N; k++) fce += s_nm_close_ev[k];
-        debug_log(P1053_TAG " sum f=%u allow_unit=%s checks=%u pass=%u ref_need_read=%u ref_attr_hold=%u ref_loop=%u ref_latched=%u ref_wp=%u"
-                  " ref_no_media=%u ref_drain=%u ref_unit=%u ref_env=%u ref_unknown=%u"
+        /* P1131: fence_decision=off は「柵の記録(fence_open_n 等)を送信判断に使っていない」ことをログ単体で示す固定値 */
+        debug_log(P1053_TAG " sum f=%u allow_unit=%s checks=%u pass=%u ref_attr_hold=%u ref_unit_changed=%u ref_first_xfer=%u"
+                  " ref_loop=%u ref_latched=%u ref_wp=%u"
+                  " ref_no_media=%u ref_drain=%u ref_unit=%u ref_env=%u ref_unknown=%u fence_decision=off"
                   " close_startup=%u close_install_reset=%u close_ev_D=%u close_ev_d=%u close_eject=%u close_ry0=%u close_gen=%u"
                   " close_attr_unit=%u close_attr_all=%u close_outside=%u"
                   " fence_close_ev=%u fence_open_n=%u open_refused_n=%u open_ref_st=%u open_ref_d=%u open_ref_gen=%u open_now=0x%x"
                   " loop_trip=%u loop_cnt_max=%u loop_time_reset=%u v_match=%u v_mismatch=%u v_skip_epoch=%u v_unmapped=%u"
                   " v_skip_err=%u v_skip_hold=%u distinct_written=%u pending_unverified=%u uncertain=%u ok_written=%u ok_unexpected=%u"
-                  " sy_ok=%u sy_refused=%u sy_fail_c_fwd=%u sy_fence_closed=%u form_a=%u form_c=%u form4=%u form_other=%u"
+                  " sy_ok=%u sy_refused=%u sy_fail_c_fwd=%u sy_unit_changed=%u form_a=%u form_c=%u form4=%u form_other=%u"
                   " would_cache_n=%u sends=%u/- latched=%d latch_why=%s latch_calls=%u invalid_results=%u late_W=%u d_events=%u"
                   " se_n=%u ej_supp=%u nm_err=%u/%u nm_err_limit=%u nm_err_bits=nd:%u,de:%u,or:%u,ma:%u nm_err_rej=%u"
                   " unit_latch_mask=0x%x unit_latch_why=%s,%s,%s,%s unit_latch_calls=%u ref_unit_latched=%u"
                   " unit_latch_fallback=%u wc_unit_mask=0x%x\n",
-                  (unsigned)g_mx68k_frame_num, ua, (unsigned)s_rl_wr_checks, (unsigned)s_nm_pass, (unsigned)s_nm_ref_need_read,
-                  (unsigned)s_nm_ref_attr_hold,
+                  (unsigned)g_mx68k_frame_num, ua, (unsigned)s_rl_wr_checks, (unsigned)s_nm_pass,
+                  (unsigned)s_nm_ref_attr_hold, (unsigned)s_nm_ref_unit_changed, (unsigned)s_nm_ref_first_xfer,
                   (unsigned)s_nm_ref_loop, (unsigned)s_nm_ref_latched, (unsigned)s_nm_ref_wp, (unsigned)s_nm_ref_no_media,
                   (unsigned)s_nm_ref_drain, (unsigned)s_nm_ref_unit, (unsigned)s_nm_ref_env, (unsigned)s_nm_ref_unknown,
                   (unsigned)s_nm_close_ev[NM_CL_STARTUP], (unsigned)s_nm_close_ev[NM_CL_INSTALL], (unsigned)s_nm_close_ev[NM_CL_EV_D],
@@ -7376,7 +7456,7 @@ static void rl_log_sum(void)
                   (unsigned)s_nm_v_match, (unsigned)s_nm_v_mismatch, (unsigned)s_nm_v_skip_epoch, (unsigned)s_nm_v_unmapped,
                   (unsigned)s_nm_v_skip_err, (unsigned)s_nm_v_skip_hold, (unsigned)dw, (unsigned)pend, (unsigned)unc, (unsigned)s_nm_ok_written,
                   (unsigned)s_nm_ok_unexp, (unsigned)s_rl_sy_ok, (unsigned)s_rl_sy_refused, (unsigned)s_nm_sy_fail_c_fwd,
-                  (unsigned)s_nm_sy_fence_closed, (unsigned)s_rl_sy_form_a, (unsigned)s_rl_sy_form_c, (unsigned)s_rl_sy_form4,
+                  (unsigned)s_nm_sy_unit_changed, (unsigned)s_rl_sy_form_a, (unsigned)s_rl_sy_form_c, (unsigned)s_rl_sy_form4,
                   (unsigned)s_rl_sy_form_other, (unsigned)s_rl_sy_would_cache_n, (unsigned)s_rl_wr_sends, s_rl_wr_latched_off,
                   s_nm_latch_why, (unsigned)s_nm_latch_calls, (unsigned)s_rl_wr_invalid, (unsigned)s_rl_wr_late_w,
                   (unsigned)s_rl_d_events, (unsigned)s_rl_se_n, (unsigned)s_rl_e5_ej_supp,
