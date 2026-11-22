@@ -720,13 +720,71 @@ static int      s_st_nmf_force_ret = 0;    /* 単体テスト専用: 次の1回�
 #define FU_BLANK_SIG_ST1_OPT      0x04u       /* ST1 の ND(bit2)は有っても無くてもよい(Inside X68000 書籍p.400 図15) */
 #define FU_BLANK_SIG_ST2          0x00u
 #define FU_BLANK_RID_MIN_US       150000      /* MA の物理下限: 2HD 360rpm の1回転 166,667µs × 0.9 */
-#define FU_NMF_BLANK_LAST_POS     1u          /* スライスで送信してよい最後の位置 k=2C+H(C0H1) */
-_Static_assert(FU_NMF_BLANK_LAST_POS == 1u, "ブランク経路は T0 で位置確認できる C0 の2面に限る");
-enum { NMFB_OFF = 0, NMFB_PROBE, NMFB_C0, NMFB_INVALID };
+#define FU_NMF_BLANK_LAST_POS_C0  1u          /* c0 のスライスで送信してよい最後の位置 k=2C+H(C0H1) */
+#define FU_NMF_BLANK_LAST_POS_C1  3u          /* P1127: c1 のスライスで送信してよい最後の位置 k=2C+H(C1H1) */
+_Static_assert(FU_NMF_BLANK_LAST_POS_C0 == 1u, "c0 は T0 で位置確認できる C0 の2面に限る");
+_Static_assert(FU_NMF_BLANK_LAST_POS_C1 == 3u, "c1 は C1 の2面まで(C2 以降は次サイクルで別途承認)");
+_Static_assert(FU_NMF_BLANK_LAST_POS_C1 < FU_NMF_LAST_POS, "c1 のスライス終端は走行の最終位置より前");
+enum { NMFB_OFF = 0, NMFB_PROBE, NMFB_C0, NMFB_C1, NMFB_INVALID };
 static int         s_nmf_blank = NMFB_OFF;      /* install で解析(NMF が無効なら常に OFF) */
-static const char* s_nmfb_mode_name = "off";    /* off|probe|c0|invalid|ignored_nmf_off(ログ用) */
+static const char* s_nmfb_mode_name = "off";    /* off|probe|c0|c1|invalid|ignored_nmf_off(ログ用) */
 static char        s_nmfb_env_raw[24] = "unset";
-static int         s_nmf_run_blank = 0;         /* 現在の走行がブランク走行か(走行開始時に s_nmf_blank==NMFB_C0 を写す) */
+static int         s_nmf_run_blank = 0;         /* 現在の走行がブランク走行か(走行開始時に s_nmf_blank が NMFB_C0/NMFB_C1 かを写す) */
+static uint32_t    s_nmf_run_blank_last = 0;    /* P1127: その走行のスライス終端 k(走行開始時の rl_nmfb_last_pos を写す、走行中は不変) */
+
+/* P1127: モードごとのスライス終端 k。probe は走行を始めず k=0 しか評価しないので c0 と同じ値で足りる。それ以外は 0 */
+static uint32_t rl_nmfb_last_pos(int mode)
+{
+    if (mode == NMFB_PROBE || mode == NMFB_C0) return FU_NMF_BLANK_LAST_POS_C0;
+    if (mode == NMFB_C1)                       return FU_NMF_BLANK_LAST_POS_C1;
+    return 0u;
+}
+
+/* P1127(V-7): ブランク有効時の Phase B 開始〜送信直前再検査 c0 の評価直後までに rl_p1 へ渡された送信名の区間記録。
+ * 同じ名前の連続はまとめて回数で数える(MSR ポーリング・リザルト7B読出しで1トラック30回以上になるため)。
+ * 記録フラグが立っていないときは rl_p1 は何もしない(既存の挙動・計時は不変) */
+#define FU_P1W_MAX                32u
+static int         s_p1w_on = 0;
+static const char* s_p1w_name[FU_P1W_MAX];
+static uint32_t    s_p1w_cnt[FU_P1W_MAX];
+static uint32_t    s_p1w_n = 0;
+static int         s_p1w_ovf = 0;
+
+static void rl_p1w_begin(void)
+{
+    memset(s_p1w_name, 0, sizeof(s_p1w_name));
+    memset(s_p1w_cnt, 0, sizeof(s_p1w_cnt));
+    s_p1w_n = 0;
+    s_p1w_ovf = 0;
+    s_p1w_on = 1;
+}
+
+static void rl_p1w_end(void) { s_p1w_on = 0; }
+
+static void rl_p1w_note(const char* what)
+{
+    if (!s_p1w_on) return;
+    if (s_p1w_n > 0u && s_p1w_name[s_p1w_n - 1u] == what) { s_p1w_cnt[s_p1w_n - 1u]++; return; }
+    if (s_p1w_n >= FU_P1W_MAX) { s_p1w_ovf = 1; return; }
+    s_p1w_name[s_p1w_n] = what;
+    s_p1w_cnt[s_p1w_n] = 1u;
+    s_p1w_n++;
+}
+
+/* p1w= の値(名前、2回以上なら *回数、カンマ区切り。記録0件は "-") */
+static void rl_p1w_str(char* out, size_t outsz)
+{
+    size_t o = 0;
+    out[0] = '\0';
+    for (uint32_t i = 0; i < s_p1w_n && o + 1 < outsz; i++) {
+        int w = s_p1w_cnt[i] > 1u ? snprintf(out + o, outsz - o, "%s%s*%u", i ? "," : "", s_p1w_name[i], (unsigned)s_p1w_cnt[i])
+                                   : snprintf(out + o, outsz - o, "%s%s", i ? "," : "", s_p1w_name[i]);
+        if (w < 0) break;
+        o += (size_t)w;
+        if (o >= outsz) { o = outsz - 1; break; }
+    }
+    if (s_p1w_n == 0u) snprintf(out, outsz, "-");
+}
 static uint32_t    s_nmfb_seen = 0, s_nmfb_probe_would_send = 0, s_nmfb_sends = 0, s_nmfb_tracks_ok = 0, s_nmfb_pre_lines = 0;
 /* G-FT: 最後の bringup(FU_INIT=装置の深いリセット、TNB:app.c:720 で m_isFirstTrasnfer=true)以降に、装置ファームの
  * 転送群コマンド(READ/WRITE/SCAN/WRITE ID、app.c:1269-1306, 2151-2160)のリザルトを受領・採用したか。
@@ -2612,6 +2670,7 @@ static void rl_fault(const char* what, int ret)
  * P1089: 上限は rl_p1_timeout_ms()(dirty 中のみ延長)。受信つき往復の成功で dirty のクリア判定を行う */
 static int rl_p1(const char* what, const uint8_t* tx, size_t txlen, uint8_t* rx, size_t rxlen)
 {
+    rl_p1w_note(what);   /* P1127(V-7): 記録フラグが立っているときだけ送信名を残す */
     int tmo = rl_p1_timeout_ms();
     int64_t t0 = rl_now_us();
     int r = mx68k_floppyu_usb_port1_exec(tx, txlen, rx, rxlen, tmo, 1);
@@ -4903,6 +4962,7 @@ typedef struct {
     uint32_t gen_now, tries;
     const rl_nmfb_try_t* tr;
     const char* decision;
+    int p1w;                                     /* P1127: 1=この FORMAT で区間記録を行った(0 なら p1w=- p1w_ovf=-1) */
 } rl_nmfb_pre_t;
 
 static void rl_nmfb_log_pre(const rl_nmfb_pre_t* g)
@@ -4927,17 +4987,22 @@ static void rl_nmfb_log_pre(const rl_nmfb_pre_t* g)
     rids[0] = '\0';
     for (uint32_t i = 0; i < FU_BLANK_SIG_N && o + 120 < sizeof(rids); i++)
         o += (size_t)snprintf(rids + o, sizeof(rids) - o, " rid%u=%s", (unsigned)i, tr[i]);
+    /* P1127: 走行中はその走行のスライス終端、走行外は現在モードの値 */
+    uint32_t blast = (s_nmf_run_active && s_nmf_run_blank) ? s_nmf_run_blank_last : rl_nmfb_last_pos(s_nmf_blank);
+    char p1w[FU_P1W_MAX * 28 + 8];
+    if (g->p1w) rl_p1w_str(p1w, sizeof(p1w));
+    else        snprintf(p1w, sizeof(p1w), "-");
     debug_log(P1126_TAG " precheck f=%d k=%u c=%u hd=%u unit=%u phase=%s run_active=%d run_blank=%d run_us=%u run_pos=%u"
               " chain_ok=%d st=%s ue_now=%u run_ue=%u a5b=%d ft=%d ft_seen=%d ft_gen=%u gen_now=%u ft_cmd=0x%02x ft_src=%s"
               " a3=%d latched=%d ulatched=%d pcn=%s pcn_valid=%d rebringup_n=%u fast=%d st3_dev=0x%02x T0=%d t0ok=%d b1=%d"
-              " sig_tries=%u/%u%s id_seen=%d b2b=%d c0=%d mode=%s decision=%s\n",
+              " sig_tries=%u/%u%s id_seen=%d b2b=%d c0=%d blank_last=%u p1w=%s p1w_ovf=%d mode=%s decision=%s\n",
               g_mx68k_frame_num, (unsigned)g->k, (unsigned)g->c, (unsigned)g->hd, (unsigned)us, g->phase, s_nmf_run_active,
               s_nmf_run_blank, (unsigned)s_nmf_run_us, (unsigned)s_nmf_run_pos, s_nmf_chain_ok, NM_ST_NAME[s_nm_st],
               (unsigned)s_nm_ue[us], (unsigned)s_nmf_run_ue, g->a5b, g->ft, s_rl_ft_seen, (unsigned)s_rl_ft_gen,
               (unsigned)g->gen_now, (unsigned)s_rl_ft_cmd, FT_SRC_NAME[s_rl_ft_src], g->a3, g->latched, g->ulatched, ph,
               s_nmf_pcn_valid[us], (unsigned)s_rl_bringup_n, s_nm_fast, (unsigned)g->st3, g->sds_ok > 0 && (g->st3 & ST3_T0) ? 1 : 0,
-              g->t0ok, g->b1, (unsigned)g->tries, (unsigned)FU_BLANK_SIG_N, rids, g->id_seen, g->b2b, g->c0, s_nmfb_mode_name,
-              g->decision);
+              g->t0ok, g->b1, (unsigned)g->tries, (unsigned)FU_BLANK_SIG_N, rids, g->id_seen, g->b2b, g->c0, (unsigned)blast,
+              p1w, g->p1w ? s_p1w_ovf : -1, s_nmfb_mode_name, g->decision);
 }
 
 /* 収集完了時(rl_collect_done 経由、Core DMA ch0 の最終バイト書込みコールバック内で同期実行)。
@@ -4974,10 +5039,10 @@ static void rl_nmf_try_send(void)
     if (s_nmf_halt)                        z = NMF_REF_HALT;
     else if (in_run_same && !s_nmf_chain_ok) z = NMF_REF_CHAIN;
     /* P1126: いずれも装置非接触。不正値は全 FORMAT 拒否 / 高速書込みモードとの組合せは未確認なので拒否 /
-     * ブランク走行のスライス終端(C1H0 以降)で停止 */
+     * ブランク走行のスライス終端(c0 は C1H0 以降、c1 は C2H0 以降。P1127: 終端は走行開始時の値で固定)で停止 */
     else if (s_nmf_blank == NMFB_INVALID)  z = NMF_REF_BLANK_ENV_INVALID;
     else if (blank && s_nm_fast)           z = NMF_REF_BLANK_FAST_MODE;
-    else if (in_run_same && s_nmf_run_blank && k > FU_NMF_BLANK_LAST_POS) {
+    else if (in_run_same && s_nmf_run_blank && k > s_nmf_run_blank_last) {
         rl_nmf_halt("blank_slice_end");
         z = NMF_REF_BLANK_SLICE_END;
     }
@@ -5000,7 +5065,7 @@ static void rl_nmf_try_send(void)
         }
         if (s_nmf_blank != NMFB_OFF) {
             rl_nmfb_pre_t g = { "0", k, c, hd, us, -1, -1, -1, s_rl_wr_latched_off, (int)((s_nm_unit_latch_mask >> us) & 1u),
-                                -1, -1, -1, -1, -1, -1, 0, mx68k_floppyu_usb_generation(), 0, NULL, NMF_REF_NAME[z] };
+                                -1, -1, -1, -1, -1, -1, 0, mx68k_floppyu_usb_generation(), 0, NULL, NMF_REF_NAME[z], 0 };
             rl_nmfb_log_pre(&g);
         }
         rl_nmf_refuse(z, in_run_same);
@@ -5025,7 +5090,11 @@ static void rl_nmf_try_send(void)
     int a7 = (n == 32u);
     for (uint32_t i = 0; a7 && i < 8u; i++)
         if (ids[i * 4u] != c || ids[i * 4u + 1u] != hd || ids[i * 4u + 2u] != (uint8_t)(i + 1u) || ids[i * 4u + 3u] != 3u) a7 = 0;
-    int a7c = blank ? (a7 && c == 0u) : (a7 && c <= FU_NMF_MAX_CYL);   /* P1126: ブランク経路は C0 限定(二重化) */
+    /* P1126/P1127: ブランク経路はスライス範囲 k<=blp 限定(二重化)。blp は現在モードの終端と、走行中なら走行開始時の終端の小さい方。
+     * SLICE_END(走行開始時の値のみ)と比較対象が非対称なのは意図的で、a7c の上限が常に SLICE_END 以下になる安全側の二重化 */
+    uint32_t blp = rl_nmfb_last_pos(s_nmf_blank);
+    if (s_nmf_run_active && s_nmf_run_blank && s_nmf_run_blank_last < blp) blp = s_nmf_run_blank_last;
+    int a7c = blank ? (a7 && k <= blp) : (a7 && c <= FU_NMF_MAX_CYL);
     int pcn_v = s_nmf_pcn_valid[us] && s_nmf_pcn_ue[us] == s_nm_ue[us] && s_nmf_pcn_gen[us] == gen_now;
     int a8 = pcn_v && s_nmf_pcn[us] == c;
     int run_act = s_nmf_run_active;
@@ -5082,6 +5151,9 @@ static void rl_nmf_try_send(void)
     int nmfb_b2b = 0, nmfb_id_seen = 0, nmfb_last_fast = 0;
     /* P1123(S-2): Phase B の最初の問合せより前に強制READYを解除・排出する(Phase 0 の検証・C77 吸収は装置へ送る前に済んでおり、
      * 検証は rl_nmf_verify 自身の入口で同じ判定を行う)。Phase A 不成立なら解除しない */
+    /* P1127(V-7): ブランク有効時のみ、ここから c0 の評価直後(下の Phase B ブロックの直後)まで rl_p1 の送信名を記録する。
+     * この区間に return は無く、終了は1箇所(rl_p1w_end)。開始時に配列・件数・p1w_ovf をクリアする */
+    if (blank) rl_p1w_begin();
     int fr_ok = phase_a ? rl_fr_wr_entry("nmf") : 1;
     if (!fr_ok) s_fr_ref_nmf++;
     if (phase_a && fr_ok) {
@@ -5134,6 +5206,7 @@ static void rl_nmf_try_send(void)
                  s_rl_state == RL_WR_COLLECT && pcn2;
         }
     }
+    rl_p1w_end();   /* P1127(V-7): 区間記録の唯一の終了点(ブランク無効時は開始していないので何もしない) */
     /* P1126(V-7): プローブは全ゲートが成立しても送らない */
     int send = phase_a && fr_ok && b1 && b2 && c0 && (s_nmf_blank != NMFB_PROBE);
 
@@ -5228,14 +5301,15 @@ static void rl_nmf_try_send(void)
     }
     if (s_nmf_blank != NMFB_OFF) {   /* P1126 */
         rl_nmfb_pre_t g = { phase_a ? "B" : "A", k, c, hd, us, a5b, ft, a3, latched, ulatched, sds_ok, t0ok, b1,
-                            nmfb_id_seen, nmfb_b2b, c0, st3, gen_now, nmfb_tries, nmfb_tr, send ? "sent" : NMF_REF_NAME[ref] };
+                            nmfb_id_seen, nmfb_b2b, c0, st3, gen_now, nmfb_tries, nmfb_tr, send ? "sent" : NMF_REF_NAME[ref],
+                            blank };
         rl_nmfb_log_pre(&g);
     }
     if (!send) {
         rl_nmf_refuse(ref, s_nmf_run_active && us == s_nmf_run_us);
         return;
     }
-    if (blank) s_nmfb_sends++;   /* P1126(プローブは上で必ず拒否されるので、ここへ来るのは c0 のみ) */
+    if (blank) s_nmfb_sends++;   /* P1126(プローブは上で必ず拒否されるので、ここへ来るのは c0/c1 のみ) */
 
     /* 送信。送信関数を呼ぶ前に走行状態を進め、連鎖を0にし、飛行中フラグを立て、照合表のそのトラックを無効化する
      * (送信失敗・後続の例外経路に関わらず、次のトラックは検証 ok まで送れない) */
@@ -5249,7 +5323,8 @@ static void rl_nmf_try_send(void)
         s_nmf_run_us = us;
         s_nmf_run_n[us]++;
         s_nmf_run_ue = s_nm_ue[us];
-        s_nmf_run_blank = (s_nmf_blank == NMFB_C0) ? 1 : 0;   /* P1126(V-8): 通常走行では 0 */
+        s_nmf_run_blank = (s_nmf_blank == NMFB_C0 || s_nmf_blank == NMFB_C1) ? 1 : 0;   /* P1126(V-8): 通常走行では 0 */
+        s_nmf_run_blank_last = s_nmf_run_blank ? rl_nmfb_last_pos(s_nmf_blank) : 0u;    /* P1127: この走行のスライス終端 */
         s_nmf_runs_started++;
         debug_log(P1067_TAG " run f=%d start unit=%u run_n=%u/%u ue=%u gen=%u runs_started=%u\n",
                   g_mx68k_frame_num, (unsigned)us, (unsigned)s_nmf_run_n[us], (unsigned)FU_NMF_RUNS_PER_EPOCH,
@@ -7500,20 +7575,26 @@ static void rl_install_reset(void)
     {
         const char* bv = getenv("MX68K_FLOPPYU_NM_FORMAT_BLANK");
         snprintf(s_nmfb_env_raw, sizeof(s_nmfb_env_raw), "%s", bv ? bv : "unset");
-        int parsed = bv == NULL ? NMFB_OFF : strcmp(bv, "c0probe") == 0 ? NMFB_PROBE : strcmp(bv, "c0") == 0 ? NMFB_C0 : NMFB_INVALID;
+        /* P1127: c1 = スライス終端を C1H1 まで(c0 の意味は変えない)。c2 等その他の値は従来どおり NMFB_INVALID */
+        int parsed = bv == NULL ? NMFB_OFF : strcmp(bv, "c0probe") == 0 ? NMFB_PROBE : strcmp(bv, "c0") == 0 ? NMFB_C0 :
+                     strcmp(bv, "c1") == 0 ? NMFB_C1 : NMFB_INVALID;
         if (!s_nmf_on) {
             s_nmf_blank = NMFB_OFF;
             s_nmfb_mode_name = parsed == NMFB_OFF ? "off" : "ignored_nmf_off";
         } else {
             s_nmf_blank = parsed;
-            s_nmfb_mode_name = parsed == NMFB_PROBE ? "probe" : parsed == NMFB_C0 ? "c0" : parsed == NMFB_INVALID ? "invalid" : "off";
+            s_nmfb_mode_name = parsed == NMFB_PROBE ? "probe" : parsed == NMFB_C0 ? "c0" : parsed == NMFB_C1 ? "c1" :
+                               parsed == NMFB_INVALID ? "invalid" : "off";
         }
+        /* P1127: blank_last= は既存の部分文字列照合(blank_mode=… nmf_on=… の隣接)を崩さないよう行末に置く */
         debug_log(P1126_TAG " env f=%d blank_env=%s blank_mode=%s nmf_on=%d nmf_src=%s halt=%d halt_why=%s partial=%d"
-                  " run_blank=%d ft_seen=%d ft_gen=%u gen=%u ft_cmd=0x%02x ft_src=%s ft_set_n=%u ft_clr_n=%u ft_stale_n=%u\n",
+                  " run_blank=%d ft_seen=%d ft_gen=%u gen=%u ft_cmd=0x%02x ft_src=%s ft_set_n=%u ft_clr_n=%u ft_stale_n=%u"
+                  " blank_last=%u\n",
                   g_mx68k_frame_num, s_nmfb_env_raw, s_nmfb_mode_name, s_nmf_on, NMF_SRC_NAME[s_nmf_src], s_nmf_halt,
                   s_nmf_halt_why, s_nmf_partial, s_nmf_run_blank, s_rl_ft_seen, (unsigned)s_rl_ft_gen,
                   (unsigned)mx68k_floppyu_usb_generation(), (unsigned)s_rl_ft_cmd, FT_SRC_NAME[s_rl_ft_src],
-                  (unsigned)s_rl_ft_set_n, (unsigned)s_rl_ft_clr_n, (unsigned)s_rl_ft_stale_n);
+                  (unsigned)s_rl_ft_set_n, (unsigned)s_rl_ft_clr_n, (unsigned)s_rl_ft_stale_n,
+                  (unsigned)rl_nmfb_last_pos(s_nmf_blank));
     }
     /* P1089(B-1): 書込みモード「高速」は、設定由来の normal かつ設定「高速」のときだけ有効。環境変数 MX68K_FLOPPYU_WRITE が
      * 設定されていれば無視する(FORMAT の NMF_SRC_IGNORED と同じ扱い。高速用の環境変数は新設しない)。
