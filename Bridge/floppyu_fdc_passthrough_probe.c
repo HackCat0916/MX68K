@@ -634,6 +634,9 @@ enum { NMF_REF_MODE = 0, NMF_REF_OFF, NMF_REF_SC_ZERO, NMF_REF_HALT, NMF_REF_CHA
        NMF_REF_ORDER, NMF_REF_COLLECT, NMF_REF_LINK, NMF_REF_NO_PCN, NMF_REF_PCN, NMF_REF_REENTRY, NMF_REF_SDS_FAIL,
        NMF_REF_NO_MEDIA, NMF_REF_WP, NMF_REF_T0, NMF_REF_ST3_OTHER, NMF_REF_RID_TIMEOUT, NMF_REF_RID_IC,
        NMF_REF_RID_C_WITHOUT_CC, NMF_REF_RID_NO_C, NMF_REF_RID_CHS, NMF_REF_RID_N, NMF_REF_RECHECK, NMF_REF_FR_RELEASE,
+       /* P1126: 未フォーマット媒体(ブランク)経路の拒否理由。既存値は動かさず末尾へ追加 */
+       NMF_REF_BLANK_ENV_INVALID, NMF_REF_BLANK_FAST_MODE, NMF_REF_BLANK_SWAP, NMF_REF_BLANK_FIRST_XFER,
+       NMF_REF_BLANK_NOT_BLANK, NMF_REF_BLANK_RID_FAST, NMF_REF_BLANK_SLICE_END, NMF_REF_BLANK_PROBE,
        NMF_REF_N };
 static const char* const NMF_REF_NAME[] = {
     "refused_mode", "refused_off", "refused_sc_zero", "refused_halt", "refused_chain", "refused_latched",
@@ -642,7 +645,9 @@ static const char* const NMF_REF_NAME[] = {
     "refused_pcn", "refused_reentry", "refused_sds_fail", "refused_no_media", "refused_wp", "refused_t0",
     "refused_st3_other", "refused_rid_timeout", "refused_rid_ic", "refused_rid_c_without_cc", "refused_rid_no_c",
     "refused_rid_chs", "refused_rid_n", "refused_recheck",
-    "refused_fr_release_fail" };   /* P1123: 入口の強制READY解除(S-2)不成立 */
+    "refused_fr_release_fail",     /* P1123: 入口の強制READY解除(S-2)不成立 */
+    "refused_blank_env_invalid", "refused_blank_fast_mode", "refused_blank_swap", "refused_blank_first_xfer",
+    "refused_blank_not_blank", "refused_blank_rid_fast", "refused_blank_slice_end", "refused_blank_probe" };   /* P1126 */
 _Static_assert(sizeof(NMF_REF_NAME) / sizeof(NMF_REF_NAME[0]) == NMF_REF_N, "NMF_REF_NAME と NMF_REF_* の要素数が一致しない");
 static int      s_rl_format_cfg = 0;       /* 設定値(install 直前に EmulatorBridge.c から渡される) */
 static int      s_nmf_on = 0;              /* install で確定: normal かつ(設定由来+設定 ON、または env 経路) */
@@ -703,6 +708,84 @@ static void rl_nmf_halt(const char* why);
 #ifdef MX68K_FLOPPYU_USB_SELFTEST
 static int      s_st_nmf_force_ret = 0;    /* 単体テスト専用: 次の1回の normal FORMAT 送信を装置へ送らずこの戻り値とする */
 #endif
+
+/* P1126(D-8-blankfmt): 未フォーマット(ID フィールド自体が無い)実2HDディスクのシリンダ0・2面(C0H0→C0H1)だけを
+ * normal FORMAT の走行機構で初期化する垂直スライス。環境変数 MX68K_FLOPPYU_NM_FORMAT_BLANK で明示的に有効化したときだけ働く
+ * (c0probe=全ゲスト成立でも送らない読取り専用プローブ / c0=送信)。ブランク有効時、交換後READ柵(a5)は「判別保留でない・
+ * C0H1 では走行開始時の ue と一致」(a5b)へ、送信前の READ ID 記録位置確認(b2)は「3回連続のブランク署名+物理下限」(b2b)へ
+ * 置き換え、先行転送ゲート G-FT(a11)を加える。無効時は既存の全式が同一の評価結果になる。根拠は .mx68k_cycles/P1126_plan.md 第2.3版 */
+#define P1126_TAG                 "[P1126-BLANK]"
+#define FU_BLANK_SIG_N            3u          /* ブランク署名の連続一致を要求する READ ID 回数(1回でも ID が読めたら即拒否) */
+#define FU_BLANK_SIG_ST1_REQ      0x01u       /* ST1 は MA(bit0)必須 */
+#define FU_BLANK_SIG_ST1_OPT      0x04u       /* ST1 の ND(bit2)は有っても無くてもよい(Inside X68000 書籍p.400 図15) */
+#define FU_BLANK_SIG_ST2          0x00u
+#define FU_BLANK_RID_MIN_US       150000      /* MA の物理下限: 2HD 360rpm の1回転 166,667µs × 0.9 */
+#define FU_NMF_BLANK_LAST_POS     1u          /* スライスで送信してよい最後の位置 k=2C+H(C0H1) */
+_Static_assert(FU_NMF_BLANK_LAST_POS == 1u, "ブランク経路は T0 で位置確認できる C0 の2面に限る");
+enum { NMFB_OFF = 0, NMFB_PROBE, NMFB_C0, NMFB_INVALID };
+static int         s_nmf_blank = NMFB_OFF;      /* install で解析(NMF が無効なら常に OFF) */
+static const char* s_nmfb_mode_name = "off";    /* off|probe|c0|invalid|ignored_nmf_off(ログ用) */
+static char        s_nmfb_env_raw[24] = "unset";
+static int         s_nmf_run_blank = 0;         /* 現在の走行がブランク走行か(走行開始時に s_nmf_blank==NMFB_C0 を写す) */
+static uint32_t    s_nmfb_seen = 0, s_nmfb_probe_would_send = 0, s_nmfb_sends = 0, s_nmfb_tracks_ok = 0, s_nmfb_pre_lines = 0;
+/* G-FT: 最後の bringup(FU_INIT=装置の深いリセット、TNB:app.c:720 で m_isFirstTrasnfer=true)以降に、装置ファームの
+ * 転送群コマンド(READ/WRITE/SCAN/WRITE ID、app.c:1269-1306, 2151-2160)のリザルトを受領・採用したか。
+ * セットはリザルト受領時のみ(1バイト目を送っただけでは立てない)。漏れは拒否方向にしか働かない */
+enum { FT_SRC_NONE = 0, FT_SRC_READ, FT_SRC_WRITE, FT_SRC_FMT };
+static const char* const FT_SRC_NAME[4] = { "-", "read", "write", "fmt" };
+static int         s_rl_ft_seen = 0;
+static uint32_t    s_rl_ft_gen = 0;
+static uint8_t     s_rl_ft_cmd = 0;
+static int         s_rl_ft_src = FT_SRC_NONE;
+static int         s_rl_ft_f = -1;
+static uint32_t    s_rl_ft_clr_at_issue = 0;    /* 発行時の s_rl_ft_clr_n(発行後に再 bringup が入ったリザルトでは立てない) */
+static uint8_t     s_rl_ft_issue_cmd = 0;
+static int         s_rl_ft_issue_valid = 0;
+static uint32_t    s_rl_ft_set_n = 0, s_rl_ft_clr_n = 0, s_rl_ft_stale_n = 0;
+
+/* 装置ファームが m_isFirstTrasnfer を消費するコマンド群か(TNB:app.c:1269-1306 の READ/WRITE/SCAN 群+2151-2152 の 0x0D)。
+ * MX 側でこれより広く立てると危険側なので、ファームの述語をそのまま写す */
+static int rl_ft_fw_xfer_cmd(uint8_t cmd)
+{
+    uint8_t c1 = cmd & 0x1Fu, c3 = cmd & 0x3Fu, cb = cmd & 0xBFu;
+    return c1 == 0x06u || c1 == 0x0Cu || cb == 0x02u ||   /* READ DATA / READ DELETED / READ DIAGNOSTIC */
+           c3 == 0x05u || c3 == 0x09u ||                    /* WRITE DATA / WRITE DELETED */
+           c1 == 0x11u || c1 == 0x19u || c1 == 0x1Du ||     /* SCAN 群 */
+           cb == 0x0Du;                                     /* WRITE ID */
+}
+/* 転送群コマンドを装置へ発行する直前に呼ぶ(発行時点の bringup クリア回数を記録する) */
+static void rl_ft_note_issue(uint8_t cmd0)
+{
+    s_rl_ft_clr_at_issue = s_rl_ft_clr_n;
+    s_rl_ft_issue_cmd = cmd0;
+    s_rl_ft_issue_valid = 1;
+}
+/* 装置からそのコマンドのリザルトを受領・採用した時点で呼ぶ。発行後に再 bringup が入っていれば立てない(古いリザルト) */
+static void rl_ft_note_result(int src)
+{
+    int fresh = s_rl_ft_issue_valid && s_rl_ft_clr_at_issue == s_rl_ft_clr_n;
+    int xfer = rl_ft_fw_xfer_cmd(s_rl_ft_issue_cmd);
+    s_rl_ft_issue_valid = 0;
+    if (!fresh) { s_rl_ft_stale_n++; return; }
+    if (!xfer) return;
+    s_rl_ft_seen = 1;
+    s_rl_ft_gen = mx68k_floppyu_usb_generation();
+    s_rl_ft_cmd = s_rl_ft_issue_cmd;
+    s_rl_ft_src = src;
+    s_rl_ft_f = g_mx68k_frame_num;
+    s_rl_ft_set_n++;
+}
+/* bringup で FU_INIT を送る直前(送信の成否に関わらず: 途中失敗でも装置の深いリセットが起きた可能性がある) */
+static void rl_ft_clear(void)
+{
+    s_rl_ft_seen = 0;
+    s_rl_ft_clr_n++;
+}
+/* 判定: USB 世代が変われば電源投入・USB 切断後の深いリセット(app.c:1085, 2376)が起き得たので無効 */
+static int rl_ft_ok(uint32_t gen_now)
+{
+    return s_rl_ft_seen && s_rl_ft_gen == gen_now;
+}
 
 /* P1032: WRITE DATA の wponly 限定実送信(MX68K_FLOPPYU_WRITE=wponly)。送信直前の非キャッシュ SDS で
  * FT=0・WP=1・RY=1・US/HD一致を確認できたときだけ装置へ書込みコマンドを送る。それ以外は dryrun と同じ NW。
@@ -2678,6 +2761,7 @@ static void rl_read_begin(void)
               g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(), p[2], p[3], p[4], p[5], p[6], p[7], p[8],
               (unsigned)(p[0] >> 7), p[0], (unsigned)s_rl_us_mx, (unsigned)(p[1] & 7u),
               (unsigned)DMA[0].MTC, (unsigned)(DMA[0].MAR & 0xFFFFFFu), (unsigned)DMA[0].OCR, (unsigned)DMA[0].CSR);
+    rl_ft_note_issue(p[0]);   /* P1126(G-FT): 発行時の bringup クリア回数 */
     if (rl_send_cmd("read") < 0) {
         /* 送信失敗(fault)。装置へは何も届いていない扱いで合成エラー */
         s_rl_op_gen = mx68k_floppyu_usb_generation();
@@ -2866,6 +2950,10 @@ static void rl_read_frame_done(void)
     }
     uint32_t n = len - FU_RESULT_LEN;
     memcpy(s_rl_dev_result, s_rl_frame + n, FU_RESULT_LEN);
+    /* P1126(G-FT, F-1): 装置ファームの READ 群のリザルトを受領した。IC は問わない(ファームは1バイト目受信時点で
+     * m_isFirstTrasnfer を消費済み、TNB:app.c:2151-2160)。この関数は rl_read_begin 由来の 'R' フレーム専用
+     * (ゲストの READ ID は rl_rid_begin→RL_RID_WAIT、MX 内部の同期 READ ID はレジスタポーリングで、いずれもここを通らない) */
+    if (s_rl_rd_cmd5 == 0x06u || s_rl_rd_cmd5 == 0x0Cu || s_rl_rd_is_diag) rl_ft_note_result(FT_SRC_READ);
     s_rl_read_ok++;
     if (s_rl_rd_is_diag) s_rl_diag_ok++;
     if (s_rl_rd_is_rdel) s_rl_rdel_ok++;   /* P1120 */
@@ -3161,6 +3249,7 @@ static int rl_send_write_cmd(uint32_t n)
      * WRITE DATA/WRITE DELETED の満杯時 flush は 'W' 待ちに現れる(M2)ので契機として扱わない */
     uint8_t c1 = s_rl_cmd[0] & 0x1Fu;
     if (c1 != 5u && c1 != 9u) rl_wc_note_trigger(WCF_CMD);
+    rl_ft_note_issue(s_rl_cmd[0]);   /* P1126(G-FT): 発行時の bringup クリア回数(WRITE DATA・WRITE ID 共通) */
     int64_t t0 = rl_now_us();
     int r = rl_p1("write_cmd", tx, k, NULL, 0);
     int64_t us = rl_now_us() - t0;
@@ -4039,6 +4128,7 @@ typedef struct {
     uint8_t  msr_post;
     uint32_t c, cc;
     int64_t  us, drain_us;
+    int64_t  tx_t_us, res_t_us;   /* P1126: コマンド送信の戻り時刻 / 結果フェーズを初めて観測した MSR ポーリングの時刻(t0 基準) */
     const char* fail;
 } rl_rid_fresh_log_t;
 
@@ -4078,6 +4168,7 @@ static int rl_fmt1_readid_fresh(uint8_t ushd, rl_rid_fresh_log_t* lg)
         uint8_t tx[4] = { FU_WR | FU_REG_DATA, 0x4A, FU_WR | FU_REG_DATA, ushd };
         rl_wc_note_trigger(WCF_CMD);   /* P1089: READ ID は flush 契機 */
         lg->ret_tx = rl_p1("fmt1_rid_cmd", tx, sizeof(tx), NULL, 0);
+        lg->tx_t_us = rl_now_us() - t0;   /* P1126: 記録のみ(既存の判定・制御には使わない) */
         if (lg->ret_tx < 0) { lg->fail = "tx"; goto drain; }
     }
     {
@@ -4088,7 +4179,7 @@ static int rl_fmt1_readid_fresh(uint8_t ushd, rl_rid_fresh_log_t* lg)
             if (rl_p1("fmt1_rid_msr", TX_MSR, 1, &msr, 1) < 1) { lg->fail = "msr_rx"; goto drain; }
             lg->polls++;
             if (lg->msr_n < sizeof(lg->msr_seq)) lg->msr_seq[lg->msr_n++] = msr;
-            if ((msr & 0xC0u) == 0xC0u) { in_result = 1; break; }
+            if ((msr & 0xC0u) == 0xC0u) { in_result = 1; lg->res_t_us = rl_now_us() - t0; break; }   /* P1126: 記録のみ */
             if (rl_now_us() >= dl) break;
             rl_fmt1_rid_sleep();
         }
@@ -4683,6 +4774,11 @@ static int rl_nmf_verify(int trig, int* post_relay)
     if (pass) {
         s_nmf_chain_ok = 1;
         s_nmf_tracks_ok++;
+        if (s_nmf_run_blank) {   /* P1126: ブランク走行の検証 ok(計数とログのみ、判定は不変) */
+            s_nmfb_tracks_ok++;
+            debug_log(P1126_TAG " verify_ok f=%d k=%u tracks_ok=%u\n", g_mx68k_frame_num, (unsigned)s_nmf_v_k,
+                      (unsigned)s_nmfb_tracks_ok);
+        }
         if (s_nmf_run_active && s_nmf_run_us == us && s_nmf_v_k == FU_NMF_LAST_POS) {   /* C76H1 の検証 ok で走行完走 */
             s_nmf_run_active = 0;
             s_nmf_runs_completed++;
@@ -4768,6 +4864,82 @@ static void rl_nmf_c77_log(const rl_nmf_c77_log_t* g)
               g->decision);
 }
 
+/* P1126: 「最後の確認以降このユニットのディスクが変わっていない」の検査項。Phase A(a5)と送信直前再検査(c0)の両方が
+ * この1関数を呼ぶ(片側だけ式を変える乖離を構造的に防ぐ)。ブランク無効時は交換後READ柵そのもの。
+ * ブランク有効時(a5b): 判別保留中でなく、かつ k=0(走行開始)または走行開始時(C0H0 送信時)の ue と現在の ue が一致 */
+static int rl_nmf_fence_term(int blank, uint8_t us, uint32_t k)
+{
+    if (!blank) return rl_nm_fence_open(us);
+    return s_nm_st == NM_ST_I && (k == 0u || (s_nmf_run_blank && s_nm_ue[us] == s_nmf_run_ue));
+}
+
+/* P1126: ブランク署名判定の1試行(同期 READ ID 1回)。good の合成は呼出し側で行う */
+typedef struct {
+    rl_rid_fresh_log_t lg;
+    uint32_t ex;                                 /* rid_exec_us = res_t_us - tx_t_us(派生値。生値は lg に残る) */
+    int ok, sig0, sig1, sig2, fast, idok;
+} rl_nmfb_try_t;
+
+static void rl_nmfb_try(uint8_t ushd, rl_nmfb_try_t* t)
+{
+    t->ok = rl_fmt1_readid_fresh(ushd, &t->lg);
+    const rl_rid_fresh_log_t* g = &t->lg;
+    t->ex = (g->res_valid && g->res_t_us > g->tx_t_us) ? (uint32_t)(g->res_t_us - g->tx_t_us) : 0u;
+    t->idok = g->res_valid && (g->res[0] & 0xC0u) == 0x00u;                                   /* ID が正常に読めた */
+    t->sig0 = g->res_valid && g->res[0] == (uint8_t)(0x40u | (ushd & 7u));                    /* IC=01・HD・US */
+    t->sig1 = g->res_valid && (g->res[1] & (uint8_t)~FU_BLANK_SIG_ST1_OPT) == FU_BLANK_SIG_ST1_REQ;
+    t->sig2 = g->res_valid && g->res[2] == FU_BLANK_SIG_ST2;
+    t->fast = g->res_valid && t->ex < (uint32_t)FU_BLANK_RID_MIN_US;
+}
+
+/* P1126: ブランク有効時の precheck 行(入口に来た FORMAT ごとに1行、送信の有無に関わらず)。判定に使った生値を全て出す。
+ * Phase 0 で拒否した場合、未評価の項は -1 */
+typedef struct {
+    const char* phase;
+    uint32_t k;
+    uint8_t c, hd, us;
+    int a5b, ft, a3, latched, ulatched, sds_ok, t0ok, b1, id_seen, b2b, c0;
+    uint8_t st3;
+    uint32_t gen_now, tries;
+    const rl_nmfb_try_t* tr;
+    const char* decision;
+} rl_nmfb_pre_t;
+
+static void rl_nmfb_log_pre(const rl_nmfb_pre_t* g)
+{
+    if (s_nmfb_pre_lines >= FU_AR_LOG_LIMIT) return;
+    s_nmfb_pre_lines++;
+    uint8_t us = g->us & 3u;
+    char ph[8], tr[FU_BLANK_SIG_N][112];
+    if (s_nmf_pcn_valid[us]) snprintf(ph, sizeof(ph), "%u", (unsigned)s_nmf_pcn[us]);
+    else                     snprintf(ph, sizeof(ph), "-");
+    for (uint32_t i = 0; i < FU_BLANK_SIG_N; i++) {
+        if (g->tr == NULL || i >= g->tries) { snprintf(tr[i], sizeof(tr[i]), "-"); continue; }
+        const rl_nmfb_try_t* t = &g->tr[i];
+        char rh[2 * 8 + 4];
+        rl_fmt1_rid_str(&t->lg, rh, sizeof(rh));
+        snprintf(tr[i], sizeof(tr[i]), "%s/%s/%u/%u/%d%d%d%d%d/tx%lld/res%lld", rh, t->lg.fail, (unsigned)t->ex,
+                 (unsigned)t->lg.polls, t->sig0, t->sig1, t->sig2, t->fast, t->idok, (long long)t->lg.tx_t_us,
+                 (long long)t->lg.res_t_us);
+    }
+    char rids[FU_BLANK_SIG_N * 120 + 8];
+    size_t o = 0;
+    rids[0] = '\0';
+    for (uint32_t i = 0; i < FU_BLANK_SIG_N && o + 120 < sizeof(rids); i++)
+        o += (size_t)snprintf(rids + o, sizeof(rids) - o, " rid%u=%s", (unsigned)i, tr[i]);
+    debug_log(P1126_TAG " precheck f=%d k=%u c=%u hd=%u unit=%u phase=%s run_active=%d run_blank=%d run_us=%u run_pos=%u"
+              " chain_ok=%d st=%s ue_now=%u run_ue=%u a5b=%d ft=%d ft_seen=%d ft_gen=%u gen_now=%u ft_cmd=0x%02x ft_src=%s"
+              " a3=%d latched=%d ulatched=%d pcn=%s pcn_valid=%d rebringup_n=%u fast=%d st3_dev=0x%02x T0=%d t0ok=%d b1=%d"
+              " sig_tries=%u/%u%s id_seen=%d b2b=%d c0=%d mode=%s decision=%s\n",
+              g_mx68k_frame_num, (unsigned)g->k, (unsigned)g->c, (unsigned)g->hd, (unsigned)us, g->phase, s_nmf_run_active,
+              s_nmf_run_blank, (unsigned)s_nmf_run_us, (unsigned)s_nmf_run_pos, s_nmf_chain_ok, NM_ST_NAME[s_nm_st],
+              (unsigned)s_nm_ue[us], (unsigned)s_nmf_run_ue, g->a5b, g->ft, s_rl_ft_seen, (unsigned)s_rl_ft_gen,
+              (unsigned)g->gen_now, (unsigned)s_rl_ft_cmd, FT_SRC_NAME[s_rl_ft_src], g->a3, g->latched, g->ulatched, ph,
+              s_nmf_pcn_valid[us], (unsigned)s_rl_bringup_n, s_nm_fast, (unsigned)g->st3, g->sds_ok > 0 && (g->st3 & ST3_T0) ? 1 : 0,
+              g->t0ok, g->b1, (unsigned)g->tries, (unsigned)FU_BLANK_SIG_N, rids, g->id_seen, g->b2b, g->c0, s_nmfb_mode_name,
+              g->decision);
+}
+
 /* 収集完了時(rl_collect_done 経由、Core DMA ch0 の最終バイト書込みコールバック内で同期実行)。
  * Phase 0(検証予約・停止・連鎖)→Phase A(装置へ触れない検査)→Phase B(非キャッシュ SDS・同期 READ ID)→C0(再検査)→送信→
  * 同期'W'待ち。判定に使った生値は1 FORMAT につき1行の precheck 行へ全て出す(送信の有無に関わらず)。
@@ -4795,9 +4967,20 @@ static void rl_nmf_try_send(void)
     int ld = s_nmf_ld_valid;
     s_nmf_ld_valid = 0;
     int in_run_same = s_nmf_run_active && us == s_nmf_run_us;
+    /* P1126: ブランク経路が有効か(NMFB_INVALID は下の Phase 0 で全拒否するので含めない) */
+    int blank = (s_nmf_blank != NMFB_OFF && s_nmf_blank != NMFB_INVALID);
+    if (s_nmf_blank != NMFB_OFF) s_nmfb_seen++;
     int z = -1;
     if (s_nmf_halt)                        z = NMF_REF_HALT;
     else if (in_run_same && !s_nmf_chain_ok) z = NMF_REF_CHAIN;
+    /* P1126: いずれも装置非接触。不正値は全 FORMAT 拒否 / 高速書込みモードとの組合せは未確認なので拒否 /
+     * ブランク走行のスライス終端(C1H0 以降)で停止 */
+    else if (s_nmf_blank == NMFB_INVALID)  z = NMF_REF_BLANK_ENV_INVALID;
+    else if (blank && s_nm_fast)           z = NMF_REF_BLANK_FAST_MODE;
+    else if (in_run_same && s_nmf_run_blank && k > FU_NMF_BLANK_LAST_POS) {
+        rl_nmf_halt("blank_slice_end");
+        z = NMF_REF_BLANK_SLICE_END;
+    }
     if (z >= 0) {
         if (ld) s_nmf_ld_exp_fmt++;
         if (c77_in) {
@@ -4815,6 +4998,11 @@ static void rl_nmf_try_send(void)
                       (unsigned)c, (unsigned)hd, (int)k, v0, s_nmf_halt, s_nmf_halt_why, s_nmf_partial, s_nmf_chain_ok,
                       s_nmf_run_active, (unsigned)s_nmf_run_us, (unsigned)s_nmf_run_pos, s_rl_wr_latched_off, NMF_REF_NAME[z]);
         }
+        if (s_nmf_blank != NMFB_OFF) {
+            rl_nmfb_pre_t g = { "0", k, c, hd, us, -1, -1, -1, s_rl_wr_latched_off, (int)((s_nm_unit_latch_mask >> us) & 1u),
+                                -1, -1, -1, -1, -1, -1, 0, mx68k_floppyu_usb_generation(), 0, NULL, NMF_REF_NAME[z] };
+            rl_nmfb_log_pre(&g);
+        }
         rl_nmf_refuse(z, in_run_same);
         return;
     }
@@ -4831,12 +5019,13 @@ static void rl_nmf_try_send(void)
     int a3 = !latched && !s_nmf_halt && !ulatched;
     int a4 = s_nm_unit_state == 0 || (s_nm_unit_state == 1 && (int)us == s_nm_unit);
     int fence = rl_nm_fence_open(us);
-    int a5 = fence;
+    int a5b = blank ? rl_nmf_fence_term(1, us, k) : -1;   /* P1126: ログ用(ブランク無効時は評価しない) */
+    int a5 = rl_nmf_fence_term(blank, us, k);             /* P1126: ブランク無効時は fence と同値 */
     int a6 = (s_rl_cmd_n == 6u) && p[0] == 0x4Du && p[2] == 3u && p[3] == 8u && p[4] == 0x74u && p[5] == 0xE5u;
     int a7 = (n == 32u);
     for (uint32_t i = 0; a7 && i < 8u; i++)
         if (ids[i * 4u] != c || ids[i * 4u + 1u] != hd || ids[i * 4u + 2u] != (uint8_t)(i + 1u) || ids[i * 4u + 3u] != 3u) a7 = 0;
-    int a7c = a7 && c <= FU_NMF_MAX_CYL;
+    int a7c = blank ? (a7 && c == 0u) : (a7 && c <= FU_NMF_MAX_CYL);   /* P1126: ブランク経路は C0 限定(二重化) */
     int pcn_v = s_nmf_pcn_valid[us] && s_nmf_pcn_ue[us] == s_nm_ue[us] && s_nmf_pcn_gen[us] == gen_now;
     int a8 = pcn_v && s_nmf_pcn[us] == c;
     int run_act = s_nmf_run_active;
@@ -4846,7 +5035,11 @@ static void rl_nmf_try_send(void)
     int order_ok = run_act && !other && k == s_nmf_run_pos;
     int a9 = start_ok || order_ok;
     int a10 = !s_rl_in_poll;
-    int phase_a = a1 && a2 && a3 && a4 && a5 && a6 && a7c && a8 && a9 && a10;
+    /* P1126(G-FT): ブランク経路では、最後の bringup 以降に転送群コマンドのリザルトを装置から受領済みであること
+     * (WRITE ID が装置の「深いリセット後の最初の転送」になり FDC が SOFTWARE RESET される状態を避ける、TNB:app.c:2151-2160) */
+    int ft = rl_ft_ok(gen_now);
+    int a11 = !blank || ft;
+    int phase_a = a1 && a2 && a3 && a4 && a5 && a6 && a7c && a8 && a9 && a10 && a11;
 
     /* P1070(V-4): 直前に完走した走行の直後の C77H0 を、装置へ一切送らず正常終了で返す(XEiJ/XM6 と同じ扱い)。
      * SDS・READ ID・WRITE ID のいずれも送らない。走行状態・連鎖・送信記録・検証予約・PCN 記録・照合表は変えない
@@ -4883,6 +5076,10 @@ static void rl_nmf_try_send(void)
     uint8_t want = (uint8_t)(0x20u | (p[1] & 7u));   /* FT=0・WP=0・RY=1・US/HD エコー一致 */
     int sds_ok = 0, st3_eq = 0, t0ok = 0, b1 = 0, rid_ok = 0, rid_ic_ok = 0, rid_chs = 0, rid_n = 0, b2 = 0, c0 = 0;
     int ry0_close = 0;
+    rl_nmfb_try_t nmfb_tr[FU_BLANK_SIG_N];   /* P1126: ブランク署名の試行(ブランク有効時のみ使う) */
+    memset(nmfb_tr, 0, sizeof(nmfb_tr));
+    uint32_t nmfb_tries = 0;
+    int nmfb_b2b = 0, nmfb_id_seen = 0, nmfb_last_fast = 0;
     /* P1123(S-2): Phase B の最初の問合せより前に強制READYを解除・排出する(Phase 0 の検証・C77 吸収は装置へ送る前に済んでおり、
      * 検証は rl_nmf_verify 自身の入口で同じ判定を行う)。Phase A 不成立なら解除しない */
     int fr_ok = phase_a ? rl_fr_wr_entry("nmf") : 1;
@@ -4898,38 +5095,63 @@ static void rl_nmf_try_send(void)
             rl_nm_fence_close(us, NM_CL_RY0, 1, 1, was, NULL);
             ry0_close = 1;
         }
-        if (b1) {
+        if (b1 && !blank) {
             rid_ok = rl_fmt1_readid_fresh(p[1], &rg);   /* ゲストの FORMAT の US/HD バイトそのもの */
             const uint8_t* r = rg.res;
             rid_ic_ok = rg.res_valid && r[0] == (p[1] & 7u) && r[1] == 0u && r[2] == 0u;
             rid_chs = rg.res_valid && r[3] == c && r[4] == hd;   /* C≥1 で唯一の物理位置の証拠 */
             rid_n = rg.res_valid && r[6] == 3u;                  /* 既に 1024B でフォーマット済み(他物理形式・ブランクは拒否) */
             b2 = rid_ok && rid_ic_ok && rid_chs && rid_n;
+        } else if (b1) {
+            /* P1126(V-4): 最大 FU_BLANK_SIG_N 回の READ ID を連続実行し、全回がブランク署名(IC=01・ST1=MA[ND 併記可]・ST2=0)
+             * かつ物理下限以上の所要時間のときだけ b2b=1。1回でも不一致ならその時点で打ち切る(以後の READ ID は送らない)。
+             * 1回でも ID が正常に読めた(IC=00)なら id_seen=1(フォーマット済みの兆候、拒否理由の最優先)。
+             * nmfb_tries は実際に送った READ ID の回数(打切りを含む) */
+            for (uint32_t i = 0; i < FU_BLANK_SIG_N; i++) {
+                rl_nmfb_try_t* t = &nmfb_tr[i];
+                rl_nmfb_try(p[1], t);
+                nmfb_tries++;
+                rg = t->lg;        /* 拒否理由の分類は最後に実施した試行の値で行う */
+                rid_ok = t->ok;
+                int good_i = t->ok && t->sig0 && t->sig1 && t->sig2 && !t->fast;
+                if (t->idok) nmfb_id_seen = 1;
+                if (t->fast) nmfb_last_fast = 1; else nmfb_last_fast = 0;
+                if (!good_i) break;
+                if (i + 1u == FU_BLANK_SIG_N) nmfb_b2b = 1;
+            }
+            b2 = nmfb_b2b;
         }
         if (b1 && b2) {
-            /* C0: Phase B 中の rl_poll() で 'D'/'d'・世代変化・ラッチ・状態変化・PCN 無効化を読んだ可能性があるので再評価する */
+            /* C0: Phase B 中の rl_poll() で 'D'/'d'・世代変化・ラッチ・状態変化・PCN 無効化を読んだ可能性があるので再評価する。
+             * P1126: 柵の項は Phase A と同じ rl_nmf_fence_term、ブランク経路では G-FT も再評価する(無効時は既存式と同値) */
             int relay2 = rl_relay_ok();
             uint32_t gen2 = mx68k_floppyu_usb_generation();
             int pcn2 = s_nmf_pcn_valid[us] && s_nmf_pcn_ue[us] == s_nm_ue[us] && s_nmf_pcn_gen[us] == gen2 && s_nmf_pcn[us] == c;
             int run2 = !s_nmf_run_active ? (k == 0u) : (us == s_nmf_run_us && k == s_nmf_run_pos && s_nmf_chain_ok);
-            c0 = relay2 && gen2 == s_rl_wr_gen_begin && rl_nm_unit_unchanged(us) && rl_nm_fence_open(us) &&
+            c0 = relay2 && gen2 == s_rl_wr_gen_begin && rl_nm_unit_unchanged(us) && rl_nmf_fence_term(blank, us, k) &&
+                 (!blank || rl_ft_ok(gen2)) &&
                  !s_rl_wr_latched_off && !((s_nm_unit_latch_mask >> us) & 1u) && !s_nmf_halt && !s_nmf_verify_pending && run2 &&
                  s_rl_state == RL_WR_COLLECT && pcn2;
         }
     }
-    int send = phase_a && fr_ok && b1 && b2 && c0;
+    /* P1126(V-7): プローブは全ゲートが成立しても送らない */
+    int send = phase_a && fr_ok && b1 && b2 && c0 && (s_nmf_blank != NMFB_PROBE);
 
     /* 拒否理由(優先順で1つ。ログ・計数用で、送信判断には使わない) */
     int ref = -1;
     if (!send) {
         int rid_proc_fail = strcmp(rg.fail, "none") != 0 && strcmp(rg.fail, "c_without_cc") != 0 &&
                             strcmp(rg.fail, "no_c") != 0;
-        if (!fr_ok)                                 ref = NMF_REF_FR_RELEASE;   /* P1123: 装置へ問い合わせていない */
+        if (phase_a && fr_ok && b1 && b2 && c0 && s_nmf_blank == NMFB_PROBE) {
+            ref = NMF_REF_BLANK_PROBE;   /* P1126: 他の全条件が成立(最優先で他の拒否理由と混同しない) */
+            s_nmfb_probe_would_send++;
+        }
+        else if (!fr_ok)                            ref = NMF_REF_FR_RELEASE;   /* P1123: 装置へ問い合わせていない */
         else if (latched || s_rl_wr_latched_off || ((s_nm_unit_latch_mask >> us) & 1u))
                                                     ref = NMF_REF_LATCHED;
         else if (s_nmf_halt)                        ref = NMF_REF_HALT;
         else if (!a4)                               ref = NMF_REF_UNIT;
-        else if (!a5)                               ref = NMF_REF_FENCE;
+        else if (!a5)                               ref = blank ? NMF_REF_BLANK_SWAP : NMF_REF_FENCE;   /* P1126 */
         else if (!a6)                               ref = NMF_REF_PARAM;
         else if (!a7)                               ref = NMF_REF_IDS;
         else if (!a7c)                              ref = NMF_REF_CYL;
@@ -4942,11 +5164,22 @@ static void rl_nmf_try_send(void)
         else if (!pcn_v)                            ref = NMF_REF_NO_PCN;
         else if (!a8)                               ref = NMF_REF_PCN;
         else if (!a10)                              ref = NMF_REF_REENTRY;
+        else if (!a11)                              ref = NMF_REF_BLANK_FIRST_XFER;   /* P1126: ブランク無効時は a11=1 */
         else if (!sds_ok)                           ref = NMF_REF_SDS_FAIL;
         else if (!(st3 & ST3_RY))                   ref = NMF_REF_NO_MEDIA;
         else if (st3 & ST3_WP)                      ref = NMF_REF_WP;
         else if (!t0ok)                             ref = NMF_REF_T0;
         else if (!b1)                               ref = NMF_REF_ST3_OTHER;
+        else if (blank) {
+            /* P1126: ブランク経路の Phase B 分類(最後に実施した試行の値で)。既存の RID_IC/RID_CHS/RID_N へは分類しない */
+            if (nmfb_id_seen)                              ref = NMF_REF_BLANK_NOT_BLANK;   /* フォーマット済みの兆候が最優先 */
+            else if (rid_proc_fail)                        ref = NMF_REF_RID_TIMEOUT;
+            else if (strcmp(rg.fail, "c_without_cc") == 0) ref = NMF_REF_RID_C_WITHOUT_CC;
+            else if (strcmp(rg.fail, "no_c") == 0)         ref = NMF_REF_RID_NO_C;
+            else if (nmfb_last_fast)                       ref = NMF_REF_BLANK_RID_FAST;
+            else if (!nmfb_b2b)                            ref = NMF_REF_BLANK_NOT_BLANK;
+            else                                           ref = NMF_REF_RECHECK;
+        }
         else if (rid_proc_fail)                     ref = NMF_REF_RID_TIMEOUT;
         else if (!rid_ic_ok)                        ref = NMF_REF_RID_IC;
         else if (strcmp(rg.fail, "c_without_cc") == 0) ref = NMF_REF_RID_C_WITHOUT_CC;
@@ -4993,10 +5226,16 @@ static void rl_nmf_try_send(void)
                   (long long)rg.us, rg.fail, rid_ic_ok, rid_chs, rid_n, b2, c0, (a8 && b1 && b2) ? 1 : 0,
                   RL_STATE_NAME[s_rl_state], send ? "sent" : NMF_REF_NAME[ref], (long long)(rl_now_us() - t0));
     }
+    if (s_nmf_blank != NMFB_OFF) {   /* P1126 */
+        rl_nmfb_pre_t g = { phase_a ? "B" : "A", k, c, hd, us, a5b, ft, a3, latched, ulatched, sds_ok, t0ok, b1,
+                            nmfb_id_seen, nmfb_b2b, c0, st3, gen_now, nmfb_tries, nmfb_tr, send ? "sent" : NMF_REF_NAME[ref] };
+        rl_nmfb_log_pre(&g);
+    }
     if (!send) {
         rl_nmf_refuse(ref, s_nmf_run_active && us == s_nmf_run_us);
         return;
     }
+    if (blank) s_nmfb_sends++;   /* P1126(プローブは上で必ず拒否されるので、ここへ来るのは c0 のみ) */
 
     /* 送信。送信関数を呼ぶ前に走行状態を進め、連鎖を0にし、飛行中フラグを立て、照合表のそのトラックを無効化する
      * (送信失敗・後続の例外経路に関わらず、次のトラックは検証 ok まで送れない) */
@@ -5010,10 +5249,14 @@ static void rl_nmf_try_send(void)
         s_nmf_run_us = us;
         s_nmf_run_n[us]++;
         s_nmf_run_ue = s_nm_ue[us];
+        s_nmf_run_blank = (s_nmf_blank == NMFB_C0) ? 1 : 0;   /* P1126(V-8): 通常走行では 0 */
         s_nmf_runs_started++;
         debug_log(P1067_TAG " run f=%d start unit=%u run_n=%u/%u ue=%u gen=%u runs_started=%u\n",
                   g_mx68k_frame_num, (unsigned)us, (unsigned)s_nmf_run_n[us], (unsigned)FU_NMF_RUNS_PER_EPOCH,
                   (unsigned)s_nm_ue[us], (unsigned)gen_now, (unsigned)s_nmf_runs_started);
+        if (s_nmf_run_blank)
+            debug_log(P1126_TAG " run f=%d start unit=%u ue=%u gen=%u\n", g_mx68k_frame_num, (unsigned)us,
+                      (unsigned)s_nm_ue[us], (unsigned)gen_now);
     }
     s_nmf_run_pos = k + 1u;
     s_nmf_chain_ok = 0;
@@ -5377,6 +5620,9 @@ static int rl_wr_result_fetch(const char* via, int require_msr)
         rl_raise_int();
         return 1;
     }
+    /* P1126(G-FT, F-2): 装置が返した書込み/WRITE ID のリザルトを採用した(不採用 invalid_result では立てない=安全側)。
+     * 飛行中フラグは下で落とすので、ここで種別を決める */
+    rl_ft_note_result((s_rl_fmt1_inflight || s_nmf_inflight) ? FT_SRC_FMT : FT_SRC_WRITE);
     if (s_rl_write_mode == WRM_ARMED) outcome = rl_ar_on_result(res, outcome);   /* P1037: 形A判定・照合表更新 */
     /* P1053: 照合表更新。P1067: normal FORMAT の飛行中は呼ばない(WRITE DATA の照合カーソルを持たないため result_without_send になる) */
     if (s_rl_write_mode == WRM_NORMAL && !s_nmf_inflight) outcome = rl_nm_on_result(outcome, res[1]);
@@ -6328,6 +6574,7 @@ static void rl_bringup(void)
     int64_t t0 = rl_now_us();
     /* P1067: 装置 FDC の初期化で PCN は不定になる。bringup は世代不変でも再実行されるので gen 比較では落ちない */
     rl_nmf_pcn_invalidate(-1, &s_nmf_pcn_inval_bringup);
+    rl_ft_clear();   /* P1126(G-FT): FU_INIT の 0x40 で装置は深いリセット(TNB:app.c:2580-2582→720)。送信の成否に関わらず落とす */
     int r1 = rl_p1("bringup_init", FU_INIT, sizeof(FU_INIT), NULL, 0);
 
     /* 初期化直後の装置FDCに残る結果フェーズを読み捨て、MSR==RQM(結果フェーズ終了)を
@@ -6673,6 +6920,20 @@ static void rl_nmf_log_sum(const char* why)
               (unsigned)s_nmf_ld_exp_write, (unsigned)s_nmf_ld_exp_seek, (unsigned)s_nmf_ld_exp_install,
               (unsigned)s_nmf_ld_exp_halt, (unsigned)s_nmf_ld_exp_fmt, (unsigned)s_nmf_ld_exp_diag,
               s_rl_wr_latched_off, en);
+    if (s_nmf_blank != NMFB_OFF) {   /* P1126: ブランク経路の分母と新設拒否理由8種(0件も含む) */
+        char bs[8 * 40 + 8];
+        size_t bo = 0;
+        bs[0] = '\0';
+        for (int i = NMF_REF_BLANK_ENV_INVALID; i <= NMF_REF_BLANK_PROBE && bo + 40 < sizeof(bs); i++)
+            bo += (size_t)snprintf(bs + bo, sizeof(bs) - bo, "%sref_%s=%u", bo ? " " : "", NMF_REF_NAME[i], (unsigned)s_nmf_ref[i]);
+        debug_log(P1126_TAG " sum f=%u why=%s mode=%s blank_seen=%u probe_would_send=%u blank_sends=%u blank_tracks_ok=%u"
+                  " run_blank=%d ft_seen=%d ft_gen=%u ft_cmd=0x%02x ft_src=%s ft_set_n=%u ft_clr_n=%u ft_stale_n=%u"
+                  " halt=%d halt_why=%s partial=%d %s\n",
+                  (unsigned)g_mx68k_frame_num, why, s_nmfb_mode_name, (unsigned)s_nmfb_seen, (unsigned)s_nmfb_probe_would_send,
+                  (unsigned)s_nmfb_sends, (unsigned)s_nmfb_tracks_ok, s_nmf_run_blank, s_rl_ft_seen, (unsigned)s_rl_ft_gen,
+                  (unsigned)s_rl_ft_cmd, FT_SRC_NAME[s_rl_ft_src], (unsigned)s_rl_ft_set_n, (unsigned)s_rl_ft_clr_n,
+                  (unsigned)s_rl_ft_stale_n, s_nmf_halt, s_nmf_halt_why, s_nmf_partial, bs);
+    }
 }
 
 /* P1089(B-8): 高速モードの集計行。fast=0(安全優先)でも normal なら出す(H-1 で fast=0 ok_cached=0 p1_flush_ext=0 を確認)。
@@ -7233,6 +7494,26 @@ static void rl_install_reset(void)
                   s_nmf_run_active, (unsigned)s_nmf_run_us, (unsigned)s_nmf_run_pos, (unsigned)s_nmf_tracks_ok,
                   (unsigned)FU_NMF_RUNS_PER_EPOCH, s_rl_wr_latched_off);
         rl_nmf_log_sum("install");
+    }
+    /* P1126(V-1): ブランク経路の有効化。NMF が有効なときだけ意味を持つ。未知値は全 FORMAT 拒否(NMFB_INVALID)へ倒す
+     * (c0probe の打ち間違いで通常 NMF に落ち、フォーマット済みディスクが実際に再フォーマットされる事故を防ぐ) */
+    {
+        const char* bv = getenv("MX68K_FLOPPYU_NM_FORMAT_BLANK");
+        snprintf(s_nmfb_env_raw, sizeof(s_nmfb_env_raw), "%s", bv ? bv : "unset");
+        int parsed = bv == NULL ? NMFB_OFF : strcmp(bv, "c0probe") == 0 ? NMFB_PROBE : strcmp(bv, "c0") == 0 ? NMFB_C0 : NMFB_INVALID;
+        if (!s_nmf_on) {
+            s_nmf_blank = NMFB_OFF;
+            s_nmfb_mode_name = parsed == NMFB_OFF ? "off" : "ignored_nmf_off";
+        } else {
+            s_nmf_blank = parsed;
+            s_nmfb_mode_name = parsed == NMFB_PROBE ? "probe" : parsed == NMFB_C0 ? "c0" : parsed == NMFB_INVALID ? "invalid" : "off";
+        }
+        debug_log(P1126_TAG " env f=%d blank_env=%s blank_mode=%s nmf_on=%d nmf_src=%s halt=%d halt_why=%s partial=%d"
+                  " run_blank=%d ft_seen=%d ft_gen=%u gen=%u ft_cmd=0x%02x ft_src=%s ft_set_n=%u ft_clr_n=%u ft_stale_n=%u\n",
+                  g_mx68k_frame_num, s_nmfb_env_raw, s_nmfb_mode_name, s_nmf_on, NMF_SRC_NAME[s_nmf_src], s_nmf_halt,
+                  s_nmf_halt_why, s_nmf_partial, s_nmf_run_blank, s_rl_ft_seen, (unsigned)s_rl_ft_gen,
+                  (unsigned)mx68k_floppyu_usb_generation(), (unsigned)s_rl_ft_cmd, FT_SRC_NAME[s_rl_ft_src],
+                  (unsigned)s_rl_ft_set_n, (unsigned)s_rl_ft_clr_n, (unsigned)s_rl_ft_stale_n);
     }
     /* P1089(B-1): 書込みモード「高速」は、設定由来の normal かつ設定「高速」のときだけ有効。環境変数 MX68K_FLOPPYU_WRITE が
      * 設定されていれば無視する(FORMAT の NMF_SRC_IGNORED と同じ扱い。高速用の環境変数は新設しない)。
@@ -8395,5 +8676,21 @@ int mx68k_floppyu_fdcpt_selftest_fr_call(int which)
     if (which == 0) return rl_fr_wr_entry("selftest_wr_entry");
     if (which == 1) { rl_fr_flush_pending("selftest_tick"); return 0; }
     return rl_fr_send0("selftest_send0", 1);
+}
+
+/* P1126 T-2 fn-blank-*: G-FT の内部状態(読取りのみ)。out = seen, gen, src, set_n, clr_n, stale_n */
+void mx68k_floppyu_fdcpt_selftest_ft_state(uint32_t out[6])
+{
+    out[0] = (uint32_t)s_rl_ft_seen; out[1] = s_rl_ft_gen; out[2] = (uint32_t)s_rl_ft_src;
+    out[3] = s_rl_ft_set_n; out[4] = s_rl_ft_clr_n; out[5] = s_rl_ft_stale_n;
+}
+
+/* P1126 T-2n fn-blank-ft-noresult: 「READ を発行→再 bringup(クリア)→その READ のリザルトが遅れて届いた」順序を
+ * G-FT の3関数へ直接与える(実経路では rl_abort_op がフレームを読み捨てるので到達しにくい窓、V-5 追加条件の確認用) */
+void mx68k_floppyu_fdcpt_selftest_ft_stale_probe(void)
+{
+    rl_ft_note_issue(0x46u);
+    rl_ft_clear();
+    rl_ft_note_result(FT_SRC_READ);
 }
 #endif /* MX68K_FLOPPYU_USB_SELFTEST */
