@@ -948,6 +948,16 @@ static int      s_rl_rd_nd = 0, s_rl_rd_ndm = 0;
 /* P1122: 計数(プロセス寿命)。ndm_rd=ND=1 でラッチした READ 数、sup_msr_rd/f0=払出し中の MSR 読出し総数/うち 0xF0 返却数、
  * sup_done_cpu/dma=払出し完了(最終バイト→リザルト移行)数を転送方式別に */
 static uint32_t s_rl_ndm_rd, s_rl_sup_msr_rd, s_rl_sup_msr_f0, s_rl_sup_done_cpu, s_rl_sup_done_dma;
+/* P1129(D-137): READ DATA の R<EOT(マルチセクタ)要求を、受付時 DMAC CH0 が単純なバイト転送で MTC==128<<N のときだけ中継する。
+ * s_rl_rd_multi = 進行中の読出しがその受理形か(rl_read_begin の全呼出し元で 0/1 を明示設定)、s_rl_rd_multi_mtc = 受付時 MTC
+ * (払出し量の上限、装置フレームが長ければここで打ち切る)。計数はプロセス寿命(sum 行の rd_multi=) */
+static int      s_rl_rd_multi = 0;
+static uint16_t s_rl_rd_multi_mtc = 0;
+static uint32_t s_rl_rd_multi_begin, s_rl_rd_multi_ok, s_rl_rd_multi_trunc, s_rl_rd_multi_short;
+static uint32_t s_rl_rd_multi_hook_skip, s_rl_rd_multi_ref_mtc, s_rl_rd_multi_ref_r, s_rl_multi_ref_lines;
+/* P1129: 払出しを打ち切った読出しの照合用。rl_verify は払出し分(n_sup)のFNVと比べる(全 n の frame_fnv では偽の不一致になる) */
+static int      s_rl_verify_trunc = 0;
+static uint32_t s_rl_verify_ref_fnv = 0;
 /* 集計(分母と分子を併記) */
 static uint32_t s_rl_m1_ref_env, s_rl_m1_ref_unit, s_rl_m1_ref_chr, s_rl_m1_ref_max, s_rl_m1_pass;
 static uint32_t s_rl_m1_ok_written, s_rl_m1_ok_chrn_unexp, s_rl_m1_fence_reads_ok;
@@ -2533,7 +2543,7 @@ static void rl_log_read_end(const char* result, int fnv_valid, uint32_t fnv)
     if (s_rl_state == RL_RD_SUPPLY) snprintf(sup, sizeof(sup), "%u/%u", (unsigned)s_rl_supply_pos, (unsigned)s_rl_supply_n);
     else                            snprintf(sup, sizeof(sup), "-");
     debug_log(P1009_TAG " read end f=%d gen=%u result=%s len=%d got=%u wait_us=%lld wait_frames=%d msr_wait=%u other_bytes=%u"
-              " C=%u H=%u R=%u N=%u us_dev=%u data_fnv=%s diag=%d rdel=%d nd=%d xfer=%s sup=%s\n",
+              " C=%u H=%u R=%u N=%u us_dev=%u data_fnv=%s diag=%d rdel=%d nd=%d xfer=%s sup=%s multi=%d\n",
               g_mx68k_frame_num, (unsigned)s_rl_op_gen, result,
               s_rl_seen_r ? (int)s_rl_frame_len : -1, (unsigned)(s_rl_seen_r ? s_rl_p2_got : 0),
               (long long)(now - s_rl_op_t0_us), g_mx68k_frame_num - s_rl_op_f0,
@@ -2541,7 +2551,8 @@ static void rl_log_read_end(const char* result, int fnv_valid, uint32_t fnv)
               s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], s_rl_rd_chrn[3], (unsigned)s_rl_rd_us, fh,
               s_rl_rd_is_diag,    /* P1116: READ DATA と READ DIAG の終了を区別する */
               s_rl_rd_is_rdel,    /* P1120: READ DELETED の終了を区別する */
-              s_rl_rd_nd, s_rl_rd_ndm ? "cpu" : "dma", sup);   /* P1122(D-136): 末尾追加のみ(既存フィールドは不変) */
+              s_rl_rd_nd, s_rl_rd_ndm ? "cpu" : "dma", sup,   /* P1122(D-136): 末尾追加のみ(既存フィールドは不変) */
+              s_rl_rd_multi);                                   /* P1129(D-137): 末尾追加のみ */
 }
 
 static void rl_log_rid_end(const char* result, const uint8_t* res)
@@ -2790,6 +2801,18 @@ static void rl_refuse(int nw, const char* why)
     rl_raise_int();
 }
 
+/* P1129(D-137): R<EOT の READ DATA を拒否したときの受付時 DMAC CH0 の生値と不成立項目(why)。拒否の分母は sum 行の rd_multi=ref_mtc */
+static void rl_log_multi_refused(uint8_t r, uint8_t eot, uint8_t n, const char* why)
+{
+    if (s_rl_multi_ref_lines >= FU_LOG_LIMIT) return;
+    s_rl_multi_ref_lines++;
+    debug_log(P1009_TAG " multi_refused f=%d cmd=0x%02x us_mx=0x%02x R=%u EOT=%u N=%u req_secs=%u why=%s MTC=0x%04x BTC=0x%04x"
+              " OCR=0x%02x CCR=0x%02x DCR=0x%02x CSR=0x%02x nd=%d\n",
+              g_mx68k_frame_num, (unsigned)s_rl_cmd[0], (unsigned)s_rl_us_mx, (unsigned)r, (unsigned)eot, (unsigned)n,
+              (unsigned)(eot - r + 1u), why, (unsigned)DMA[0].MTC, (unsigned)DMA[0].BTC, (unsigned)DMA[0].OCR,
+              (unsigned)DMA[0].CCR, (unsigned)DMA[0].DCR, (unsigned)DMA[0].CSR, s_rl_spec_nd);
+}
+
 static void rl_read_begin(void)
 {
     const uint8_t* p = s_rl_cmd;   /* [0]cmd [1]US/HD [2]C [3]H [4]R [5]N [6]EOT [7]GPL [8]DTL */
@@ -2816,10 +2839,13 @@ static void rl_read_begin(void)
     s_rl_read_begin++;
     s_rl_rp_total++;
     debug_log(P1009_TAG " read begin f=%d gen=%u C=%u H=%u R=%u N=%u EOT=%u GPL=0x%02x DTL=0x%02x MT=%u cmd=0x%02x us_mx=0x%02x us_dev=0x%02x"
-              " MTC=0x%04x MAR=0x%06x OCR=0x%02x CSR=0x%02x\n",
+              " MTC=0x%04x MAR=0x%06x OCR=0x%02x CSR=0x%02x multi=%d req_secs=%u CCR=0x%02x BTC=0x%04x DCR=0x%02x\n",
               g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(), p[2], p[3], p[4], p[5], p[6], p[7], p[8],
               (unsigned)(p[0] >> 7), p[0], (unsigned)s_rl_us_mx, (unsigned)(p[1] & 7u),
-              (unsigned)DMA[0].MTC, (unsigned)(DMA[0].MAR & 0xFFFFFFu), (unsigned)DMA[0].OCR, (unsigned)DMA[0].CSR);
+              (unsigned)DMA[0].MTC, (unsigned)(DMA[0].MAR & 0xFFFFFFu), (unsigned)DMA[0].OCR, (unsigned)DMA[0].CSR,
+              /* P1129(D-137): 末尾追加のみ。req_secs は multi=1 のとき EOT-R+1(生値 R/EOT は同じ行にある)、それ以外 1 */
+              s_rl_rd_multi, s_rl_rd_multi ? (unsigned)(p[6] - p[4] + 1u) : 1u,
+              (unsigned)DMA[0].CCR, (unsigned)DMA[0].BTC, (unsigned)DMA[0].DCR);
     rl_ft_note_issue(p[0]);   /* P1126(G-FT): 発行時の bringup クリア回数 */
     if (rl_send_cmd("read") < 0) {
         /* 送信失敗(fault)。装置へは何も届いていない扱いで合成エラー */
@@ -3021,8 +3047,9 @@ static void rl_read_frame_done(void)
     /* P1116/P1120: 書込み安全フックは READ DATA のときだけ適用する(許可リスト)。READ DATA 以外
      * (DIAG: 要求 CHRN のセクタとは限らない[P1116]、DELETED: DDAM セクタが ST2=0 で読め、柵が開くと後続の
      * WRITE DATA が DDAM→DAM へ書き換え得る[P1120])は書込み安全フックへ流さない。新しい読取り系コマンドを
-     * 中継に加えても、ここに明示しない限りフック対象外になる(既定で安全側) */
-    if (s_rl_rd_cmd5 == 0x06u) {
+     * 中継に加えても、ここに明示しない限りフック対象外になる(既定で安全側)。
+     * P1129(D-137): READ DATA でも R<EOT の受理形(s_rl_rd_multi)は同じ方針で対象外にする(新しい受理形は明示するまでフック対象外) */
+    if (s_rl_rd_cmd5 == 0x06u && !s_rl_rd_multi) {
         rl_ar_on_read_ok(n);   /* P1037: armed の武装・照合(armed 以外では何もしない) */
         rl_nm_on_read_ok(n);   /* P1053: normal の柵解除・照合(normal 以外では何もしない) */
         /* P1035: mode1 の読み戻しベリファイ(ログ機械照合のみ。ゲストへ返すデータ・リザルトには影響しない) */
@@ -3051,6 +3078,7 @@ static void rl_read_frame_done(void)
     } else {
         if (s_rl_rd_is_diag) s_rl_diag_hook_skip++;
         if (s_rl_rd_is_rdel) s_rl_rdel_hook_skip++;   /* P1120 */
+        if (s_rl_rd_multi) s_rl_rd_multi_hook_skip++;   /* P1129 */
     }
     int all_same = (n > 0);
     for (uint32_t i = 0; i < n; i++) if (s_rl_frame[i] != s_rl_frame[0]) { all_same = 0; break; }
@@ -3080,7 +3108,22 @@ static void rl_read_frame_done(void)
         s_rl_synth_after_read = 1;
         return;
     }
-    s_rl_supply_n = n;
+    /* P1129(D-137): R<EOT の受理形は払出し量を受付時 MTC で打ち切る(参照2実装 XEiJ+t FUK.java:937-945 / XM6t fdc_bridger.h:904-907
+     * と同じく MTC を超える装置データは捨てる)。FNV・read data/dump ログは上で受信した n バイト全体のまま */
+    uint32_t n_sup = n;
+    s_rl_verify_trunc = 0;
+    if (s_rl_rd_multi) {
+        s_rl_rd_multi_ok++;
+        if (n > s_rl_rd_multi_mtc) {
+            s_rl_rd_multi_trunc++;
+            n_sup = s_rl_rd_multi_mtc;
+            s_rl_verify_trunc = 1;
+            s_rl_verify_ref_fnv = rl_fnv(s_rl_frame, n_sup);
+        } else if (n < s_rl_rd_multi_mtc) {
+            s_rl_rd_multi_short++;
+        }
+    }
+    s_rl_supply_n = n_sup;
     s_rl_supply_pos = 0;
     s_rl_mar0_valid = 0;
     s_rl_state = RL_RD_SUPPLY;
@@ -6048,11 +6091,40 @@ static void rl_exec(void)
 {
     uint8_t cmd = s_rl_cmd[0] & 0x1Fu;
     switch (cmd) {
-    case 6: {   /* READ DATA: 単一セクタ(MT=0 かつ R==EOT)かつ N<=6 のみ中継(FU_FRAME_CAP は N=7 まで収容できるが、
-                 * READ DATA で N=7 の観測例が無いため据置。P1119/D-136 でコメントを実装に合わせて訂正) */
+    case 6: {   /* READ DATA: MT=0 かつ N<=6 のうち、R==EOT(単一セクタ)と、P1129(D-137)の R<EOT 受理形だけ中継する
+                 * (FU_FRAME_CAP は N=7 まで収容できるが、READ DATA で N=7 の観測例が無いため据置。P1119/D-136)。
+                 * R<EOT: 装置ファームは EOT によらず 128<<N バイトで TC を出して終える(TNB:app.c:1677, 1727-1731)ので、
+                 * ゲストの DMA 期待量がちょうど 1 セクタ分と DMAC の構成上確定するときだけ受理する:
+                 * 1<=N、ND=0、チェイン無し(OCR bit3)、コンティニュー無し(CCR bit6)、1カウント1バイト(Core:x68k/dmac.c:238 の
+                 * switch 添字 0/3/4)、受付時 MTC==128<<N。それ以外の R<EOT は multi_sector_mtc で拒否(参照実装との既知の乖離)。
+                 * R>EOT は従来どおり multi_sector で拒否 */
         int mt = (s_rl_cmd[0] >> 7) & 1;
         uint8_t r = s_rl_cmd[4], n = s_rl_cmd[5], eot = s_rl_cmd[6];
-        if (mt || r != eot || n > 6u) { rl_refuse(0, mt ? "mt" : (r != eot ? "multi_sector" : "n_too_large")); return; }
+        if (mt || r > eot || n > 6u) {
+            if (!mt && r > eot) s_rl_rd_multi_ref_r++;
+            rl_refuse(0, mt ? "mt" : (r > eot ? "multi_sector" : "n_too_large"));
+            return;
+        }
+        s_rl_rd_multi = 0;
+        if (r < eot) {
+            unsigned sz = ((DMA[0].OCR >> 4) & 3u) + ((DMA[0].DCR >> 1) & 4u);   /* Core:x68k/dmac.c:238 の switch 添字 */
+            const char* why = n < 1u                                  ? "n0"
+                            : s_rl_spec_nd                            ? "nd"
+                            : (DMA[0].OCR & 0x08u)                    ? "chain"
+                            : (DMA[0].CCR & 0x40u)                    ? "cnt"
+                            : !(sz == 0u || sz == 3u || sz == 4u)     ? "size"
+                            : DMA[0].MTC != (uint16_t)(128u << n)     ? "mtc"
+                            : NULL;
+            if (why) {
+                s_rl_rd_multi_ref_mtc++;
+                rl_log_multi_refused(r, eot, n, why);
+                rl_refuse(0, "multi_sector_mtc");
+                return;
+            }
+            s_rl_rd_multi = 1;
+            s_rl_rd_multi_mtc = DMA[0].MTC;
+            s_rl_rd_multi_begin++;
+        }
         rl_read_begin();
         return;
     }
@@ -6066,6 +6138,7 @@ static void rl_exec(void)
         if (r != eot)                        { rl_refuse(0, "diag_multi"); return; }
         if (n < 1u || n > 7u)                { rl_refuse(0, "diag_n"); return; }
         if (s_rl_fmt1_verify_pending || s_nmf_verify_pending) { rl_refuse(0, "diag_fmt_verify_pending"); return; }
+        s_rl_rd_multi = 0;   /* P1129: rl_read_begin の全呼出し元で明示設定する */
         rl_read_begin();
         return;
     }
@@ -6076,6 +6149,7 @@ static void rl_exec(void)
         if ((s_rl_cmd[0] & 0xA0u) != 0u) { rl_refuse(0, "rdel_sk_mt"); return; }
         if (r != eot)                    { rl_refuse(0, "rdel_multi"); return; }
         if (n < 1u || n > 6u)            { rl_refuse(0, "rdel_n"); return; }
+        s_rl_rd_multi = 0;   /* P1129: rl_read_begin の全呼出し元で明示設定する */
         rl_read_begin();
         return;
     }
@@ -6866,16 +6940,19 @@ static void rl_verify(void)
     else if (!(s_rl_ocr0 & 0x80u))                         skip = "not_dev_to_mem";
     else if (((mar_now - s_rl_mar0) & 0xFFFFFFu) != n)     skip = "mar_delta";
     else if (s_rl_mar0 + n > 0xC00000u)                    skip = "not_ram";   /* 副作用の無い RAM 域に限る */
+    /* P1129(D-137): 払出しを打ち切った読出しは、払出し分(n バイト)だけで計算した FNV と比べる(末尾の trunc= は追加のみ) */
+    uint32_t ref = s_rl_verify_trunc ? s_rl_verify_ref_fnv : s_rl_frame_fnv;
     if (skip) {
-        debug_log(P1009_TAG " read verify f=%d MAR0=0x%06x MAR_now=0x%06x n=%u skip=%s frame_fnv=0x%08x\n",
-                  g_mx68k_frame_num, (unsigned)s_rl_mar0, (unsigned)mar_now, (unsigned)n, skip, (unsigned)s_rl_frame_fnv);
+        debug_log(P1009_TAG " read verify f=%d MAR0=0x%06x MAR_now=0x%06x n=%u skip=%s frame_fnv=0x%08x trunc=%d\n",
+                  g_mx68k_frame_num, (unsigned)s_rl_mar0, (unsigned)mar_now, (unsigned)n, skip, (unsigned)ref,
+                  s_rl_verify_trunc);
         return;
     }
     uint32_t h = 2166136261u;
     for (uint32_t i = 0; i < n; i++) h = (h ^ dma_readmem24(s_rl_mar0 + i)) * 16777619u;
-    debug_log(P1009_TAG " read verify f=%d MAR0=0x%06x n=%u guest_fnv=0x%08x frame_fnv=0x%08x p1008_ref=0x%08x match=%d\n",
-              g_mx68k_frame_num, (unsigned)s_rl_mar0, (unsigned)n, (unsigned)h, (unsigned)s_rl_frame_fnv,
-              (unsigned)FU_P1008_REF_FNV, h == s_rl_frame_fnv ? 1 : 0);
+    debug_log(P1009_TAG " read verify f=%d MAR0=0x%06x n=%u guest_fnv=0x%08x frame_fnv=0x%08x p1008_ref=0x%08x match=%d trunc=%d\n",
+              g_mx68k_frame_num, (unsigned)s_rl_mar0, (unsigned)n, (unsigned)h, (unsigned)ref,
+              (unsigned)FU_P1008_REF_FNV, h == ref ? 1 : 0, s_rl_verify_trunc);
 }
 
 /* P1089(B-6): 能動的な flush 確認。dirty 中に最後の書込み送信から FU_WC_IDLE_CONFIRM_MS 書込みが途絶え、状態機械が
@@ -7092,7 +7169,8 @@ static void rl_log_sum(void)
               " rebringup_inline=%u/%u/%u diag_begin=%u diag_ok=%u diag_hook_skip=%u se_rd_n=%u ejg_supp=%u"
               " rdel_begin=%u rdel_ok=%u rdel_hook_skip=%u"
               " ndm_rd=%u ndm_msr=%u/%u sup_done=cpu:%u,dma:%u sup_cur=%s wr_sends=%u"
-              " rd_e5r=%u/%u/%u/%u wait_max_us=%lld rde5_p1_fail=%u rde5_p1_us_max=%lld rd_e5r_nb_nr=%u/%u\n",
+              " rd_e5r=%u/%u/%u/%u wait_max_us=%lld rde5_p1_fail=%u rde5_p1_us_max=%lld rd_e5r_nb_nr=%u/%u"
+              " rd_multi=begin:%u,ok:%u,trunc:%u,short:%u,hook_skip:%u,ref_mtc:%u,ref_r:%u\n",
               (unsigned)g_mx68k_frame_num, (unsigned)mx68k_floppyu_usb_generation(),
               s_rl_last_mode == 1 ? "relay" : "stub", s_rl_reason ? s_rl_reason : "-", hr, hs, hf,
               (unsigned)s_rl_read_begin, (unsigned)s_rl_read_ok, (unsigned)s_rl_read_err[RE_TIMEOUT],
@@ -7130,7 +7208,11 @@ static void rl_log_sum(void)
               /* P1125(D-146): total/waited_ok/supp/cache_hit、待ち時間・待った後の問合せの失敗数と所要時間の最大、nobit/norelay */
               (unsigned)s_rl_rd_e5r_total, (unsigned)s_rl_rd_e5r_waited_ok, (unsigned)s_rl_rd_e5r_supp,
               (unsigned)s_rl_rd_e5r_cache_hit, (long long)s_rl_rd_e5r_wait_max_us, (unsigned)s_rl_rde5_p1_fail,
-              (long long)s_rl_rde5_p1_us_max, (unsigned)s_rl_rd_e5r_nobit, (unsigned)s_rl_rd_e5r_norelay);
+              (long long)s_rl_rde5_p1_us_max, (unsigned)s_rl_rd_e5r_nobit, (unsigned)s_rl_rd_e5r_norelay,
+              /* P1129(D-137): 受理/払出し完了/打切り/装置転送量<MTC/フック除外/MTC・ND・DMAC構成で拒否/R>EOT で拒否 */
+              (unsigned)s_rl_rd_multi_begin, (unsigned)s_rl_rd_multi_ok, (unsigned)s_rl_rd_multi_trunc,
+              (unsigned)s_rl_rd_multi_short, (unsigned)s_rl_rd_multi_hook_skip, (unsigned)s_rl_rd_multi_ref_mtc,
+              (unsigned)s_rl_rd_multi_ref_r);
     /* P1052: 既存の集計行の書式は変えず、別の1行で出す */
     debug_log(P1052_TAG " sum f=%u D=%u d=%u pend_set=%u coalesced=%u raised=%u masked=%u deferred_irq1=%u"
               " deferred_cdef=%u deferred_wr=%u defer_streak_max=%u requeued=%u requeued_ext=%u inflight=%d acked=%u"
@@ -7639,6 +7721,8 @@ static void rl_install_reset(void)
     /* P1120: 同様に cmd5/rdel フラグだけリセット。rdel 計数は diag 計数と同じくプロセス寿命 */
     s_rl_rd_cmd5 = 0;
     s_rl_rd_is_rdel = 0;
+    s_rl_rd_multi = 0;             /* P1129: フラグのみ(rd_multi 計数はプロセス寿命) */
+    s_rl_verify_trunc = 0;
     s_rl_spec_capturing = 0;
     s_rl_spec_nd = 0;              /* P1122(D-136): リセットで DMA モードへ戻す(s_rl_spec[]/s_rl_spec_valid は bringup 再送用に保持) */
     s_rl_rd_nd = 0;
