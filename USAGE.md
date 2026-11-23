@@ -177,7 +177,7 @@ TNB製作所製の「ふろっぴU君」をUSBで接続すると、実機の5イ
 - ディスクの読み書きは、通常どおりHuman68kから行います（`DIR`、`COPY`、`FORMAT.X`など）。
 - ディスクを交換した直後は、そのドライブを一度読むまで書き込みが拒否されることがあります。「書込み禁止」エラーが出たら「中止」を選び、そのドライブで`DIR`を実行してから操作をやり直してください。それでも出る場合は、安全のため書き込みが停止しています（表示が「書込み: 再起動まで停止中」）。MX68Kを再起動してください。
 - マルチセクタ書き込みなど一部の書き込み要求は、安全のため「書込み禁止」エラーで拒否します。
-- FORMATは、標準2HD（1024バイト×8セクタ）で物理フォーマット済みのディスクの再フォーマットのみ対応します（未フォーマットのディスクや他の物理形式は不可）。同じディスクへのFORMATは続けて2回まで（ディスクを入れ直すと再びFORMATできます）。物理シリンダ77はFORMATしません（XEiJ・XM6と同じ）。FORMATが途中で止まった場合は「FORMAT: 再起動まで停止中 — ディスクが途中まで初期化されている可能性があります」と表示されるので、MX68Kを再起動してください。
+- FORMATは、標準2HD（1024バイト×8セクタ）で物理フォーマット済みのディスクの再フォーマットのみ対応します（未フォーマットのディスクや他の物理形式は不可）。同じディスクへのFORMATは続けて2回まで（ディスクを入れ直すと再びFORMATできます）。物理シリンダ77はFORMATしません（XEiJ・XM6と同じ）。FORMATが途中で止まった場合、装置の状態によっては再起動不要でそのまま次のFORMATへ進めることがあります（ディスクが途中まで初期化されている可能性があります）。装置の状態が分からない場合のみ「FORMAT: 再起動まで停止中」と表示されるので、その場合はMX68Kを再起動してください。
 - 書き込み・FORMATの対象には、ゲーム原盤などのディスクも含まれ得ます。大切なディスクは書込み保護タブで保護してください。また、アクセス中にディスクを取り出さないでください。
 
 **English:**
@@ -203,7 +203,7 @@ While FloppyU is in use, the assigned drives use the FloppyU drives instead of a
 - Read and write disks from Human68k as usual (`DIR`, `COPY`, `FORMAT.X`, etc.).
 - Right after a disk swap, writes to that drive may be refused until the drive has been read once. If Human68k reports a write-protect (書込み禁止) error, choose "中止" (Abort), run `DIR` on that drive, and retry. If the error persists, writing has been stopped for safety (the status shows "Writing: Stopped until restart") — restart MX68K.
 - Some write requests, such as multi-sector writes, are refused with a "write-protected" error for safety.
-- FORMAT only re-formats disks already physically formatted as standard 2HD (1024 bytes × 8 sectors) — unformatted disks and other physical formats are not supported. The same disk can be formatted at most twice in a row (re-inserting the disk allows formatting again). Physical cylinder 77 is not formatted (same as XEiJ and XM6). If FORMAT stops partway, the status shows "Formatting: Stopped until restart — the disk may be partially formatted"; restart MX68K.
+- FORMAT only re-formats disks already physically formatted as standard 2HD (1024 bytes × 8 sectors) — unformatted disks and other physical formats are not supported. The same disk can be formatted at most twice in a row (re-inserting the disk allows formatting again). Physical cylinder 77 is not formatted (same as XEiJ and XM6). If FORMAT stops partway, depending on the drive's state it may be possible to continue with the next FORMAT without restarting (the disk may be partially formatted). Only when the drive's state is unknown does the status show "Formatting: Stopped until restart" — in that case, restart MX68K.
 - Writing and FORMAT can also reach disks such as original game disks. Protect important disks with their write-protect tab, and do not eject a disk while it is being accessed.
 
 ### ハードディスク（SASI/SCSI）・MO・CD-ROM / Hard Disks (SASI/SCSI), MO, CD-ROM
