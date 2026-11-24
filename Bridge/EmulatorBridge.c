@@ -4455,6 +4455,55 @@ void mx68k_run_frame(void) {
     int32_t vline_total_val = (crtc_vline_total > 0) ? crtc_vline_total
                             : ((VLINE_TOTAL > 0) ? VLINE_TOTAL : 567);
 
+#if P1134_PROBE_ENABLE
+    /* P1134 (D-135): [P1134-ENV] 初回 + 入力(CRTC R00-R08・R20・HRL・MFP VR/TACR・クロック)の
+     * 変化時のみ 1 行(最大32行)。CRTC は生バイト(R_N = [2N]上位,[2N+1]下位)で出し、実機フレーム
+     * 周期は解析時に一次資料の式から独立計算する(MX の導出値 frame_clocks_10m は併記のみ)。
+     * IERx/IMRx/TADR はドライバが頻繁に書換え得る・TADR はライブカウンタなので変化検知に使わず、
+     * 出力時のスナップショットとしてのみ併記する。 */
+    {
+        static uint8_t  s_p1134_env_prev[32];
+        static int      s_p1134_env_init = 0;
+        static uint32_t s_p1134_env_lines = 0;
+        uint8_t cur[32];
+        memcpy(cur, CRTC_Regs, 18);                    /* R00-R08 */
+        cur[18] = CRTC_Regs[0x28]; cur[19] = CRTC_Regs[0x29];   /* R20 */
+        cur[20] = (uint8_t)((SysPort[4] >> 1) & 1);    /* HRL */
+        cur[21] = MFP[MFP_VR];
+        cur[22] = MFP[MFP_TACR];
+        cur[23] = (uint8_t)g_clock_mhz;
+        cur[24] = (uint8_t)s_p808_overshoot_fix;
+        cur[25] = (uint8_t)m68000_cpu_backend_is_musashi();
+        memset(cur + 26, 0, sizeof(cur) - 26);
+        if ((!s_p1134_env_init || memcmp(cur, s_p1134_env_prev, sizeof(cur)) != 0)
+            && s_p1134_env_lines < 32u) {
+            s_p1134_env_lines++;
+            char crtc[160];
+            int lc = 0;
+            crtc[0] = '\0';
+            for (int r = 0; r < 9; r++)
+                lc += snprintf(crtc + lc, sizeof(crtc) - (size_t)lc, "R%02d=$%02x%02x ",
+                               r, (unsigned)CRTC_Regs[2 * r], (unsigned)CRTC_Regs[2 * r + 1]);
+            debug_log("[P1134-ENV] f=%d first=%d clock_mhz=%d clk_num=%d clk_den=%d overshoot_fix=%d "
+                      "cpu_core=%s cpu_model=%d | %sR20=$%02x%02x HRL=%u | VR=$%02x IERA=$%02x IERB=$%02x "
+                      "IMRA=$%02x IMRB=$%02x TACR=$%02x TADR=$%02x | frame_clocks_10m=%d "
+                      "active_vline=%d ctx_unavailable=%d lines=%u/32\n",
+                      g_mx68k_frame_num, s_p1134_env_init ? 0 : 1, g_clock_mhz,
+                      (int)clk_num, (int)clk_den, (int)s_p808_overshoot_fix,
+                      m68000_cpu_backend_is_musashi() ? "musashi" : "c68k", g_wired_cpu_model,
+                      crtc, (unsigned)CRTC_Regs[0x28], (unsigned)CRTC_Regs[0x29],
+                      (unsigned)cur[20], (unsigned)MFP[MFP_VR], (unsigned)MFP[MFP_IERA],
+                      (unsigned)MFP[MFP_IERB], (unsigned)MFP[MFP_IMRA], (unsigned)MFP[MFP_IMRB],
+                      (unsigned)MFP[MFP_TACR], (unsigned)MFP[MFP_TADR],
+                      (int)g_p641_frame_clocks_10m, (int)vline_total_val,
+                      P602_ENABLE ? 0 : 1, (unsigned)s_p1134_env_lines);
+            memcpy(s_p1134_env_prev, cur, sizeof(cur));
+            s_p1134_env_init = 1;
+        }
+    }
+    p1134_frame_begin(g_p641_frame_clocks_10m);   /* P1134 [P1134-TBASE]: Σフレーム予算(名目10MHz) */
+#endif
+
     /* P26-DIAG: IPL範囲でのPC固着を診断（frame 0〜5のみ） */
     if (frame_num <= 5) {
         uint32_t cur_pc = C68k_Get_PC(&C68K);
@@ -5118,6 +5167,9 @@ void mx68k_run_frame(void) {
             /* P181: DMAC ch0 は FDD 専用。ACT ビットが立つ = 実ディスク R/W 中
              * (seek/select/poll では立たない)。実転送時のみアクセスランプを点灯する。 */
             if (DMA[0].CSR & 0x08u) mx68k_fdd_note_rw();
+#if P1134_PROBE_ENABLE
+            if (DMA[0].CSR & 0x08u) p1134_dma0_act_note();   /* P1134: ロード中フレームの判定(読取りのみ) */
+#endif
 #if P136_ENABLE
             p136_poll(P136_DMA0, vl);
 #endif
@@ -5155,7 +5207,17 @@ void mx68k_run_frame(void) {
             // OPM / ADPCM タイマー (毎ライン)
             // P149: ライン単位の clkdiv 正規化済みクロック(MPX clk_line = line_usedclk)を供給する。
             // 生の sc ではない — Edit A の clkdiv スケーリング後は、生の sc だと FM/ADPCM が速く回りすぎる。
+#if P1134_PROBE_ENABLE
+            /* P1134 (D-135) [P1134-OPMIRQ]: OPM_Read は ReadStatus()=status&3 を返すだけで
+             * 副作用なし(Core:fmgen/opm.h:89、fmg_wrap.cpp:131-137)。前後差分で新規に立った
+             * ビットと、他ビット既セット中の立上り(fmgen のみ追加 MFP_Int(12))を数える。 */
+            uint8_t p1134_st_pre   = OPM_Read(0);
+            uint8_t p1134_iprb_pre = MFP[MFP_IPRB];
+#endif
             OPM_Timer((uint32_t)line_usedclk);
+#if P1134_PROBE_ENABLE
+            p1134_opm_timer_note(p1134_st_pre, OPM_Read(0), p1134_iprb_pre, line_usedclk);
+#endif
             ADPCM_PreUpdate((uint32_t)line_usedclk);
             /* P488: MIDI ボードのタイマー更新 + 送出キューのフラッシュ。
              * 呼出位置は参照実装 px68k-libretro libretro/winx68k.cpp:483 と同一
@@ -5981,6 +6043,11 @@ void mx68k_run_frame(void) {
      * 出力する。P492 と同じ位置(frame_num++ の前 = g_mx68k_frame_num が当該
      * フレームの番号のままの時点)・同じ 300 フレーム周期(ゲートは関数側)。 */
     p602_periodic_dump();
+#endif
+#if P1134_PROBE_ENABLE
+    /* P1134 (D-135): [P1134-KEYON]/[P1134-OPMIRQ]/[P1134-TBASE] を 300 フレームごとに出す
+     * (P602 と同じ位置・同じ周期、ゲートは関数側)。 */
+    p1134_periodic_dump();
 #endif
     /* P509 (D-48): FDC コマンドヒストグラム + 強制 READY モデルの出力。
      * P492 と同じ 300 フレーム周期(ゲートは関数側)。 */

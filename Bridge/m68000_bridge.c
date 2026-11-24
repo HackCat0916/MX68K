@@ -23,6 +23,7 @@
 #include "mx_cpu_iface.h"              /* P860: CPUコア抽象層(実装はファイル末尾の「mx_cpu_* 実装」節) */
 #include "mx_cpu_musashi.h"            /* P868: Musashiバックエンド(Musashi本体のヘッダは含めない——P867のinclude規約) */
 #include "floppyu_fdc_passthrough_probe.h"   /* P1123: OPM データ書込みフック(ふろっぴU君の強制READY 中継) */
+#include "../Core/px68k/fmgen/fmg_wrap.h"   /* P1135 (D-135): OPM_Read() 副作用なし読取り */
 #include <string.h>                    /* P47-D: リセット用の memset */
 #include <stdio.h>                     /* P214-R2: プローブの1行サマリ用 snprintf */
 #include <time.h>                      /* P518: p424_now_ns() 用の clock_gettime/struct timespec */
@@ -1578,6 +1579,10 @@ void p479_opm_shadow_reset(void) {
     g_opm_curreg = 0;
 }
 
+#if P1134_PROBE_ENABLE
+static void p1134_opm_write_note(uint8_t reg, uint8_t val);   /* 本体は P602 ブロック直前 */
+#endif
+
 /* 実書込の前に trace_Memory_WriteB/W から無条件に呼ばれる。
  * ゲストに対しては read-only: 記録するのみで、val を変更することは無い。 */
 static void p479_opm_shadow_note(uint32_t addr_raw, uint32_t val, int is_word) {
@@ -1615,6 +1620,10 @@ static void p479_opm_shadow_note(uint32_t addr_raw, uint32_t val, int is_word) {
         /* P1123(D-143): ふろっぴU君の強制READY 中継(OPM データ書込みの bit6 を見る、XEiJ+t/XM6t と同じ)。
          * ゲストに対しては read-only(v を変更しない)。振り分け器が無効なら即 return */
         mx68k_floppyu_fdcpt_note_opm_data(g_opm_curreg, v);
+#if P1134_PROBE_ENABLE
+        /* P1134 (D-135): KEYON/$14 等の計数のみ(v は変更しない) */
+        p1134_opm_write_note(g_opm_curreg, v);
+#endif
     }
 }
 
@@ -24031,6 +24040,372 @@ extern uint64_t g_p986_rom30_rd;            /* ROM30から返した回数 */
 extern uint64_t g_p986_scsiin_suppressed;   /* P254のSCSIINROM上書きを抑止した回数 */
 extern uint64_t g_p986_rom_rd_total;        /* $FC0000-$FFFFFF 分岐に入った総回数(分母) */
 
+#if P1134_PROBE_ENABLE
+/* ====================================================================
+ *  P1134 (D-135): BGM トラック間ズレの時間源切り分けプローブ(観測専用)。
+ *  Fix Plan: .mx68k_cycles/P1134_plan.md(記号表・自己反証可能性表)。
+ *
+ *  割込み文脈の判定(OPM 書込みがどの割込みハンドラ内で起きたか):
+ *   p602_on_vec_fetch() はベクタ表の long 境界 read すべてで呼ばれ、例外発火と
+ *   データとしての read を区別しない。そこで3段のフィルタを課す。
+ *   F1: A7 が偶数かつ妥当範囲(P602 の frame_ok と同条件)。
+ *   F2: live SR が S=1・IPL=6 かつスタック上の SR の IPL<6。c68k の割込み受付
+ *       (Core:c68k/c68kmac.inc CHECK_INT)は A7/USP 交換 → PC/SR の push →
+ *       flag_S/flag_I の更新 → ベクタ read の順なので、ベクタ read 時点で両方が
+ *       観測可能(実装時に読取りで確認、P1134_impl.md 参照)。
+ *   F3: 候補を保持し、次のチャンク先頭 PC がハンドラ先頭から +0x1000 以内なら確定、
+ *       範囲外なら破棄。候補保持中の OPM 書込みは unconfirmed に計上する。
+ *  確定した文脈は書込み時点の IPL>=6 の間だけ有効(IPL<6 は main)。
+ *  受付累計の分母は IACK フック(mx68k_diag_irqh_callback)で独立に数える。
+ *  ベクタ番号の v43 等の表記は VR=$40 を前提にした名前で、実際の判定は
+ *  MFP VR の上位4bit からの相対位置で行う(VR 生値は [P1134-ENV] に出る)。
+ * ==================================================================== */
+#define P1134_CTX_MAIN   0
+#define P1134_CTX_V43    1   /* GPIP3 = OPM IRQ */
+#define P1134_CTX_V46    2   /* GPIP4 = V-DISP */
+#define P1134_CTX_V4D    3   /* Timer A */
+#define P1134_CTX_V44    4   /* Timer D */
+#define P1134_CTX_V45    5   /* Timer C */
+#define P1134_CTX_OTHER  6
+#define P1134_CTX_UNCONF 7
+#define P1134_NCTX       8
+#define P1134_HANDLER_MAX_LINES 16u
+#define P1134_CONFIRM_SPAN      0x1000u
+
+static const char* const s_p1134_ctx_name[P1134_NCTX] = {
+    "main", "v43", "v46", "v4D", "v44", "v45", "other", "unconf"
+};
+
+static uint32_t s_p1134_keyon[8][P1134_NCTX];
+static uint32_t s_p1134_keyoff[8][P1134_NCTX];
+static uint32_t s_p1134_ctx_wr[P1134_NCTX];
+static uint32_t s_p1134_opm_wr_total = 0;
+static uint32_t s_p1134_ipl_hist[8];
+static uint32_t s_p1134_isr_nz = 0;          /* 書込み時に ISRA|ISRB != 0 だった回数 */
+static uint32_t s_p1134_r14_hist[256];
+static uint8_t  s_p1134_r10 = 0, s_p1134_r11 = 0, s_p1134_r12 = 0;
+
+/* 文脈フィルタの段階別生カウント */
+static uint32_t s_p1134_vread_total = 0;     /* MFP ベクタ域の long read 総数 */
+static uint32_t s_p1134_pass_frame  = 0;     /* F1 通過 */
+static uint32_t s_p1134_pass_sr     = 0;     /* F2 通過 */
+static uint32_t s_p1134_iack_match  = 0;     /* F2 通過のうち直前 IACK のベクタと一致 */
+static uint32_t s_p1134_confirmed   = 0;     /* F3 確定 */
+static uint32_t s_p1134_rejected    = 0;     /* F3 破棄(範囲外 + 未確定のまま次候補に上書き) */
+static uint32_t s_p1134_superseded  = 0;     /* rejected のうち次候補による上書き分 */
+static uint32_t s_p1134_confirmed_ctx[P1134_NCTX];
+
+static int      s_p1134_cand_valid  = 0;
+static uint32_t s_p1134_cand_vec    = 0;
+static uint32_t s_p1134_cand_target = 0;
+static int      s_p1134_cur_ctx     = -1;    /* 確定済み文脈(-1 = なし) */
+
+/* IACK(受付)累計 —— 文脈フィルタとは独立の分母 */
+static uint32_t s_p1134_iack[256];
+static uint32_t s_p1134_iack_l6_total = 0;
+static int32_t  s_p1134_last_iack_vec = -1;
+static int      s_p1134_frame_l1_iack = 0;
+
+/* [P1134-HANDLER] */
+static uint32_t s_p1134_handler_last[256];
+static uint8_t  s_p1134_handler_seen[256];
+static uint32_t s_p1134_handler_lines = 0;
+
+/* [P1134-OPMIRQ] */
+static uint64_t s_p1134_lines_total = 0;
+static uint64_t s_p1134_status_nz_lines = 0;
+static uint32_t s_p1134_rise_a = 0, s_p1134_rise_b = 0;
+static uint32_t s_p1134_hidden_edge = 0;     /* 下限: 同一ライン同時立上りを除く */
+static uint32_t s_p1134_both_same_line = 0;
+static uint32_t s_p1134_hidden_iprb_pre = 0; /* hidden_edge のうち直前に IPRB bit3 が保留中だった回数 */
+
+/* [P1135-VECSTAT] (D-135): v43ベクタフェッチ確定時、その瞬間のOPMステータスが
+ * 既に0(=保留中のTimer A/B要因が無い)だったかを数える。H7仮説
+ * (fmgenのSetStatus/ResetStatus非対称性による「空振り割込み」)の直接実測。 */
+static uint8_t  s_p1135_cand_opm_st    = 0xFFu;  /* 候補捕捉時のstatus、0xFF=未捕捉 */
+static uint32_t s_p1135_v43_status_zero = 0;     /* 確定v43のうちstatus==0だった件数 */
+
+/* [P1134-TBASE] */
+static uint64_t s_p1134_sum_line_clk = 0;
+static uint64_t s_p1134_sum_frame_clk = 0;
+static uint32_t s_p1134_frames = 0;
+static uint32_t s_p1134_l1_frames = 0;       /* レベル1 IACK(FDC/FDD/SASI/SCSI 共用)があったフレーム数 */
+static uint32_t s_p1134_dma0_frames = 0;     /* DMAC ch0 ACT のラインがあったフレーム数 */
+static int      s_p1134_frame_dma0 = 0;
+static int      s_p1134_frame_open = 0;
+
+static int p1134_ctx_of_vec(uint32_t n) {
+    if ((n & 0xF0u) != (uint32_t)(MFP[MFP_VR] & 0xF0u)) return P1134_CTX_OTHER;
+    switch (n & 0x0Fu) {
+        case 0x3u: return P1134_CTX_V43;
+        case 0x6u: return P1134_CTX_V46;
+        case 0xDu: return P1134_CTX_V4D;
+        case 0x4u: return P1134_CTX_V44;
+        case 0x5u: return P1134_CTX_V45;
+        default:   break;
+    }
+    return P1134_CTX_OTHER;
+}
+
+static void p1134_opm_write_note(uint8_t reg, uint8_t val) {
+    s_p1134_opm_wr_total++;
+    int ctx;
+    if (mx_cpu_be_musashi()) {
+        ctx = P1134_CTX_OTHER;   /* c68k 経路のみが対象 */
+    } else {
+        uint32_t sr  = (uint32_t)C68k_Get_SR(&C68K);
+        uint32_t ipl = (sr >> 8) & 7u;
+        s_p1134_ipl_hist[ipl]++;
+        if (ipl < 6u)                  ctx = P1134_CTX_MAIN;
+        else if (s_p1134_cand_valid)   ctx = P1134_CTX_UNCONF;
+        else if (s_p1134_cur_ctx >= 0) ctx = s_p1134_cur_ctx;
+        else                           ctx = P1134_CTX_OTHER;
+    }
+    if (MFP[MFP_ISRA] | MFP[MFP_ISRB]) s_p1134_isr_nz++;
+    s_p1134_ctx_wr[ctx]++;
+    switch (reg) {
+        case 0x08: {
+            uint32_t ch = val & 7u;
+            if ((val >> 3) & 0x0Fu) s_p1134_keyon[ch][ctx]++;
+            else                    s_p1134_keyoff[ch][ctx]++;
+            break;
+        }
+        case 0x10: s_p1134_r10 = val; break;
+        case 0x11: s_p1134_r11 = val; break;
+        case 0x12: s_p1134_r12 = val; break;
+        case 0x14: s_p1134_r14_hist[val]++; break;
+        default: break;
+    }
+}
+
+/* p602_on_vec_fetch() の先頭から呼ばれる(P602_ENABLE=0 では呼ばれない)。 */
+static __attribute__((unused)) void p1134_on_vec_fetch(uint32_t r_addr) {
+    if (mx_cpu_be_musashi()) return;
+    uint32_t n = r_addr >> 2;
+    if ((n & 0xF0u) != (uint32_t)(MFP[MFP_VR] & 0xF0u)) return;   /* MFP ベクタ域のみ */
+    s_p1134_vread_total++;
+
+    uint32_t target  = p47_read_long_le(r_addr);
+    uint32_t live_sr = (uint32_t)C68k_Get_SR(&C68K);
+    uint32_t a7      = (uint32_t)C68K.A[7] & 0x00FFFFFFu;
+    int frame_ok = ((a7 & 1u) == 0u && a7 >= 0x400u && (a7 + 8u) < 0x00C00000u) ? 1 : 0;
+    int pass_sr  = 0;
+    uint32_t stacked_sr = 0xFFFFu;
+    if (frame_ok) {
+        s_p1134_pass_frame++;
+        uint32_t l0 = p47_read_long_le(a7);
+        if (l0 != 0xFFFFFFFFu) stacked_sr = (l0 >> 16) & 0xFFFFu;
+        if (((live_sr >> 13) & 1u) && ((live_sr >> 8) & 7u) == 6u &&
+            stacked_sr != 0xFFFFu && ((stacked_sr >> 8) & 7u) < 6u) {
+            pass_sr = 1;
+        }
+    }
+    if (pass_sr) {
+        s_p1134_pass_sr++;
+        if (s_p1134_last_iack_vec >= 0 && (uint32_t)s_p1134_last_iack_vec == n)
+            s_p1134_iack_match++;
+        s_p1134_last_iack_vec = -1;
+        if (s_p1134_cand_valid) { s_p1134_rejected++; s_p1134_superseded++; }
+        s_p1134_cand_valid  = 1;
+        s_p1134_cand_vec    = n;
+        s_p1134_cand_target = target & 0x00FFFFFFu;
+        s_p1134_cur_ctx     = -1;
+        s_p1135_cand_opm_st = OPM_Read(0) & 0x3u;   /* [P1135-VECSTAT]: 副作用なし */
+    }
+
+    /* [P1134-HANDLER]: ベクタごとの初回 + ターゲット変化時(全体で最大16行) */
+    if (s_p1134_handler_lines < P1134_HANDLER_MAX_LINES &&
+        (!s_p1134_handler_seen[n] || s_p1134_handler_last[n] != target)) {
+        s_p1134_handler_seen[n] = 1;
+        s_p1134_handler_last[n] = target;
+        s_p1134_handler_lines++;
+        debug_log("[P1134-HANDLER] f=%d vec=$%02X target=$%08x live_pc=$%06x live_sr=$%04x "
+                  "a7=$%06x stacked_sr=$%04x frame_ok=%d pass_sr=%d VR=$%02x lines=%u/%u\n",
+                  g_mx68k_frame_num, (unsigned)n, (unsigned)target,
+                  (unsigned)MX68KQ_GUEST_PC(), (unsigned)(live_sr & 0xFFFFu),
+                  (unsigned)a7, (unsigned)stacked_sr, frame_ok, pass_sr,
+                  (unsigned)MFP[MFP_VR],
+                  (unsigned)s_p1134_handler_lines, (unsigned)P1134_HANDLER_MAX_LINES);
+    }
+}
+
+/* p602_chunk_note() の先頭から呼ばれる(P602_ENABLE=0 では呼ばれない)。 */
+static __attribute__((unused)) void p1134_chunk_note(uint32_t chunk_pc) {
+    if (mx_cpu_be_musashi()) return;
+    if (s_p1134_cand_valid) {
+        uint32_t pc = chunk_pc & 0x00FFFFFFu;
+        if (pc >= s_p1134_cand_target && pc < s_p1134_cand_target + P1134_CONFIRM_SPAN) {
+            int ctx = p1134_ctx_of_vec(s_p1134_cand_vec);
+            s_p1134_confirmed++;
+            s_p1134_confirmed_ctx[ctx]++;
+            if (ctx == P1134_CTX_V43 && s_p1135_cand_opm_st != 0xFFu) {
+                if (s_p1135_cand_opm_st == 0u) s_p1135_v43_status_zero++;
+            }
+            s_p1135_cand_opm_st = 0xFFu;   /* 使用済み候補を無効化、次候補の誤帰属を防ぐ */
+            s_p1134_cur_ctx = ctx;
+        } else {
+            s_p1134_rejected++;
+            s_p1134_cur_ctx = -1;
+        }
+        s_p1134_cand_valid = 0;
+        return;
+    }
+    /* ハンドラから抜けた(IPL<6)なら確定文脈を捨てる(後続の IPL 上げ区間へ持ち越さない) */
+    if (s_p1134_cur_ctx >= 0 && (((uint32_t)C68k_Get_SR(&C68K) >> 8) & 7u) < 6u)
+        s_p1134_cur_ctx = -1;
+}
+
+/* mx68k_diag_irqh_callback() から受付のたびに呼ばれる。 */
+static void p1134_on_iack(int32_t level, int32_t vect) {
+    if (level == 1) s_p1134_frame_l1_iack = 1;
+    if (level != 6) return;
+    s_p1134_iack_l6_total++;
+    if (vect >= 0 && vect < 256) {
+        s_p1134_iack[vect]++;
+        s_p1134_last_iack_vec = vect;
+    } else {
+        s_p1134_last_iack_vec = -1;
+    }
+}
+
+void p1134_opm_timer_note(uint8_t st_before, uint8_t st_after, uint8_t iprb_before,
+                          int32_t line_usedclk) {
+    uint8_t b = st_before & 3u, a = st_after & 3u;
+    uint8_t rise = (uint8_t)(a & (uint8_t)~b);
+    s_p1134_lines_total++;
+    s_p1134_sum_line_clk += (uint64_t)(line_usedclk > 0 ? line_usedclk : 0);
+    if (a) s_p1134_status_nz_lines++;
+    if (rise & 1u) s_p1134_rise_a++;
+    if (rise & 2u) s_p1134_rise_b++;
+    if (rise == 3u) {
+        s_p1134_both_same_line++;
+    } else if (((rise & 1u) && (b & 2u)) || ((rise & 2u) && (b & 1u))) {
+        s_p1134_hidden_edge++;
+        if (iprb_before & 0x08u) s_p1134_hidden_iprb_pre++;
+    }
+}
+
+static void p1134_frame_close(void) {
+    if (!s_p1134_frame_open) return;
+    if (s_p1134_frame_l1_iack) s_p1134_l1_frames++;
+    if (s_p1134_frame_dma0)    s_p1134_dma0_frames++;
+    s_p1134_frame_l1_iack = 0;
+    s_p1134_frame_dma0    = 0;
+    s_p1134_frame_open    = 0;
+}
+
+void p1134_frame_begin(int32_t frame_clocks_10m) {
+    p1134_frame_close();
+    s_p1134_frames++;
+    s_p1134_sum_frame_clk += (uint64_t)(frame_clocks_10m > 0 ? frame_clocks_10m : 0);
+    s_p1134_frame_open = 1;
+}
+
+void p1134_dma0_act_note(void) { s_p1134_frame_dma0 = 1; }
+
+void p1134_periodic_dump(void) {
+    uint32_t f = (uint32_t)g_mx68k_frame_num;
+    if (f % 300u != 0u) return;
+    p1134_frame_close();
+
+    /* --- [P1134-KEYON] --- */
+    {
+        char on[1024], off[1024], wr[256], ipl[128], cc[256];
+        int lo = 0, lf = 0, lw = 0, li = 0, lc = 0;
+        on[0] = off[0] = wr[0] = ipl[0] = cc[0] = '\0';
+        for (int ch = 0; ch < 8; ch++) {
+            lo += snprintf(on + lo, sizeof(on) - (size_t)lo, "ch%d=", ch);
+            lf += snprintf(off + lf, sizeof(off) - (size_t)lf, "ch%d=", ch);
+            for (int c = 0; c < P1134_NCTX; c++) {
+                lo += snprintf(on + lo, sizeof(on) - (size_t)lo, "%u%s",
+                               (unsigned)s_p1134_keyon[ch][c], (c < P1134_NCTX - 1) ? "/" : " ");
+                lf += snprintf(off + lf, sizeof(off) - (size_t)lf, "%u%s",
+                               (unsigned)s_p1134_keyoff[ch][c], (c < P1134_NCTX - 1) ? "/" : " ");
+            }
+        }
+        for (int c = 0; c < P1134_NCTX; c++) {
+            lw += snprintf(wr + lw, sizeof(wr) - (size_t)lw, "%s=%u ",
+                           s_p1134_ctx_name[c], (unsigned)s_p1134_ctx_wr[c]);
+            lc += snprintf(cc + lc, sizeof(cc) - (size_t)lc, "%s=%u ",
+                           s_p1134_ctx_name[c], (unsigned)s_p1134_confirmed_ctx[c]);
+        }
+        for (int i = 0; i < 8; i++)
+            li += snprintf(ipl + li, sizeof(ipl) - (size_t)li, "%u%s",
+                           (unsigned)s_p1134_ipl_hist[i], (i < 7) ? "/" : "");
+        /* ctx 分布の信頼度: confirmed ÷ レベル6 受付累計 が 0.9 未満なら参考扱い(Fix Plan テスト計画) */
+        const char* quality;
+        if (s_p1134_iack_l6_total == 0u)
+            quality = "n/a(iack_l6=0)";
+        else if ((uint64_t)s_p1134_confirmed * 10u >= (uint64_t)s_p1134_iack_l6_total * 9u)
+            quality = "ok";
+        else
+            quality = "REF(confirmed/iack_l6<0.9、ctx分布は参考扱い)";
+        debug_log("[P1134-KEYON] f=%u opm_wr_total=%u ctx_order=main/v43/v46/v4D/v44/v45/other/unconf "
+                  "| on: %s| off: %s| wr: %s| ipl0-7=%s isr_nz=%u VR=$%02x "
+                  "| filter vread_total=%u pass_frame=%u pass_sr=%u iack_match=%u confirmed=%u "
+                  "rejected=%u superseded=%u pending=%d | confirmed_ctx: %s"
+                  "| iack_l6=%u ctx_quality=%s ctx_unavailable=%d\n",
+                  f, (unsigned)s_p1134_opm_wr_total, on, off, wr, ipl,
+                  (unsigned)s_p1134_isr_nz, (unsigned)MFP[MFP_VR],
+                  (unsigned)s_p1134_vread_total, (unsigned)s_p1134_pass_frame,
+                  (unsigned)s_p1134_pass_sr, (unsigned)s_p1134_iack_match,
+                  (unsigned)s_p1134_confirmed, (unsigned)s_p1134_rejected,
+                  (unsigned)s_p1134_superseded, s_p1134_cand_valid, cc,
+                  (unsigned)s_p1134_iack_l6_total, quality,
+                  P602_ENABLE ? 0 : 1);
+        debug_log("[P1135-VECSTAT] f=%u v43_confirmed=%u v43_status_zero=%u\n",
+                  f, (unsigned)s_p1134_confirmed_ctx[P1134_CTX_V43],
+                  (unsigned)s_p1135_v43_status_zero);
+    }
+
+    /* --- [P1134-OPMIRQ] --- */
+    {
+        /* $14 書込み値の上位8値(値:回数) */
+        char top[256];
+        int lt = 0;
+        uint8_t used[256];
+        memset(used, 0, sizeof(used));
+        top[0] = '\0';
+        for (int k = 0; k < 8; k++) {
+            int best = -1;
+            for (int v = 0; v < 256; v++) {
+                if (used[v] || s_p1134_r14_hist[v] == 0u) continue;
+                if (best < 0 || s_p1134_r14_hist[v] > s_p1134_r14_hist[best]) best = v;
+            }
+            if (best < 0) break;
+            used[best] = 1;
+            lt += snprintf(top + lt, sizeof(top) - (size_t)lt, "$%02X:%u ",
+                           (unsigned)best, (unsigned)s_p1134_r14_hist[best]);
+        }
+        uint32_t base = (uint32_t)(MFP[MFP_VR] & 0xF0u);
+        debug_log("[P1134-OPMIRQ] f=%u lines_total=%llu status_nonzero_lines=%llu rise_A=%u rise_B=%u "
+                  "hidden_edge_lo=%u hidden_edge_hi=%u both_same_line=%u hidden_iprb_pre=%u "
+                  "mfp_int12_est=%u | iack v43=%u v46=%u v4D=%u v44=%u v45=%u iack_l6=%u "
+                  "| r14_top: %s| r10=$%02x r11=$%02x r12=$%02x\n",
+                  f, (unsigned long long)s_p1134_lines_total,
+                  (unsigned long long)s_p1134_status_nz_lines,
+                  (unsigned)s_p1134_rise_a, (unsigned)s_p1134_rise_b,
+                  (unsigned)s_p1134_hidden_edge,
+                  (unsigned)(s_p1134_hidden_edge + s_p1134_both_same_line),
+                  (unsigned)s_p1134_both_same_line, (unsigned)s_p1134_hidden_iprb_pre,
+                  (unsigned)(s_p1134_rise_a + s_p1134_rise_b),
+                  (unsigned)s_p1134_iack[base | 0x3u], (unsigned)s_p1134_iack[base | 0x6u],
+                  (unsigned)s_p1134_iack[base | 0xDu], (unsigned)s_p1134_iack[base | 0x4u],
+                  (unsigned)s_p1134_iack[base | 0x5u], (unsigned)s_p1134_iack_l6_total,
+                  top, (unsigned)s_p1134_r10, (unsigned)s_p1134_r11, (unsigned)s_p1134_r12);
+    }
+
+    /* --- [P1134-TBASE] --- */
+    debug_log("[P1134-TBASE] f=%u frames=%u sum_line_usedclk=%llu sum_frame_clocks_10m=%llu "
+              "diff=%lld l1_irq_frames=%u dma0_act_frames=%u\n",
+              f, (unsigned)s_p1134_frames,
+              (unsigned long long)s_p1134_sum_line_clk,
+              (unsigned long long)s_p1134_sum_frame_clk,
+              (long long)s_p1134_sum_line_clk - (long long)s_p1134_sum_frame_clk,
+              (unsigned)s_p1134_l1_frames, (unsigned)s_p1134_dma0_frames);
+}
+#endif /* P1134_PROBE_ENABLE */
+
 #if P602_ENABLE
 /* ====================================================================
  *  P602 (D-57): 同人版ソーサリアンが MC68040 搭載と誤検出される件の
@@ -24332,6 +24707,9 @@ void p602_workarea_snapshot(const char* tag) {
 static void p602_on_vec_fetch(uint32_t r_addr) {
     uint32_t n = r_addr >> 2;
     if (n > 255u) return;
+#if P1134_PROBE_ENABLE
+    p1134_on_vec_fetch(r_addr);   /* P1134 (D-135): 割込み文脈の候補記録(観測のみ) */
+#endif
     s_p602_vec_hist[n]++;
     s_p602_vec_total++;
 
@@ -24415,6 +24793,9 @@ static inline void p602_pc_parity_note(void) {
  *   brff_sampled=0 を単独で「一度も実行していない」と読めないようにする。
  *   網羅的な検出は (a) の奇数 PC 側が担う。 */
 static void p602_chunk_note(uint32_t chunk_pc) {
+#if P1134_PROBE_ENABLE
+    p1134_chunk_note(chunk_pc);   /* P1134 (D-135): 割込み文脈候補の確定/破棄(観測のみ) */
+#endif
     uint16_t op = p602_read_op(chunk_pc & 0x00FFFFFFu);
     s_p602_chunk_samples++;
     if (!p602_is_brff(op)) return;
@@ -30032,6 +30413,9 @@ static int32_t mx68k_diag_irqh_callback(int32_t level)
     } else {
         vect = my_irqh_callback(level);
     }
+#if P1134_PROBE_ENABLE
+    p1134_on_iack(level, vect);   /* P1134 (D-135): 受付累計(文脈フィルタとは独立の分母) */
+#endif
 #if P378_ENABLE
     /* P378: ラスタ(CRTC IntLine)割込みが CPU に実際に配送・実行されたかを数える。
      * P380 訂正: 0x46 は実は VSYNC(irq=9)のベクタだった。ラスタ(CRTC IntLine、

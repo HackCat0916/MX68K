@@ -3896,6 +3896,28 @@ void p602_workarea_snapshot(const char* tag);
 void p602_periodic_dump(void);
 #endif
 
+/* ==== P1134 (D-135): スター・ウォーズ BGM トラック間ズレの診断プローブ ====
+ *  [P1134-ENV] / [P1134-KEYON] / [P1134-OPMIRQ] / [P1134-TBASE] / [P1134-HANDLER]。
+ *  観測専用 —— ゲストメモリ・CPU レジスタ・戻り値・制御フロー・タイミングを変更しない
+ *  (debug_log 出力と file-static カウンタへの加算のみ)。本体は m68000_bridge.c、
+ *  EmulatorBridge.c からはフレーム/ライン単位の呼出しのみ。c68k 経路のみが対象。
+ *  P602_ENABLE=0 のときは割込み文脈の判定が働かず、行に ctx_unavailable=1 を出す。
+ *  Fix Plan: .mx68k_cycles/P1134_plan.md。D-135 解決後に除去候補。 */
+#ifndef P1134_PROBE_ENABLE
+#define P1134_PROBE_ENABLE     1   /* 0=休止(プローブ追加前とバイト単位で同じ動作) */
+#endif
+#if P1134_PROBE_ENABLE
+/* OPM_Timer() 呼出し前後の status(bit0=TimerA, bit1=TimerB)と、呼出し前の MFP IPRB。 */
+void p1134_opm_timer_note(uint8_t st_before, uint8_t st_after, uint8_t iprb_before,
+                          int32_t line_usedclk);
+/* フレーム先頭: 名目10MHz のフレーム予算(g_p641_frame_clocks_10m)。 */
+void p1134_frame_begin(int32_t frame_clocks_10m);
+/* 走査線末尾: DMAC ch0 が ACT だったライン(当該フレームの FDD 転送の有無)。 */
+void p1134_dma0_act_note(void);
+/* フレーム末尾から毎フレーム呼ぶ(出力は 300 フレームごと)。 */
+void p1134_periodic_dump(void);
+#endif
+
 /* ==== P919 (D-85): 6x12/8x16 フォント領域の読み出し計数プローブ ====
  *  [P919-CG6X12] / [P919-CG6X12-S](m68000_bridge.c)と
  *  [P919-CG6X12-LOAD](EmulatorBridge.c、CGROM ロード直後に 1 回)。
