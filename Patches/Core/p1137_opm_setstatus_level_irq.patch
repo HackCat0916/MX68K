@@ -1,0 +1,93 @@
+# P1137: fmgen OPM の割込み通知を「status 0→非0 の時だけ」に変更(Class B: 参照実装に逐語移植可能な既存修正なし)
+#
+# 分類: B(ハードウェア仕様準拠修正——参照実装に既存修正なし)
+# 一次資料: Inside X68000 書籍p.78(PDF p.82)図1 GPIP3=FM音源の割り込み要求信号 / 書籍p.81(PDF p.85)図3
+#   bit3 FMIRQ「1:割り込み要求なし 0:割り込み要求中」/ 書籍p.82(PDF p.86)§4-2「'0'→'1'、あるいは'1'→'0'への変化で割り込みを発生」
+#   (MFP側=エッジ検出・状態信号は一次資料で確定。OPM /IRQ のOR保持は明文なし——U-1 のユーザー判断=(b-1)
+#    実機判別プログラムによる実機実測代替[CLAUDE.md 2026-10-18 規律]、2026-11-24 承認)
+#   実機判別プログラム T-2e(.mx68k_cycles/P1137_OPMIRQ.S、計測モード)の結果(2026-11-24、ユーザー hands-on):
+#     (判定基準: 0-1秒 約51 / 1-2秒 0 = レベル方式、0-1秒 約1009 / 1-2秒 約1008 = ビット単位)
+#     MX(パッチ前)       : 0-1秒=1009、1-2秒=1008 → ビット単位
+#     XEiJ               : 0-1秒=51、  1-2秒=0    → レベル方式
+#     実機 X68000        : 0-1秒=51、  1-2秒=0、Bフラグ=1のまま受理=1 → レベル方式(XEiJ と完全一致)
+#       実機の出力(`OPMIRQ.X -F` で実行): vec$43=$00060D10  AER=$06 VR=$40 IERB=$2E IMRB=$2E GPIP=$7A(開始時 bit3=1=要求なし)
+#       2秒後 GPIP=$72(bit3=0=OPM IRQ 線が要求中のまま。B フラグが F-RESET されず線を保持していることを実機のピン状態で直接観測)
+#       (実機の機種型番・CPU クロック・起動媒体はこの記録に含まれていない——未記録)
+#     MX(パッチ後)       : 0-1秒=51、  1-2秒=0、Bフラグ=1のまま受理=1 → レベル方式(実機・XEiJと一致、新Releaseビルド)
+#       MXの出力: vec$43=$43FF05E4  AER=$06 VR=$40 IERB=$26 IMRB=$26 GPIP=$75、2秒後 GPIP=$E3(MXのGPIP bit3は常に0の既知の差異)
+#       (vec$43 は下位24ビットが ROM 内 $FF05E4。実機の $00060D10[RAM]とは指し先が異なる——実機側は何らかの RAM 常駐処理が
+#        ベクタ$43を差し替えていたことになり、下記の残留懸念と関係する)
+#   → 実機・XEiJ(独立2系統)がレベル方式で一致し、パッチ前 MX のみが外れ値。C4(OPM /IRQ は status の OR を保持する
+#     レベル出力)を [user hands-on confirmation] で確定とし、Class B 条件(b) を実機実測代替(CLAUDE.md 2026-10-18 規律)で充足。
+#   残留懸念(未確認): 実機実行では F オプション(ベクタ$43 が ROM 外なら中止する安全確認の強制スキップ)を使用した。
+#     vec$43=$00060D10(RAM)だったため中止判定に掛かったと推定。X68000 では vec$43 が IOCS/Human68k の RAM 常駐処理を
+#     指すのが通常構成である可能性があり、「ROM 外=サウンドドライバ常駐」という判定はこのベクタには過剰検出だったかもしれない。
+#     ただし MXDRV/ZMUSIC 等が非常駐だったこと(CONFIG.SYS 等)は別途確認していない。プログラムは計測中ベクタ$43 を自前の
+#     ハンドラへ差し替え OPM $14 を直接書くため、仮に常駐ドライバがあっても 51/0 という計数自体を否定するものではないが、
+#     ドライバが別経路で OPM タイマ・$14 を書き換えていた可能性は排除できていない。
+# 実測根拠: [P1134-OPMIRQ] rise_A+rise_B−both_same_line−hidden_iprb_pre=22413 ≒ iack v43=22412(差1)、
+#   hidden_edge 462件中約441件が独自のv43 trapを生成 / [P1135-VECSTAT] v43_status_zero=0/22412(P1135、スター・ウォーズ)
+# 上流欠陥同定: fmgen原典のSetStatusは他ビット保持中もIntr(true)を重ねる(レベル通知としては無害)が、px68k(xkeropi由来 d92ab3d)の
+#   MyOPM::Intr(fmg_wrap.cpp:71-74)がIntr(true)を毎回MFP_Int(12)=エッジ事象へ変換し、Intr(false)を捨てる組合せ欠陥
+# 同系先例: 同一ファイルの OPM::ResetStatus(opm.cpp:153-161)が既に「非0→0 の時だけ Intr(false)」(本パッチで対称化)
+# 参照実装調査(修正不在の証明): px68k本家 74ddbb3 fmgen/opm.cpp:141-148 / px68k-libretro 617574f opm.cpp:141-161・
+#   GitHub libretro 3f4f542a opm.cpp:182-200 / MPX68K ba935693(GitHub)・42fc340(ローカル) opm.cpp:141-159 — いずれも同一欠陥。
+#   XEiJ(YM2151.java:1624-1630、MC68901.java:645-674)・XM6本家(vm/opmif.cpp:609-616、vm/mfp.cpp:1594-1615)・
+#   eCZ-600 9a2a6f99(ym2151.cpp:194-203)・Nuked-OPM f209e6ed(opm.c:1434/2189、YM2151ダイ解析由来、/IRQ=timer_a_status||timer_b_status)は
+#   レベル単位の正しい挙動だが構造が異なりClass Aの移植元にできない
+# Bridge代替検討: P1136実験フラグ(IPRB事後取消し)はHALTED退避タイミング不良(R1)とMFP_Int副作用の打消し不完全(R5)で却下
+# 対象ファイル:行範囲: Core/px68k/fmgen/opm.cpp:141-148(OPM::SetStatus、適用前。ファイル最終変更 6337b28 = 初期取込み)
+# 由来サイクル: P1137
+# 変更内容: SetStatus で新ビットを立てる直前の status が 0 だった時だけ Intr(true) を呼ぶ(追加状態なし)。
+#   status の値・ReadStatus・タイマ周期・CSM・リセットは不変。変わるのは「他ビット保持中に別ビットが立った時」に
+#   MFP_Int(12) を呼ばなくなることのみ。
+# 適用方法: git apply Patches/Core/p1137_opm_setstatus_level_irq.patch
+#           撤回:  git apply -R Patches/Core/p1137_opm_setstatus_level_irq.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+# 環境変数: なし。
+# 併用が必須の Bridge 側変更: なし。置き換え対象の Bridge 近似 MX68K_DEBUG_P1136_SUPPRESS_HIDDEN(既定OFF)は
+#   効果確認後 P1138 で撤去(No stacking)。ステートロード後の status 整合(残留リスク R-3)も P1138 で対応(U-5(a))。
+#
+# 版固定(本パッチ作成時に実行した生出力):
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k" rev-parse HEAD
+#   | 74ddbb37b4e12b77362a4e12f28ceb5aaa593684
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k-libretro" rev-parse HEAD
+#   | 617574fc65892421dd8be92270f8241c96a1a594
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K" rev-parse HEAD
+#   | 42fc3401b5a3449a3b758ae67edba3c4a19682b8
+#   $ shasum -a 256 "/Volumes/WD 8TB HDD/Develop/xm6/vm/opmif.cpp" "/Volumes/WD 8TB HDD/Develop/xm6/vm/mfp.cpp" \
+#       /Users/toshinari/Desktop/XEiJ_0261008/xeij/YM2151.java /Users/toshinari/Desktop/XEiJ_0261008/xeij/MC68901.java
+#   | 1b8be233b1e162d817b8c77412b7b3625117cd972dd94d710bd576b13f98664a  /Volumes/WD 8TB HDD/Develop/xm6/vm/opmif.cpp
+#   | 7868115dd727a60c374357cfeffd2d98e0468c7fa882394b26675dcceca6f160  /Volumes/WD 8TB HDD/Develop/xm6/vm/mfp.cpp
+#   | a728815a23b576ec9208c8ce820865a5c0e2f4ee74f657e50c7c896edceb15b3  /Users/toshinari/Desktop/XEiJ_0261008/xeij/YM2151.java
+#   | f77ba69ac8045b809899c6eb1a54cb61951266343c05b3d96ee0708fde937947  /Users/toshinari/Desktop/XEiJ_0261008/xeij/MC68901.java
+#   (GitHub 側ハッシュ libretro 3f4f542a・MPX68K ba935693・eCZ-600 9a2a6f99・Nuked-OPM f209e6ed の取得コマンドと生出力は
+#    .mx68k_cycles/P1137_plan.md「記号表」直後・「参照diff」節に記載)
+#   $ grep -n -a -A7 "void OPM::SetStatus" "/Volumes/WD 8TB HDD/Develop/px68k/fmgen/opm.cpp"   (px68k本家 74ddbb3)
+#   | 141:void OPM::SetStatus(uint bits)
+#   | 142-{
+#   | 143-	if (!(status & bits))
+#   | 144-	{
+#   | 145-		status |= bits;
+#   | 146-		Intr(true);
+#   | 147-	}
+#   | 148-}
+#   (MPX68K ローカル 42fc340 "X68000 Shared/px68k/fmgen/opm.cpp":141-148 も同一内容)
+#
+diff --git a/Core/px68k/fmgen/opm.cpp b/Core/px68k/fmgen/opm.cpp
+index b21eec1..0703489 100644
+--- a/Core/px68k/fmgen/opm.cpp
++++ b/Core/px68k/fmgen/opm.cpp
+@@ -142,8 +142,11 @@ void OPM::SetStatus(uint32_t bits)
+ {
+ 	if (!(status & bits))
+ 	{
++		bool was_asserted = (status != 0);
+ 		status |= bits;
+-		Intr(true);
++		// IRQ線は status の OR(レベル)。0→非0 の時だけ通知する(P1137 D-135)
++		if (!was_asserted)
++			Intr(true);
+ 	}
+ }
+ 

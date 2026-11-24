@@ -142,8 +142,11 @@ void OPM::SetStatus(uint32_t bits)
 {
 	if (!(status & bits))
 	{
+		bool was_asserted = (status != 0);
 		status |= bits;
-		Intr(true);
+		// IRQ線は status の OR(レベル)。0→非0 の時だけ通知する(P1137 D-135)
+		if (!was_asserted)
+			Intr(true);
 	}
 }
 

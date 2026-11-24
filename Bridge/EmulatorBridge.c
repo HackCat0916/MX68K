@@ -7911,6 +7911,41 @@ static int do_load_state(const char* path) {
             OPM_Write(0, (uint8_t)reg);
             OPM_Write(1, g_opm_shadow[reg]);
         }
+        /* P1138 (D-135 R-3): fmgen の status はステートに含まれず、上の $14 再生も
+         * F-RESET を落として書くため、ロード直前の実行中 status が残る。P1137 以降の
+         * レベル通知では status≠0 のままだと次の Intr(true) が出ず、ゲストの F-RESET
+         * (ISR 内)が来ないまま OPM 割込みが恒久停止する。LOAD/IRQEN ビットは直前の
+         * 再生値と同一にして F-RESET だけを立てる(カウンタ再ロード無し、fmtimer.cpp:19-30)。 */
+        {
+            static uint32_t s_p1138_load_count = 0, s_p1138_fired_total = 0;
+            uint8_t st_before = (uint8_t)(OPM_Read(0) & 3u);
+            int fired = 0;
+            s_p1138_load_count++;
+            if (g_opm_written[0x14]) {
+                if (st_before != 0u) {
+                    OPM_Write(0, 0x14);
+                    OPM_Write(1, (uint8_t)((g_opm_shadow[0x14] & (uint8_t)~0x30) | 0x30));
+                    fired = 1;
+                }
+            } else {
+                /* セーブ時点で $14 未書込み = チップはリセット直後の regtc=0 のまま
+                 * (p479_opm_shadow_reset はチップのリセットと同じ箇所で呼ばれる)。
+                 * 既存の再生は $14 を書かないため、ロード直前の LOAD/IRQEN と status が
+                 * 残る。0x30 を書いて regtc=0 相当(タイマ停止・IRQEN 無し)へ戻し、
+                 * status も同時に消す。st_before に依らず常に行う。 */
+                OPM_Write(0, 0x14);
+                OPM_Write(1, 0x30);
+                fired = 2;
+            }
+            if (fired) s_p1138_fired_total++;
+            uint8_t st_after = (uint8_t)(OPM_Read(0) & 3u);
+            debug_log("[P1138-LOADST] load#=%u written14=%d shadow14=$%02x st_before=%u fired=%d "
+                      "st_after=%u fired_total=%u iprb=$%02x\n",
+                      (unsigned)s_p1138_load_count, (int)g_opm_written[0x14],
+                      (unsigned)g_opm_shadow[0x14], (unsigned)st_before, fired,
+                      (unsigned)st_after, (unsigned)s_p1138_fired_total,
+                      (unsigned)MFP[MFP_IPRB]);
+        }
         /* 2段階latch自体を最後に復元する——これによりP474の既知の制限
          * (KEYOFFループ後にCurRegが0x08のまま残る問題、上のP474コメント
          * 参照)も解消する。注意: セーブ時のCurRegがたまたま0x1Bだった
