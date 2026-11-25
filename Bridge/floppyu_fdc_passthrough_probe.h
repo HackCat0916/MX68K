@@ -15,6 +15,7 @@
 #define MX68K_FLOPPYU_FDC_PASSTHROUGH_PROBE_H
 
 #include <stdint.h>
+#include "dmac.h"   /* P1141: dmac_ch(ステートセーブ用の写しの型) */
 
 /* DMA_Init() の直後ごと(init / hardreset)に呼ぶ。設定値から毎回再計算し、有効時は
  * テーブル 0x4A と DMA ch0 の ReadyCB を振り分け器へ差し替え、無効時は元値へ戻す(冪等)。
@@ -57,6 +58,14 @@ void mx68k_floppyu_get_write_unit_stop(int32_t* mx_mask);
  * read-only)。reg はアドレスラッチ($E90001)で選択済みのレジスタ番号、v は書込みデータ。ふろっぴU君の強制READY
  * (装置レジスタ0x23)中継の状態を更新する。振り分け器が無効、または MX68K_FLOPPYU_FORCE_READY=0 なら何もしない。 */
 void mx68k_floppyu_fdcpt_note_opm_data(uint8_t reg, uint8_t v);
+
+/* P1141(D-149): 中継READの DMAC ch0 受け渡し(HO)。DMA_Exec(0) の直前ごとに呼ぶ(HO 中でなければ分岐1つで戻る) */
+void mx68k_floppyu_fdcpt_dma0_pre(void);
+/* P1141: ステートセーブ用の ch0 の写しを、HO 中かつ署名一致ならエラー完了の形に変える(実行中の DMA[] には触れない)。
+ * 変えたら1、変えなければ0 */
+int mx68k_floppyu_fdcpt_ho_state_image(dmac_ch* ch0_img);
+/* P1141: DMAC に書かずに HO を落とす(ステートロード直後など) */
+void mx68k_floppyu_fdcpt_ho_drop(const char* why);
 
 #ifdef MX68K_FLOPPYU_USB_SELFTEST
 /* P1054: 単体テスト専用。観測関数(e5p_*)の呼出し前後で振り分け器の状態が同一なら1 */

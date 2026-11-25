@@ -750,6 +750,7 @@ static bool    g_floppyu_write_fast = false;
  *  既存の m68000_bridge.c:305 `extern uint8_t Mcry_LRTiming;` と同じ方針)。 */
 extern void p634_lrck_advance(int32_t clock);
 extern void p634_lrck_reset(void);
+extern void p1142_mcry_cmdreg_reset(void);  /* P1142 (D-150): m68000_bridge.c */
 /* P636 (サウンドモニタ): Mercury PCM の活動検出ポーリング。実体・状態変数は
  * P634 と同じ理由で m68000_bridge.c 側にまとめてあり、ここは extern 宣言で受ける。 */
 extern void p636_mercury_pcm_poll_samples(void);
@@ -1838,6 +1839,7 @@ int mx68k_init(void) {
         p634_lrck_reset();                 /* P634 (D-43): Mcry_Init が Mcry_LRTiming=0 に
                                             * するのと同じ箇所で自走 LR 位相も 0 クリアし、
                                             * 状態の非同期を作らない。 */
+        p1142_mcry_cmdreg_reset();         /* P1142 (D-150): $ECC090 書込保持値とログ計数をクリア */
         debug_log("[P483-MERCURY] init: enabled=%d installed_prev=%d installed=%d "
                   "vol=%d rate=%d dir=%s\n", (int)g_mercury_enabled, p483_prev,
                   g_mercury_installed, MCRY_VOL, g_audio_sample_rate_hz, mx68k_mercury_dir());
@@ -2890,6 +2892,7 @@ void mx68k_reset_hard(void) {
         p634_lrck_reset();                 /* P634 (D-43): init 経路と同一 — Mcry_Init が
                                             * Mcry_LRTiming=0 にするのと同じ箇所で
                                             * 自走 LR 位相も 0 クリアする。 */
+        p1142_mcry_cmdreg_reset();         /* P1142 (D-150): $ECC090 書込保持値とログ計数をクリア */
         debug_log("[P483-MERCURY] reset: enabled=%d installed_prev=%d installed=%d "
                   "vol=%d rate=%d dir=%s\n", (int)g_mercury_enabled, p483_prev,
                   g_mercury_installed, MCRY_VOL, g_audio_sample_rate_hz, mx68k_mercury_dir());
@@ -3297,6 +3300,8 @@ void mx68k_pause(bool pause) {
  * m68000_bridge.c の chunk ループのサンプラ(Part B)がフレームでゲートできるようにする。
  * 診断専用。ここで書き込み、読むのは P82-G プローブのみ。 */
 int g_mx68k_frame_num = 0;
+/* P1139(D-149-a): 実行済みゲスト時間の累計[ns]。エミュレーションスレッドだけが書く。リセットでも戻さない(単調) */
+uint64_t g_mx68k_guest_ns = 0;
 
 #if P135_ENABLE
 /* =====================================================================
@@ -4063,6 +4068,7 @@ static void p1041_vram_blink_probe(int frame_num)
  *   これらは LINE ブロック専用の計装で、意図的にスコープを LINE モードに限定している。
  * 呼出し前の ACT(CSR bit3)と MTC の減少量を [P1102-DMA0PACE] の窓カウンタへ加える(読取りのみ)。 */
 static void p1102_dma0_exec(int vl) {
+    mx68k_floppyu_fdcpt_dma0_pre();   /* P1141: 中継READの受け渡し(HO 中でなければ即 return)。下の採取より前に置く */
     uint16_t mtc_pre = DMA[0].MTC;
     if (DMA[0].CSR & 0x08u) s_p1102_act_calls++;
 #if P367_ENABLE
@@ -4426,6 +4432,21 @@ void mx68k_run_frame(void) {
     /* P641: クロック倍率スケーリング前(名目10MHz基準)の値を保持する。
      * mx68k_get_vsync_hz() がこれを 10e6 で割って垂直周波数を返す。 */
     g_p641_frame_clocks_10m = clk_total;
+    /* P1139 T-2: 300フレームごとに Δguest_ns と Σ(frame_clocks_10m×100) を生値で並べる(両者が一致すれば正規化は正しい) */
+    {
+        static uint64_t s_p1139_g0 = 0, s_p1139_sum_fc = 0;
+        static uint32_t s_p1139_frames = 0;
+        if (s_p1139_frames >= 300u) {
+            debug_log("[P1139-GNS] f=%d frames=%u d_guest_ns=%llu sum_fc_ns=%llu clock_mhz=%d\n",
+                      frame_num, (unsigned)s_p1139_frames, (unsigned long long)(g_mx68k_guest_ns - s_p1139_g0),
+                      (unsigned long long)s_p1139_sum_fc, g_clock_mhz);
+            s_p1139_frames = 0;
+            s_p1139_sum_fc = 0;
+        }
+        if (s_p1139_frames == 0) s_p1139_g0 = g_mx68k_guest_ns;
+        s_p1139_sum_fc += (uint64_t)clk_total * 100u;
+        s_p1139_frames++;
+    }
 
     /* P180: MX の c68k コア(Core/c68k/c68kexec.c)は実 MC68000 サイクルを数える — MPX の
      * WinX68k_Exec コメントが前提とする 1/5-MHz スケーリングは適用しない。P149 は MPX の
@@ -4920,6 +4941,7 @@ void mx68k_run_frame(void) {
         ClkUsed -= usedclk * clk_num;
         line_usedclk += usedclk;
         MFP_Timer(usedclk);   /* per-chunk 供給 → IRQ/タイマー粒度 ≤1500 cyc */
+        g_mx68k_guest_ns += (uint64_t)usedclk * 100u;   /* P1139: usedclk は名目10MHz の0.1µs単位(クロック倍率は正規化済み) */
 #if P404_ENABLE
         /* P404-TCWATCH: D-23調査。MFP Timer C の「分母」(= MFP_Timer() 呼出し回数)と
          * 制御レジスタ生値を 30 フレーム毎に無条件ダンプする。Timer C 沈黙時に
@@ -5095,6 +5117,7 @@ void mx68k_run_frame(void) {
              * ch0 を呼ぶため、P164/P165 の起動時診断(frame 55〜80 限定)は発火しない(意図的なスコープ限定)。
              * 計数はブロックの前後で値を読むだけ(どちらの分岐も DMA_Exec(0) をちょうど 1 回呼ぶ)。 */
             if (s_p1102_pace == P1102_PACE_LINE) {
+            mx68k_floppyu_fdcpt_dma0_pre();   /* P1141: p1102_dma0_exec の先頭と同じ(下の採取より前) */
             uint16_t p1102_mtc_pre = DMA[0].MTC;
             if (DMA[0].CSR & 0x08u) s_p1102_act_calls++;
             {
@@ -7544,7 +7567,13 @@ static int do_save_state(const char* path) {
         n = state_crtc_block(scratch, 1);   if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
         n = state_pal_block(scratch, 1);    if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
         n = state_mfp_block(scratch, 1);    if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
-        if (state_wblk(f, DMA, (uint32_t)sizeof(DMA))) { rc = -4; goto done; }  /* dmac_ch[4] */
+        {
+            /* P1141: 中継READの受け渡し(HO)中は、保存用の写しだけをエラー完了の形にして書く(実行中の DMA[] は変えない) */
+            dmac_ch dma_img[4];
+            memcpy(dma_img, DMA, sizeof(dma_img));
+            (void)mx68k_floppyu_fdcpt_ho_state_image(&dma_img[0]);
+            if (state_wblk(f, dma_img, (uint32_t)sizeof(dma_img))) { rc = -4; goto done; }  /* dmac_ch[4] */
+        }
         n = state_ioc_block(scratch, 1);    if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
         n = state_bgregs_block(scratch, 1); if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
         n = state_timing_block(scratch, 1); if (state_wblk(f, scratch, n)) { rc = -4; goto done; }
@@ -7783,6 +7812,7 @@ static int do_load_state(const char* path) {
     memcpy(BGCHR8,      blk_bgchr8,  STATE_BGCHR8_BYTES);
     memcpy(BGCHR16,     blk_bgchr16, STATE_BGCHR16_BYTES);
     memcpy(DMA,         blk_dma,   sizeof(DMA));
+    mx68k_floppyu_fdcpt_ho_drop("state_load");   /* P1141: ロードしたイメージを正とし、DMAC には書かない */
     if (exp_himem) memcpy(g_himem_buf, blk_himem, exp_himem);   /* P890 */
     state_crtc_block((uint8_t*)blk_crtc, 0);
     state_pal_block((uint8_t*)blk_pal, 0);

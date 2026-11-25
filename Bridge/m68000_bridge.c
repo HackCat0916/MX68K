@@ -17,6 +17,7 @@
 #include "EmulatorBridge.h"
 #include "opm_shadow.h"                /* P479: EmulatorBridge.c と共有する OPM レジスタシャドウ */
 #include "mercury_opn_shadow.h"        /* P491: EmulatorBridge.c と共有する Mercury OPN レジスタシャドウ */
+#include "mercury_cmdreg.h"            /* P1142: Mercury コマンドレジスタ読出し値の合成 */
 #include "sram_ext_bridge.h"           /* P494: SRAM 64KB 化の Fetch シャドウ配線/同期 */
 #include "windrv_bridge.h"             /* P642: Windrv($E9F000/$E9F001)の MMIO フック */
 #include "fpuboard_bridge.h"           /* P901: FPU ボード CZ-6BP1(MC68881)の CIR デバイス */
@@ -692,6 +693,82 @@ void p634_lrck_reset(void) {
     s_p634_stall_base_f  = 0;
     s_p634_stall_toggles = 0;
     s_p634_stall_done    = 0;
+}
+
+/* ====================================================================
+ *  P1142 (D-150): Mercury Unit コマンドレジスタ($ECC090/$ECC091)の読出し値。
+ *
+ *  Core mercury.c は $ECC091 read を常に 0、$ECC090 read を bit3(P634 で差替え)
+ *  以外 0 で返すが、実機 CPLD(artemis.abl :459-503)・XEiJ・pix68k はいずれも
+ *  $ECC091 で最後に書いたコマンド値、$ECC090 で 0xF0|EXPCL|!EXREQ|!M256|!ACKIG
+ *  を返す。合成式は mercury_cmdreg.h。Core の Mcry_Read は従来どおり実行し
+ *  (A2 の Mcry_LRTiming 反転副作用もそのまま)、戻り値だけを差し替える。
+ *  $ECC090 への書込は Core が破棄するので、Bridge 側で s_p1142_mode に保持する。
+ *  すべて g_mercury_installed の内側 — 未装着(既定)時は挙動不変。
+ *  スレッドモデルは P634 と同じ(mx68k_run_frame() のスレッドのみ)。
+ *  s_p1142_mode はセーブステート対象外(Mcry_Status 等の既存の限界と同列)。
+ * ==================================================================== */
+/* P492 ブロックの有効/無効に依存しないよう独立に宣言(同一型の重複宣言は合法)。 */
+extern uint8_t Mcry_Status;         /* Core/px68k/x68k/mercury.c — 最後に書いたコマンド値 */
+
+#define P1142_MCRY_CMD_HI_ADDR  0x00ECC090u   /* mercury.c case 0x90 */
+#define P1142_MCRY_CMD_LO_ADDR  0x00ECC091u   /* mercury.c case 0x91 */
+_Static_assert(P1142_MCRY_CMD_HI_ADDR == P634_LRCK_STATUS_ADDR,
+               "P1142: $ECC090 は P634 の差替えアドレスと同一であること");
+#define P1142_LOG_MAX           8u            /* [P1142-MCRYRB] 出力上限(サマリ行は枠外) */
+
+enum { P1142_K_RD_B90 = 0, P1142_K_RD_B91, P1142_K_RD_W90,
+       P1142_K_WR_B90, P1142_K_WR_W90, P1142_K_NUM };
+static const char *const s_p1142_kname[P1142_K_NUM] = {
+    "rd_b90", "rd_b91", "rd_w90", "wr_b90", "wr_w90"
+};
+
+static uint8_t  s_p1142_mode = 0;               /* $ECC090 へ最後に書いた値 */
+static uint32_t s_p1142_cnt[P1142_K_NUM];       /* 分母: 種別ごとの発生回数 */
+static uint32_t s_p1142_last_out[P1142_K_NUM];  /* 種別ごとの前回出力値 */
+static uint8_t  s_p1142_seen[P1142_K_NUM];      /* 種別ごとの初回出力済みフラグ */
+static uint32_t s_p1142_lines = 0;
+
+static void p1142_emit(const char *trig, const char *kind,
+                       uint32_t core, uint32_t out, int ready) {
+    debug_log("[P1142-MCRYRB] f=%u trig=%s kind=%s installed=%d core=0x%04x out=0x%04x"
+              " status=0x%02x mode=0x%02x isready=%d phase=%u"
+              " | rd_b90=%u rd_b91=%u rd_w90=%u wr_b90=%u wr_w90=%u\n",
+              (uint32_t)g_mx68k_frame_num, trig, kind, g_mercury_installed,
+              (unsigned)core, (unsigned)out,
+              (unsigned)Mcry_Status, (unsigned)s_p1142_mode, ready,
+              (unsigned)s_p634_lr_phase,
+              s_p1142_cnt[P1142_K_RD_B90], s_p1142_cnt[P1142_K_RD_B91],
+              s_p1142_cnt[P1142_K_RD_W90], s_p1142_cnt[P1142_K_WR_B90],
+              s_p1142_cnt[P1142_K_WR_W90]);
+}
+
+/* 計数は毎回、出力は「種別ごとの初回」か「前回出力から out が変化」のときのみ。 */
+static void p1142_note(int k, uint32_t core, uint32_t out, int ready) {
+    const char *trig;
+    s_p1142_cnt[k]++;
+    if (!s_p1142_seen[k])                 trig = "first";
+    else if (out != s_p1142_last_out[k])  trig = "changed";
+    else                                  return;
+    s_p1142_seen[k]     = 1;
+    s_p1142_last_out[k] = out;
+    if (s_p1142_lines >= P1142_LOG_MAX) return;
+    s_p1142_lines++;
+    p1142_emit(trig, s_p1142_kname[k], core, out, ready);
+}
+
+/* EmulatorBridge.c の p634_lrck_reset() 呼出し直後(init / ハードリセット)で呼ぶ。
+ * 実機 EXRESET で ACKIG=M256=1 ⇒ 読値 bit1-0=0 となるため mode=0 に戻す。 */
+void p1142_mcry_cmdreg_reset(void) {
+    int k, any = 0;
+    for (k = 0; k < P1142_K_NUM; k++) any |= (s_p1142_cnt[k] != 0);
+    if (g_mercury_installed && any)
+        p1142_emit("reset-summary", "-", 0u, 0u, (int)Mcry_IsReady());
+    s_p1142_mode  = 0;
+    s_p1142_lines = 0;
+    for (k = 0; k < P1142_K_NUM; k++) {
+        s_p1142_cnt[k] = 0; s_p1142_last_out[k] = 0; s_p1142_seen[k] = 0;
+    }
 }
 
 /* ====================================================================
@@ -25775,10 +25852,18 @@ static uint32_t trace_Memory_ReadB(const uint32_t addr) {
             s_p634_ovr_b_dmac++;
             p634_lrck_log_maybe();
         } else if (a634 == P634_LRCK_STATUS_ADDR) {     /* Mercury LR ステータスポート */
+            /* P1142: 上位バイト全体を合成(bit3 は同じ P634 位相なので P634 の差替えを包含)。 */
+            uint32_t core = val;
+            int rdy = (int)Mcry_IsReady();
             s_p634_rd_b_mcry++;
-            val = (val & ~(1u << 3)) | ((uint32_t)s_p634_lr_phase << 3);
+            val = mcry_cmdreg_hi(s_p1142_mode, s_p634_lr_phase, rdy);
             s_p634_ovr_b_mcry++;
             p634_lrck_log_maybe();
+            p1142_note(P1142_K_RD_B90, core, val, rdy);
+        } else if (a634 == P1142_MCRY_CMD_LO_ADDR) {    /* P1142: コマンド値の読み戻し */
+            uint32_t core = val;
+            val = mcry_cmdreg_lo(Mcry_Status);
+            p1142_note(P1142_K_RD_B91, core, val, (int)Mcry_IsReady());
         }
     }
     /* P637 (D-67) プローブ1 (byte read): Mercury Status Port $ECC0A1 の読出し計数。
@@ -27470,10 +27555,15 @@ static uint32_t trace_Memory_ReadW(const uint32_t addr_raw) {
             s_p634_ovr_w_dmac++;
             p634_lrck_log_maybe();
         } else if (a634 == P634_LRCK_STATUS_ADDR) {     /* Mercury LR ステータスポート */
+            /* P1142: 上位=$ECC090 合成値(bit11 は P634 位相)、下位=$ECC091(Mcry_Status)。 */
+            uint32_t core = val;
+            int rdy = (int)Mcry_IsReady();
             s_p634_rd_w_mcry++;
-            val = (val & ~(1u << 11)) | ((uint32_t)s_p634_lr_phase << 11);
+            val = mcry_cmdreg_word(mcry_cmdreg_hi(s_p1142_mode, s_p634_lr_phase, rdy),
+                                   mcry_cmdreg_lo(Mcry_Status));
             s_p634_ovr_w_mcry++;
             p634_lrck_log_maybe();
+            p1142_note(P1142_K_RD_W90, core, val, rdy);
         }
     }
     /* P637 (D-67) プローブ1 (word read): $ECC0A0 の word read は下位バイトが
@@ -28181,6 +28271,11 @@ static void trace_Memory_WriteB(const uint32_t addr, uint32_t val) {
         }
     }
 #endif
+    /* P1142: $ECC090 への byte 書込を保持する(Core は破棄する。書込自体は従来どおり到達)。 */
+    if (g_mercury_installed && (addr & 0x00FFFFFFu) == P1142_MCRY_CMD_HI_ADDR) {
+        s_p1142_mode = (uint8_t)val;
+        p1142_note(P1142_K_WR_B90, val, s_p1142_mode, (int)Mcry_IsReady());
+    }
     /* P506 (D-28): 外付け SCSI ボード窓 ($EA0000-$EA1FFF) への
      * byte/word 書込。XM6 vm/scsi.cpp:699,706-712 (WriteByte、
      * cpu->BusErr(addr, FALSE) — 第 2 引数が Read の TRUE と異なり、
@@ -29810,6 +29905,12 @@ static void trace_Memory_WriteW(const uint32_t addr_raw, uint32_t val) {
         }
     }
 #endif
+    /* P1142: $ECC090 への word 書込の上位バイトを保持する(偶数番地のみ一致)。
+     * 下位バイトは Core の既存経路(mem_wrap.c → Mcry_Write(0x91))で Mcry_Status へ入る。 */
+    if (g_mercury_installed && (addr & 0x00FFFFFFu) == P1142_MCRY_CMD_HI_ADDR) {
+        s_p1142_mode = (uint8_t)((val >> 8) & 0xFFu);
+        p1142_note(P1142_K_WR_W90, val, s_p1142_mode, (int)Mcry_IsReady());
+    }
     /* P506 (D-28): 外部 SCSI ボード窓 ($EA0000-$EA1FFF) へのワード書込。
      * XM6 vm/scsi.cpp:699,706-712 (WriteByte、
      * cpu->BusErr(addr, FALSE)) / :823 (WriteWord、WriteByte へ委譲)。

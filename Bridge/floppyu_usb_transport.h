@@ -44,6 +44,9 @@ int    mx68k_floppyu_usb_port1_exec(const uint8_t* tx, size_t txlen,
 /* port2: 受信は非ブロッキング(リングから取り出すだけ)。戻り値=取り出したバイト数(未接続は0)。
  * 消費者は1スレッドのみ(SPSC)。 */
 size_t mx68k_floppyu_usb_port2_read(uint8_t* buf, size_t cap);
+/* P1139: 1回で返すのは受信スレッドの書込み1回(チャンク)の境界まで。*t_last_us に返した最後のバイトの
+ * 受信時刻(CLOCK_MONOTONIC の µs)、時刻の記録が上書き済みなら -1(このときは時刻の分かる次のチャンクの手前まで) */
+size_t mx68k_floppyu_usb_port2_read_ts(uint8_t* buf, size_t cap, int64_t* t_last_us);
 int    mx68k_floppyu_usb_port2_rx_overflowed(void);   /* sticky、次の接続で0に戻る */
 /* port2: 送信は同期(参照実装の 'W' 応答 = 0x4D+データ返送用)。戻り値は送信バイト数、
  * それ以外は port1_exec と同じ規約(-1/-2/-3)。 */

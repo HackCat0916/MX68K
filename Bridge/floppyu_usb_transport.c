@@ -54,6 +54,12 @@ int mx68k_floppyu_usb_port1_exec(const uint8_t* tx, size_t txlen, uint8_t* rx, s
     return -1;
 }
 size_t mx68k_floppyu_usb_port2_read(uint8_t* buf, size_t cap) { (void)buf; (void)cap; return 0; }
+size_t mx68k_floppyu_usb_port2_read_ts(uint8_t* buf, size_t cap, int64_t* t_last_us)
+{
+    (void)buf; (void)cap;
+    if (t_last_us) *t_last_us = -1;
+    return 0;
+}
 int    mx68k_floppyu_usb_port2_rx_overflowed(void) { return 0; }
 int    mx68k_floppyu_usb_port2_write(const uint8_t* buf, size_t len, int timeout_ms)
 {
@@ -147,6 +153,18 @@ static _Atomic(uint64_t)  s_rx_overflow;     /* 現接続の破棄バイト数 *
 static _Atomic int        s_rx_overflowed;   /* sticky、接続確立時に0へ */
 static _Atomic(uint64_t)  s_rx_conn_bytes;   /* 現接続の受信バイト数 */
 static uint32_t           s_consumer_gen = 0; /* 消費者専用 */
+
+/* ---- P1139: 受信チャンクの時刻リング(書込み1回=1項目、[start,end) は絶対位置) ----
+ * 受信スレッドは項目を書いてから s_rx_wpos を release で公開する。項目ごとの seq は奇数=書込み中(seqlock)。
+ * 読み手は wpos を acquire で読んだ後に項目を読み、seq が前後で一致し偶数のときだけ採用する */
+#define FUSB_TS_RING_N 16u
+typedef struct {
+    _Atomic(uint32_t) seq;
+    _Atomic(uint64_t) start, end;
+    _Atomic(int64_t)  t_us;
+} fusb_ts_ent;
+static fusb_ts_ent        s_ts_ring[FUSB_TS_RING_N];
+static uint32_t           s_ts_widx = 0;      /* 受信スレッド専用 */
 
 /* ---- 集計(sum 行) ---- */
 static _Atomic(uint64_t) s_cnt_scans, s_cnt_connects, s_cnt_disconnects;
@@ -334,6 +352,16 @@ static void fusb_ring_write(const uint8_t* p, size_t n)
     size_t   k    = (n < room) ? n : (size_t)room;
     for (size_t i = 0; i < k; i++) {
         s_rx_ring[(w + i) & FUSB_RX_RING_MASK] = p[i];
+    }
+    if (k > 0) {   /* P1139: wpos の公開より前に時刻項目を書く */
+        fusb_ts_ent* e = &s_ts_ring[s_ts_widx++ % FUSB_TS_RING_N];
+        uint32_t sq = atomic_load_explicit(&e->seq, memory_order_relaxed);
+        atomic_store_explicit(&e->seq, sq + 1u, memory_order_relaxed);
+        atomic_thread_fence(memory_order_release);
+        atomic_store_explicit(&e->start, w, memory_order_relaxed);
+        atomic_store_explicit(&e->end, w + k, memory_order_relaxed);
+        atomic_store_explicit(&e->t_us, fusb_now_us(), memory_order_relaxed);
+        atomic_store_explicit(&e->seq, sq + 2u, memory_order_release);
     }
     atomic_store_explicit(&s_rx_wpos, w + k, memory_order_release);
     if (k < n) {
@@ -869,6 +897,61 @@ size_t mx68k_floppyu_usb_port2_read(uint8_t* buf, size_t cap)
         buf[i] = s_rx_ring[(r + i) & FUSB_RX_RING_MASK];
     }
     atomic_store_explicit(&s_rx_rpos, r + n, memory_order_release);
+    return n;
+}
+
+/* P1139: 位置 pos を含む書込みチャンクの {end, 時刻} を探す。見つからなければ 0(リングが周回して上書き済み)で、
+ * *end には pos より後で時刻が分かっている最古のチャンクの開始位置(無ければ UINT64_MAX)を返す */
+static int fusb_ts_lookup(uint64_t pos, uint64_t* end, int64_t* t_us)
+{
+    uint64_t next_start = UINT64_MAX;
+    for (uint32_t i = 0; i < FUSB_TS_RING_N; i++) {
+        fusb_ts_ent* e = &s_ts_ring[i];
+        uint32_t s1 = atomic_load_explicit(&e->seq, memory_order_acquire);
+        if (s1 & 1u) continue;
+        uint64_t st = atomic_load_explicit(&e->start, memory_order_relaxed);
+        uint64_t en = atomic_load_explicit(&e->end, memory_order_relaxed);
+        int64_t  t  = atomic_load_explicit(&e->t_us, memory_order_relaxed);
+        atomic_thread_fence(memory_order_acquire);
+        uint32_t s2 = atomic_load_explicit(&e->seq, memory_order_relaxed);
+        if (s1 != s2 || s1 == 0u) continue;
+        if (st <= pos && pos < en) { *end = en; *t_us = t; return 1; }
+        if (st > pos && st < next_start) next_start = st;
+    }
+    *end = next_start;
+    return 0;
+}
+
+/* P1139: port2_read と同じ取り出しだが、1回で返すのは1つの書込みチャンクの境界まで。
+ * *t_last_us に返した最後のバイトを含むチャンクの書込み時刻(fusb_now_us)、見つからなければ -1 を返す
+ * (このときは時刻の分かる次のチャンクの手前まで返す) */
+size_t mx68k_floppyu_usb_port2_read_ts(uint8_t* buf, size_t cap, int64_t* t_last_us)
+{
+    if (t_last_us) *t_last_us = -1;
+    if (!buf || cap == 0) return 0;
+    if (atomic_load_explicit(&s_state, memory_order_acquire) != FUSB_CONNECTED) return 0;
+
+    uint32_t g = atomic_load_explicit(&s_rx_gen, memory_order_acquire);
+    if (g != s_consumer_gen) {
+        uint64_t base = atomic_load_explicit(&s_rx_connect_wpos, memory_order_acquire);
+        atomic_store_explicit(&s_rx_rpos, base, memory_order_release);
+        s_consumer_gen = g;
+    }
+
+    uint64_t r = atomic_load_explicit(&s_rx_rpos, memory_order_relaxed);
+    uint64_t w = atomic_load_explicit(&s_rx_wpos, memory_order_acquire);
+    uint64_t avail = w - r;
+    if (avail == 0) return 0;
+    uint64_t en = 0;
+    int64_t  t = -1;
+    (void)fusb_ts_lookup(r, &en, &t);   /* 見つからなくても、時刻の分かる次のチャンクの手前で区切る */
+    if (en != UINT64_MAX && en > r && en - r < avail) avail = en - r;
+    size_t   n = (avail < cap) ? (size_t)avail : cap;
+    for (size_t i = 0; i < n; i++) {
+        buf[i] = s_rx_ring[(r + i) & FUSB_RX_RING_MASK];
+    }
+    atomic_store_explicit(&s_rx_rpos, r + n, memory_order_release);
+    if (t_last_us) *t_last_us = t;
     return n;
 }
 

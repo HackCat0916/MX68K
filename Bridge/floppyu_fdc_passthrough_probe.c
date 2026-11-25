@@ -60,10 +60,13 @@
 #include "floppyu_vslice.h"   /* mx68k_floppyu_vslice_claimed */
 #include "dmac.h"   /* Core:dmac.h、DMA[4]・dmac_ch 構造体・OCR/MTC フィールド定義(読取りのみ) */
 #include "../Core/px68k/x68k/m68000.h"   /* M68K_PC/M68K_SR 列挙値(読取りのみ、Bridge:m68000_bridge.c:7 と同じ手法) */
+#include "EmulatorBridge.h"   /* P1140: mx68k_read_memory_bytes(診断ダンプ専用) */
+#include "mx_cpu_iface.h"     /* P1140: mx_cpu_get_pc/ssp/dreg/areg(診断ダンプ専用) */
 
 extern void debug_log(const char* fmt, ...);   /* Bridge/EmulatorBridge.c で定義 */
 extern uint32_t m68000_get_reg(int32_t regnum); /* Bridge:m68000_bridge.c で定義、ヘッダ未宣言 */
 extern int  g_mx68k_frame_num;                 /* EmulatorBridge.c で定義 */
+extern uint64_t g_mx68k_guest_ns;              /* P1139: 実行済みゲスト時間[ns]、EmulatorBridge.c で定義 */
 extern int  mx68k_turbo_audio_ratio_q16_get(void); /* P1064: EmulatorBridge.c で定義(読取り専用、ログ記録のみ) */
 
 /* Core:x68k/mem_wrap.c:58/98 の表、Core:x68k/fdc.h:7/8/14、Core:x68k/dmac.h:48。
@@ -395,6 +398,31 @@ static int      s_rl_p2_kind = RL_P2_NONE;
 static uint8_t  s_rl_p2_len_lo = 0;
 static uint32_t s_rl_p2_len = 0, s_rl_p2_got = 0;
 static int      s_rl_in_poll = 0;
+/* P1139(D-149-a): 中継READ完了のゲストへの公開を、送信時のゲスト時刻+装置の実所要時間(d_wall)まで遅らせる(RDPACE)。
+ * hold=1 は「'R'フレームは受信・処理済みだが、ゲストにはまだ RL_RD_WAIT に見せている」状態(新しい状態値は作らない) */
+#define P1139_TAG             "[P1139-RDPACE]"
+#define FU_RD_PACE_SLACK_US   50        /* ペーシングでゲストが送信基準の壁時計を先行してよい上限(導出した設計値) */
+#define FU_RD_PACE_GUARD_MS   (FU_READ_DEADLINE_MS + 500)   /* ペーシングループ自体の保険(FU_E5_RDWAIT_CAP_MS と同じ考え方) */
+#define FU_G14_LOG_LIMIT      32u
+static int      s_rl_rdpace_on = 1;        /* MX68K_FLOPPYU_RDPACE=0 で 0(修正前と同じ即時公開、比較専用) */
+static int      s_rl_rdpace_cfg_logged = 0;
+static int      s_rl_rd_hold = 0;
+static uint64_t s_rl_rd_g0 = 0;            /* 送信時のゲスト時刻 */
+static uint64_t s_rl_rd_reveal_at = 0;     /* 公開してよいゲスト時刻 */
+static uint64_t s_rl_rd_g_det = 0;
+static int64_t  s_rl_rd_t_rx = 0, s_rl_rd_t_det = 0, s_rl_rd_d_wall = 0;
+static int      s_rl_rd_ts_fb = 0, s_rl_rd_clamped = 0, s_rl_rd_order_bad = 0;
+static uint32_t s_rl_rd_pace_sleeps = 0;
+static int64_t  s_rl_rd_pace_us = 0;
+static int      s_rl_rd_hold_n = 0;        /* この READ を hold にしたか(公開時のログ用) */
+static uint32_t s_rl_rd_n_sup = 0;         /* 公開時に払い出す量(受信時に確定) */
+static int64_t  s_rl_p2_chunk_ts = -1;     /* rl_poll が今処理しているチャンクの受信時刻(-1=記録なし) */
+/* 集計(プロセス寿命、分母を併記) */
+static uint32_t s_rp_total, s_rp_target, s_rp_hold, s_rp_immediate, s_rp_forced, s_rp_ts_fb, s_rp_clamped, s_rp_order_bad;
+static uint32_t s_rp_e_hist[5];            /* |e| <50µs / <200µs / <1ms / <5ms / >=5ms */
+static uint32_t s_rp_g14_viol, s_rp_g14_fwd_lines, s_rp_g14_rev_lines, s_rp_hold_drop;
+static int64_t  s_rp_pace_us_sum = 0;
+static uint32_t s_rp_pace_sleeps_sum = 0;
 /* 接続・ブリングアップ・故障停止・モード表示 */
 static int      s_rl_bringup_valid = 0;
 static uint32_t s_rl_bringup_gen = 0;
@@ -1832,7 +1860,8 @@ static int rl_in_write_wait(void)
 }
 static int rl_op_needs_device(void)
 {
-    return s_rl_state == RL_RD_WAIT || s_rl_state == RL_RID_WAIT || rl_in_write_wait();
+    /* P1139: hold 中はフレーム受信済みなので装置は不要(従来の RD_SUPPLY と同じ扱い) */
+    return (s_rl_state == RL_RD_WAIT && !s_rl_rd_hold) || s_rl_state == RL_RID_WAIT || rl_in_write_wait();
 }
 static int rl_in_read_phase(void)
 {
@@ -2578,8 +2607,11 @@ static void rl_fr_note_st3(uint8_t us_hd, uint8_t st3, const char* src)
               (unsigned)s_fr_st3_chg);
 }
 
+static void rl_rd_reveal(int forced);   /* P1139: 定義は rl_read_frame_done の直後 */
 static void rl_reset_link_state(void)
 {
+    /* P1139: 世代変化時の hold は即座に公開する(フレームは受信済み。従来の RD_SUPPLY も世代変化で打ち切らない) */
+    if (s_rl_state == RL_RD_WAIT && s_rl_rd_hold) rl_rd_reveal(2);
     e5p_close("gen");   /* P1054: 観測窓の強制終端(観測のみ) */
     rl_fr_reset_state("gen");   /* P1123(S-3) */
     /* P1053: 世代変化で柵は閉じる(fo_gen 不一致に加え、P1055 では ue[全]++)。呼出し元が s_rl_gen_seen を更新する前に呼ぶので、
@@ -2604,6 +2636,71 @@ static void rl_reset_link_state(void)
     s_rl_p2_kind = RL_P2_NONE;
 }
 
+/* P1140(D-149-b): 判定ロジック確認用の診断ダンプ。中継READ us_dev=1 C=1 H=0 R∈{7,8} の begin/end/reveal で
+ * CPUレジスタ・PC前後256B・SSPから256Bを出す。読取りのみで振り分け器の状態には一切書き込まない。件数上限なし */
+#define P1140_TAG "[P1140-JUDGEDUMP]"
+static uint8_t  s_p1140_eot = 0;   /* begin 時の EOT(end/reveal 行用、s_rl_cmd は後続で上書きされるため) */
+static uint32_t s_p1140_seq = 0;
+static uint32_t s_p1141_judge_n = 0;   /* P1141: 判定式ダンプ(プロセスあたり1回)を出した回数 */
+
+static int p1140_match(uint8_t us, const uint8_t* chrn)
+{
+    return us == 1u && chrn[0] == 1u && chrn[1] == 0u && (chrn[2] == 7u || chrn[2] == 8u);
+}
+
+static void p1140_hexdump(const char* what, uint32_t seq, uint32_t addr, uint32_t len)
+{
+#ifndef MX68K_FLOPPYU_USB_SELFTEST
+    uint8_t buf[512], kind[512];
+    if (len > sizeof(buf)) len = sizeof(buf);
+    mx68k_read_memory_bytes(addr, buf, kind, len);
+    for (uint32_t o = 0; o < len; o += 32u) {
+        char hx[32 * 2 + 1];
+        uint32_t n = (len - o < 32u) ? len - o : 32u, nk = 0;
+        for (uint32_t i = 0; i < n; i++) {
+            snprintf(hx + i * 2, 3, "%02x", buf[o + i]);
+            if (kind[o + i] >= MX68K_MEMKIND_IO_UNSAFE) nk++;   /* 実体を読めなかったバイト(0xFF で埋まる) */
+        }
+        debug_log(P1140_TAG " seq=%u %s %06x: %s nk=%u\n", (unsigned)seq, what, (unsigned)((addr + o) & 0xFFFFFFu), hx, (unsigned)nk);
+    }
+#else
+    (void)what; (void)seq; (void)addr; (void)len;
+#endif
+}
+
+static void p1140_dump(const char* ev, const char* result)
+{
+    if (!p1140_match(s_rl_rd_us, s_rl_rd_chrn)) return;
+    uint32_t seq = ++s_p1140_seq;
+#ifndef MX68K_FLOPPYU_USB_SELFTEST
+    uint32_t pc = mx_cpu_get_pc() & 0xFFFFFFu, ssp = mx_cpu_get_ssp() & 0xFFFFFFu;
+    uint32_t d[8], a[7];
+    for (int i = 0; i < 8; i++) d[i] = mx_cpu_get_dreg(i);
+    for (int i = 0; i < 7; i++) a[i] = mx_cpu_get_areg(i);
+#else
+    uint32_t pc = 0, ssp = 0, d[8] = {0}, a[7] = {0};
+#endif
+    debug_log(P1140_TAG " seq=%u ev=%s f=%d wall_us=%lld guest_ns=%llu us_dev=%u C=%u H=%u R=%u N=%u EOT=%u result=%s"
+              " PC=0x%06x SSP=0x%06x SR=0x%04x\n",
+              (unsigned)seq, ev, g_mx68k_frame_num, (long long)rl_now_us(), (unsigned long long)g_mx68k_guest_ns,
+              (unsigned)s_rl_rd_us, s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], s_rl_rd_chrn[3],
+              (unsigned)s_p1140_eot, result ? result : "-",
+              (unsigned)pc, (unsigned)ssp, (unsigned)m68000_get_reg(M68K_SR));
+    debug_log(P1140_TAG " seq=%u regs D0=%08x D1=%08x D2=%08x D3=%08x D4=%08x D5=%08x D6=%08x D7=%08x"
+              " A0=%08x A1=%08x A2=%08x A3=%08x A4=%08x A5=%08x A6=%08x\n",
+              (unsigned)seq, (unsigned)d[0], (unsigned)d[1], (unsigned)d[2], (unsigned)d[3],
+              (unsigned)d[4], (unsigned)d[5], (unsigned)d[6], (unsigned)d[7],
+              (unsigned)a[0], (unsigned)a[1], (unsigned)a[2], (unsigned)a[3], (unsigned)a[4], (unsigned)a[5], (unsigned)a[6]);
+    p1140_hexdump("pc", seq, pc >= 256u ? pc - 256u : 0u, 512u);
+    p1140_hexdump("stk", seq, ssp, 256u);
+    /* P1141: R7/R8 の計数の格納先(毎イベント)と、R8 の払出し完了時に戻り先 0x0526be 周辺の判定式(プロセスあたり1回) */
+    p1140_hexdump("res", seq, 0x06CFD8u, 16u);
+    if (strcmp(ev, "supply_done") == 0 && s_rl_rd_chrn[2] == 8u && s_p1141_judge_n == 0u) {
+        s_p1141_judge_n++;
+        p1140_hexdump("judge", seq, 0x052600u, 512u);
+    }
+}
+
 /* P1035: 末尾に読出し開始時の C/H/R/N・装置側ユニット・データFNV(成功時のみ)を追加(既存フィールドは不変) */
 static void rl_log_read_end(const char* result, int fnv_valid, uint32_t fnv)
 {
@@ -2626,6 +2723,7 @@ static void rl_log_read_end(const char* result, int fnv_valid, uint32_t fnv)
               s_rl_rd_is_rdel,    /* P1120: READ DELETED の終了を区別する */
               s_rl_rd_nd, s_rl_rd_ndm ? "cpu" : "dma", sup,   /* P1122(D-136): 末尾追加のみ(既存フィールドは不変) */
               s_rl_rd_multi);                                   /* P1129(D-137): 末尾追加のみ */
+    p1140_dump("end", result);
 }
 
 static void rl_log_rid_end(const char* result, const uint8_t* res)
@@ -2698,13 +2796,182 @@ static void rl_ar_after_unknown(const char* why, const uint8_t* res)
     rl_ar_disarm(why);
 }
 
-/* 進行中の READ/READ ID を打ち切る。aborted_by_cmd 以外は合成エラー+割込み(DMACには一切触れない)。
+/* P1139: 中継READ1件につき1行(件数の上限なし)。outcome=reveal(公開)/drop:<理由>(公開せずに hold を落とした)。
+ * e_ns = (g_rev − g0) − d_wall×1000 は派生値で、生値は同じ行に全て出す */
+static void rl_rdpace_log(const char* outcome, int forced, uint64_t g_rev)
+{
+    int64_t e_ns = (int64_t)(g_rev - s_rl_rd_g0) - s_rl_rd_d_wall * 1000;
+    debug_log(P1139_TAG " f=%d C=%u H=%u R=%u outcome=%s g0=%llu t0=%lld t_rx=%lld t_det=%lld g_det=%llu d_wall=%lld hold=%d"
+              " g_rev=%llu e_ns=%lld pace_sleeps=%u pace_us=%lld ts_src=%s clamped=%d order_bad=%d forced=%d\n",
+              g_mx68k_frame_num, s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], outcome,
+              (unsigned long long)s_rl_rd_g0, (long long)s_rl_op_t0_us, (long long)s_rl_rd_t_rx, (long long)s_rl_rd_t_det,
+              (unsigned long long)s_rl_rd_g_det, (long long)s_rl_rd_d_wall, s_rl_rd_hold_n, (unsigned long long)g_rev,
+              (long long)e_ns, (unsigned)s_rl_rd_pace_sleeps, (long long)s_rl_rd_pace_us,
+              s_rl_rd_ts_fb ? "fallback_now" : "transport", s_rl_rd_clamped, s_rl_rd_order_bad, forced);
+}
+
+/* P1139: hold を公開せずに落とす(打切り・リセット・世代変化以外の状態戻り)。hold でなければ何もしない */
+static void rl_rd_hold_drop(const char* why)
+{
+    if (!s_rl_rd_hold) return;
+    s_rl_rd_hold = 0;
+    s_rp_hold_drop++;
+    char oc[48];
+    snprintf(oc, sizeof(oc), "drop:%s", why);
+    rl_rdpace_log(oc, 0, g_mx68k_guest_ns);
+}
+
+/* P1141(D-149): 中継READの DMAC ch0 受け渡し(HO)。適格な READ の受付時に MTC を退避して 0 にし(COC を隠す)、
+ * 公開後の次の ch0 呼出し直前(前置フック)で MTC を戻して一括転送する。DMAC への書込みは W-1(受付)・
+ * W-2(RE_ABORTED の MTC 復元)・W-3(前置フック)の3箇所だけ。W-2/W-3 は署名一致のときだけ書く */
+#define P1141_TAG "[P1141-DMAHO]"
+enum { HO_OFF = 0, HO_HIDDEN, HO_BURST, HO_FIN, HO_NSTATE };
+static const char* const HO_NAME[HO_NSTATE] = { "off", "hidden", "burst", "fin" };
+enum { HOW_ENV_OFF = 0, HOW_ND, HOW_NOT_ACT, HOW_CCR, HOW_CNT, HOW_DIR, HOW_CHAIN, HOW_REQG, HOW_SIZE, HOW_MTC, HOW_N };
+static const char* const HOW_NAME[HOW_N] = { "env_off", "nd", "not_act", "ccr", "cnt", "dir", "chain", "reqg", "size", "mtc" };
+enum { HOO_NORMAL = 0, HOO_SHORT, HOO_RESULT_ONLY, HOO_ABORT, HOO_DROP, HOO_CANCEL, HOO_BUSERR, HOO_STALL, HOO_N };
+static const char* const HOO_NAME[HOO_N] = { "normal", "short", "result_only", "abort", "drop", "cancel", "buserr", "stall" };
+#define FU_HO_ORPHAN_LOG_LIMIT 32u
+static int      s_rl_ho = HO_OFF;
+static int      s_rl_ho_in_pre = 0;
+static int      s_ho_env_on = 1;           /* MX68K_FLOPPYU_DMAHO=0 で 0(修正前後の比較専用) */
+static int      s_ho_cfg_logged = 0;
+static int      s_ho_elig = 0;
+static const char* s_ho_why = "-";
+static uint16_t s_ho_mtc0 = 0;
+static uint32_t s_ho_mar0 = 0;
+static uint8_t  s_ho_ocr0 = 0, s_ho_ccr0 = 0, s_ho_csr0 = 0, s_ho_dcr0 = 0;
+static uint64_t s_ho_g0 = 0, s_ho_g_rev = 0;
+static uint32_t s_ho_burst_n = 0;
+static char     s_ho_outcome[48] = "-";    /* HO_FIN で実行するエラー完了の理由 */
+/* 集計(プロセス寿命、分母を併記) */
+static uint32_t s_ho_reads = 0, s_ho_elig_n = 0, s_ho_why_n[HOW_N], s_ho_out_n[HOO_N];
+static uint32_t s_ho_orphan = 0, s_ho_orphan_lines = 0, s_ho_si_n = 0, s_ho_si_cancel = 0;
+static unsigned long long s_ho_burst_bytes = 0;
+
+/* HO 中の署名(W-2/W-3/ステートイメージ共通)。一致なら NULL、不一致なら最初の不一致項目 */
+static const char* ho_sig_mismatch(const dmac_ch* c)
+{
+    if (c->MTC != 0u)                         return "mtc";
+    if ((c->CSR & 0xF8u) != 0x08u)            return "csr";
+    if ((c->CCR & 0xE0u) != 0x80u)            return "ccr";
+    if ((c->MAR & 0xFFFFFFu) != s_ho_mar0)    return "mar";
+    if (c->OCR != s_ho_ocr0)                  return "ocr";
+    return NULL;
+}
+
+static void ho_count_outcome(const char* outcome)
+{
+    for (int i = 0; i < HOO_N; i++) {
+        size_t n = strlen(HOO_NAME[i]);
+        if (strncmp(outcome, HOO_NAME[i], n) == 0 && (outcome[n] == '\0' || outcome[n] == ':')) { s_ho_out_n[i]++; return; }
+    }
+}
+
+/* 中継READ1件につき1行(件数の上限なし)。dt_g は派生値で、生値 g0/g_end は同じ行にある */
+static void ho_log(const char* outcome, const char* note)
+{
+    uint64_t g_end = g_mx68k_guest_ns;
+    if (s_ho_elig) ho_count_outcome(outcome);
+    debug_log(P1141_TAG " f=%d C=%u H=%u R=%u N=%u elig=%d why=%s mtc0=0x%04x mar0=0x%06x ocr0=0x%02x ccr0=0x%02x csr0=0x%02x"
+              " dcr0=0x%02x g0=%llu g_rev=%llu g_end=%llu dt_g=%lld d_wall=%lld n_sup=%u burst_n=%u mtc_end=0x%04x"
+              " mar_end=0x%06x csr_end=0x%02x cer_end=0x%02x outcome=%s note=%s\n",
+              g_mx68k_frame_num, s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], s_rl_rd_chrn[3], s_ho_elig, s_ho_why,
+              (unsigned)s_ho_mtc0, (unsigned)s_ho_mar0, (unsigned)s_ho_ocr0, (unsigned)s_ho_ccr0, (unsigned)s_ho_csr0,
+              (unsigned)s_ho_dcr0, (unsigned long long)s_ho_g0, (unsigned long long)s_ho_g_rev, (unsigned long long)g_end,
+              (long long)(g_end - s_ho_g0), (long long)s_rl_rd_d_wall, (unsigned)s_rl_rd_n_sup, (unsigned)s_ho_burst_n,
+              (unsigned)DMA[0].MTC, (unsigned)(DMA[0].MAR & 0xFFFFFFu), (unsigned)DMA[0].CSR, (unsigned)DMA[0].CER,
+              outcome, note ? note : "-");
+}
+
+static void ho_to_fin(const char* outcome)
+{
+    snprintf(s_ho_outcome, sizeof(s_ho_outcome), "%s", outcome);
+    s_rl_ho = HO_FIN;
+}
+
+/* DMAC に書かずに HO を落とす */
+static void ho_drop_int(const char* why)
+{
+    if (s_rl_ho == HO_OFF) return;
+    char oc[48];
+    snprintf(oc, sizeof(oc), "drop:%s", why);
+    s_rl_ho = HO_OFF;
+    ho_log(oc, NULL);
+}
+
+/* エラー完了(W-3)。SAB で CER=0x11・ERR・ACT/STR 解除(Core:dmac.c:142-145、CCR の INT は書込みで消えるので DMAC 割込みは
+ * 上がらない)。Core の DMAERR は COC を立てないので補う(XEiJ HD63450.java:636 と同じ見え方) */
+static void ho_err_complete(void)
+{
+    DMA_Write(0xE84007u, 0x10u);
+    DMA[0].CSR |= 0x80u;
+}
+
+/* rl_abort_op から(READ 待ち/払出し中のみ)。RE_ABORTED は署名一致なら MTC を戻す(W-2)、それ以外は HO_FIN へ */
+static void ho_on_abort(int re)
+{
+    if (s_rl_ho != HO_HIDDEN && s_rl_ho != HO_BURST) return;
+    if (re == RE_ABORTED) {
+        const char* mm = ho_sig_mismatch(&DMA[0]);
+        char nt[32];
+        if (!mm) { DMA[0].MTC = s_ho_mtc0; snprintf(nt, sizeof(nt), "w2=restored"); }
+        else     snprintf(nt, sizeof(nt), "w2=skip:%s", mm);
+        s_rl_ho = HO_OFF;
+        ho_log("drop:aborted_by_cmd", nt);
+        return;
+    }
+    char oc[48];
+    snprintf(oc, sizeof(oc), "abort:%s", RE_NAME[re]);
+    ho_to_fin(oc);
+}
+
+/* 受付(W-1)。rl_read_begin の送信成功後、P1139 の g0 記録の後に呼ぶ。n は READ コマンドの第6バイト(N) */
+static void ho_accept(uint8_t n)
+{
+    const dmac_ch* c = &DMA[0];
+    unsigned sz = ((c->OCR >> 4) & 3u) + ((c->DCR >> 1) & 4u);   /* Core:x68k/dmac.c:238 の switch 添字 */
+    int w = !s_ho_env_on                                  ? HOW_ENV_OFF
+          : s_rl_rd_nd                                    ? HOW_ND
+          : (c->CSR & 0xF8u) != 0x08u                     ? HOW_NOT_ACT
+          : (c->CCR & 0x40u)                              ? HOW_CNT
+          : (c->CCR & 0xE0u) != 0x80u                     ? HOW_CCR
+          : !(c->OCR & 0x80u)                             ? HOW_DIR
+          : (c->OCR & 0x08u)                              ? HOW_CHAIN
+          : (c->OCR & 3u) != 2u                           ? HOW_REQG
+          : !(sz == 0u || sz == 3u || sz == 4u)           ? HOW_SIZE
+          : (n > 7u || c->MTC != (uint16_t)(128u << n))   ? HOW_MTC
+          : -1;
+    s_ho_reads++;
+    s_ho_mtc0 = c->MTC; s_ho_mar0 = c->MAR & 0xFFFFFFu;
+    s_ho_ocr0 = c->OCR; s_ho_ccr0 = c->CCR; s_ho_csr0 = c->CSR; s_ho_dcr0 = c->DCR;
+    s_ho_g0 = s_rl_rd_g0; s_ho_g_rev = 0; s_ho_burst_n = 0;
+    snprintf(s_ho_outcome, sizeof(s_ho_outcome), "-");
+    if (w >= 0) {
+        s_ho_elig = 0;
+        s_ho_why = HOW_NAME[w];
+        s_ho_why_n[w]++;
+        s_rl_ho = HO_OFF;
+        ho_log("ineligible", NULL);
+        return;
+    }
+    s_ho_elig = 1;
+    s_ho_why = "-";
+    s_ho_elig_n++;
+    DMA[0].MTC = 0;   /* W-1: Core は MTC=0 の間は転送ループに入らず COC も立てない(Core:dmac.c:236) */
+    s_rl_ho = HO_HIDDEN;
+}
+
+/* 進行中の READ/READ ID を打ち切る。aborted_by_cmd 以外は合成エラー+割込み。
+ * P1141: DMAC へは書かない。例外は HO 中の RE_ABORTED(ゲストの次コマンド受付)による MTC の1ワード復元(W-2、署名一致時のみ)。
+ * それ以外の HO 中の打切りは HO_FIN を立てるだけで、エラー完了は前置フックが行う。
  * P1032: 書込み待ち(装置へ書込みコマンド送信済み)を打ち切るときは、RE値を問わず同一プロセスでの以後の書込みを
  * 全て停止する(ラッチ)。前のコマンドで装置が送出した古い'W'が受信リングに滞留し、後の新しいコマンドの待ち中に
  * 解釈されると、'W'応答の4条件ではコマンド個体を区別できず新コマンドのデータを送ってしまうため、その状況自体を
  * 作らない(Fable5 M1)。次段(モード1)では、装置応答とコマンドを対応付ける識別手段の導入が必要 */
 static void rl_abort_op(int re)
 {
+    rl_rd_hold_drop(RE_NAME[re]);   /* P1139: 打ち切る READ が hold 中なら公開せずに落とす */
     if (rl_in_write_wait()) {
         if (re == RE_MEDIA) s_rl_g3_abort++;   /* P1062: RE_MEDIA は 'D'/'d' 処理の WAIT_W 打切りからのみ */
         s_rl_fmt1_inflight = 0;                /* P1064: spent はそのまま */
@@ -2721,6 +2988,7 @@ static void rl_abort_op(int re)
     }
     if (s_rl_state == RL_RD_WAIT || s_rl_state == RL_RD_SUPPLY) {
         s_rl_read_err[re]++;
+        ho_on_abort(re);   /* P1141: RE_ABORTED は W-2、それ以外は HO_FIN */
         rl_log_read_end(RE_NAME[re], 0, 0);
         if (s_rl_p2_kind == RL_P2_TARGET) s_rl_p2_kind = RL_P2_DISCARD;
         if (re == RE_ABORTED) { s_rl_aborted_by_cmd++; s_rl_state = RL_IDLE; s_rl_rdnum = 0; return; }
@@ -2889,13 +3157,15 @@ static void rl_log_multi_refused(uint8_t r, uint8_t eot, uint8_t n, const char* 
 static void rl_read_begin(void)
 {
     const uint8_t* p = s_rl_cmd;   /* [0]cmd [1]US/HD [2]C [3]H [4]R [5]N [6]EOT [7]GPL [8]DTL */
+    ho_drop_int("new_read");   /* P1141: 通常は受付時の打切りで落ちている */
     s_rl_rd_is_diag = ((p[0] & 0xBFu) == 0x02u);   /* P1116: rl_exec の case 2 から来た READ DIAG */
     if (s_rl_rd_is_diag) s_rl_diag_begin++;
     s_rl_rd_cmd5 = p[0] & 0x1Fu;                    /* P1120: 書込み安全フックの許可リスト判定に使う */
     s_rl_rd_is_rdel = (s_rl_rd_cmd5 == 0x0Cu);      /* P1120: rl_exec の case 12 から来た READ DELETED */
     if (s_rl_rd_is_rdel) s_rl_rdel_begin++;
     /* P1122(D-136): CPU 転送判定を受付時にラッチ(READ DATA/DIAG/DELETED 共通、XEiJ+t isReadTransCommand と同範囲)。
-     * ND と受付時 MTC==0 の両方が CPU 転送を示すときだけ 0xF0。MX は DMAC の MTC を書き換えない */
+     * ND と受付時 MTC==0 の両方が CPU 転送を示すときだけ 0xF0。
+     * P1141: HO 適格の READ だけは送信成功後に MTC を 0 にする(W-1)。このラッチはそれより前に置くこと(退避前の値を見る) */
     if (s_fr_dev_high) s_fr_rd_while_high++;   /* P1123: 強制READY下で装置へ READ 系を送った数(意図した変化、R-2) */
     s_rl_rd_nd = s_rl_spec_nd;
     s_rl_rd_ndm = (s_rl_rd_nd && DMA[0].MTC == 0) ? 1 : 0;
@@ -2919,6 +3189,8 @@ static void rl_read_begin(void)
               /* P1129(D-137): 末尾追加のみ。req_secs は multi=1 のとき EOT-R+1(生値 R/EOT は同じ行にある)、それ以外 1 */
               s_rl_rd_multi, s_rl_rd_multi ? (unsigned)(p[6] - p[4] + 1u) : 1u,
               (unsigned)DMA[0].CCR, (unsigned)DMA[0].BTC, (unsigned)DMA[0].DCR);
+    s_p1140_eot = p[6];
+    p1140_dump("begin", NULL);
     rl_ft_note_issue(p[0]);   /* P1126(G-FT): 発行時の bringup クリア回数 */
     if (rl_send_cmd("read") < 0) {
         /* 送信失敗(fault)。装置へは何も届いていない扱いで合成エラー */
@@ -2949,6 +3221,18 @@ static void rl_read_begin(void)
     s_rl_frame_len = 0;
     s_rl_msr_wait = 0;
     s_rl_other_bytes = 0;
+    /* P1139: 送信時のゲスト時刻を記録し、hold/ペーシングの計測値を初期化する */
+    rl_rd_hold_drop("new_read");   /* 通常は 0(:7091 の打切りで落ちている)。残っていれば逆方向の破れと同じく落とす */
+    s_rl_rd_g0 = g_mx68k_guest_ns;
+    s_rl_rd_reveal_at = 0;
+    s_rl_rd_g_det = 0;
+    s_rl_rd_t_rx = 0; s_rl_rd_t_det = 0; s_rl_rd_d_wall = 0;
+    s_rl_rd_ts_fb = 0; s_rl_rd_clamped = 0; s_rl_rd_order_bad = 0;
+    s_rl_rd_pace_sleeps = 0; s_rl_rd_pace_us = 0;
+    s_rl_rd_hold_n = 0;
+    s_rl_rd_n_sup = 0;
+    s_rp_total++;
+    ho_accept(p[5]);   /* P1141: 適格なら MTC を退避して 0 にする(W-1) */
     s_rl_state = RL_RD_WAIT;
 }
 
@@ -3091,6 +3375,8 @@ static void rl_nm_on_read_ok(uint32_t n)
     }
 }
 
+static void rl_rd_decide(void);   /* P1139: 定義は rl_read_frame_done の直後 */
+
 /* 'R'フレーム完了(進行中READ宛て) */
 static void rl_read_frame_done(void)
 {
@@ -3100,6 +3386,7 @@ static void rl_read_frame_done(void)
     uint32_t len = s_rl_frame_len;
     if (len < FU_RESULT_LEN) {
         s_rl_read_err[RE_SHORT]++;
+        if (s_rl_ho == HO_HIDDEN) ho_to_fin("abort:short");   /* P1141: リザルト合成で RD_WAIT を抜けるので HO_FIN へ */
         rl_log_read_end(RE_NAME[RE_SHORT], 0, 0);
         rl_synth_err(0, 1);
         rl_raise_int();
@@ -3174,12 +3461,8 @@ static void rl_read_frame_done(void)
     debug_log(P1009_TAG " read result f=%d dev=%02X %02X %02X %02X %02X %02X %02X st0_mx=0x%02x\n",
               g_mx68k_frame_num, r[0], r[1], r[2], r[3], r[4], r[5], r[6], (unsigned)p955_st_dev_to_mx(r[0]));
     if (n == 0) {
-        uint8_t res[FU_RESULT_LEN];
-        memcpy(res, r, FU_RESULT_LEN);
-        res[0] = p955_st_dev_to_mx(res[0]);
-        rl_set_result(res, FU_RESULT_LEN);
-        rl_raise_int();
-        s_rl_synth_after_read = 1;
+        s_rl_rd_n_sup = 0;   /* P1139: リザルトのみ。公開(rl_rd_reveal)でリザルト設定+割込み */
+        rl_rd_decide();
         return;
     }
     /* P1129(D-137): R<EOT の受理形は払出し量を受付時 MTC で打ち切る(参照2実装 XEiJ+t FUK.java:937-945 / XM6t fdc_bridger.h:904-907
@@ -3197,10 +3480,75 @@ static void rl_read_frame_done(void)
             s_rl_rd_multi_short++;
         }
     }
-    s_rl_supply_n = n_sup;
-    s_rl_supply_pos = 0;
-    s_rl_mar0_valid = 0;
-    s_rl_state = RL_RD_SUPPLY;
+    s_rl_rd_n_sup = n_sup;   /* P1139: 払出しの開始(遷移)は rl_rd_reveal で行う */
+    rl_rd_decide();
+}
+
+/* P1139: ゲストへ READ 完了を見せる(従来 rl_read_frame_done の最後にあった遷移部)。
+ * ログ・FNV・照合フックは受信時に実行済みで、ここでは遷移だけを行う */
+static void rl_rd_reveal(int forced)
+{
+    int was_target = s_rl_rdpace_on;
+    s_rl_rd_hold = 0;
+    if (forced) s_rp_forced++;
+    uint64_t g_rev = g_mx68k_guest_ns;
+    if (s_rl_rd_n_sup == 0) {
+        uint8_t res[FU_RESULT_LEN];
+        memcpy(res, s_rl_dev_result, FU_RESULT_LEN);
+        res[0] = p955_st_dev_to_mx(res[0]);
+        rl_set_result(res, FU_RESULT_LEN);
+        rl_raise_int();
+        s_rl_synth_after_read = 1;
+    } else {
+        s_rl_supply_n = s_rl_rd_n_sup;
+        s_rl_supply_pos = 0;
+        s_rl_mar0_valid = 0;
+        s_rl_state = RL_RD_SUPPLY;
+    }
+    /* P1141: 遷移だけ(DMAC には触れない)。一括転送/エラー完了は次の前置フックが行う */
+    if (s_rl_ho == HO_HIDDEN) {
+        s_ho_g_rev = g_rev;
+        if (s_rl_rd_n_sup > 0) s_rl_ho = HO_BURST;
+        else                   ho_to_fin("result_only");
+    }
+    p1140_dump("reveal", forced ? "forced" : "-");   /* P1140: ゲストへ完了が見え始める遷移(1READにつき1回) */
+    if (!was_target) return;   /* オプトアウト中は RDPACE の計測対象外 */
+    int64_t e_ns = (int64_t)(g_rev - s_rl_rd_g0) - s_rl_rd_d_wall * 1000;
+    int64_t ae = e_ns < 0 ? -e_ns : e_ns;
+    s_rp_e_hist[ae < 50000 ? 0 : ae < 200000 ? 1 : ae < 1000000 ? 2 : ae < 5000000 ? 3 : 4]++;
+    rl_rdpace_log("reveal", forced, g_rev);
+}
+
+/* P1139: 'R'フレーム完了時の判定。受信時刻から d_wall を求め、ゲストが送信+d_wall に達していれば即時公開、
+ * 達していなければ hold にする(公開は rl_rd_pace_and_reveal/rl_tick がゲスト時刻の到達で行う) */
+static void rl_rd_decide(void)
+{
+    s_rl_rd_t_det = rl_now_us();
+    s_rl_rd_g_det = g_mx68k_guest_ns;
+    if (!s_rl_rdpace_on) { rl_rd_reveal(0); return; }
+    s_rp_target++;
+    int64_t t0 = s_rl_op_t0_us, t_rx = s_rl_p2_chunk_ts;
+    s_rl_rd_ts_fb = (t_rx < 0);
+    if (s_rl_rd_ts_fb) { t_rx = s_rl_rd_t_det; s_rp_ts_fb++; }
+    s_rl_rd_t_rx = t_rx;
+    s_rl_rd_order_bad = (t_rx > s_rl_rd_t_det || t_rx < t0);
+    if (s_rl_rd_order_bad) s_rp_order_bad++;
+    int64_t d = t_rx - t0, dmax = s_rl_rd_t_det - t0;
+    if (dmax < 0) dmax = 0;
+    s_rl_rd_clamped = (d < 0 || d > dmax);
+    if (d < 0) d = 0;
+    if (d > dmax) d = dmax;
+    if (s_rl_rd_clamped) s_rp_clamped++;
+    s_rl_rd_d_wall = d;
+    s_rl_rd_reveal_at = s_rl_rd_g0 + (uint64_t)d * 1000u;
+    if (s_rl_rd_g_det >= s_rl_rd_reveal_at) {
+        s_rp_immediate++;
+        rl_rd_reveal(0);
+    } else {
+        s_rl_rd_hold = 1;
+        s_rl_rd_hold_n = 1;
+        s_rp_hold++;
+    }
 }
 
 /* RD_SUPPLY: $E94003 読出し(DMA経由・CPUポーリングとも)で次の1Bを返す */
@@ -3224,6 +3572,7 @@ static uint8_t rl_supply_byte(void)
         s_rl_verify_pending = 1;
         s_rl_verify_n = s_rl_supply_n;
         if (s_rl_rd_ndm) s_rl_sup_done_cpu++; else s_rl_sup_done_dma++;   /* P1122(D-136): 払出し完了を転送方式別に数える */
+        p1140_dump("supply_done", "-");   /* P1140: 最終バイト払出し=リザルト+割込みの時点(1READにつき1回) */
     }
     return b;
 }
@@ -3476,6 +3825,78 @@ static void rl_sync_sleep(void)
     s_rl_blk_frame_us += rl_now_us() - t0;
 }
 
+/* P1139 G-14(逆方向): 状態だけが RD_WAIT から外れて hold が残っていれば記録して落とす(落とし忘れの検出) */
+static void rl_g14_rev(const char* site)
+{
+    if (!s_rl_rd_hold || s_rl_state == RL_RD_WAIT) return;
+    s_rp_g14_viol++;
+    if (s_rp_g14_rev_lines < FU_G14_LOG_LIMIT) {
+        s_rp_g14_rev_lines++;
+        debug_log(P1139_TAG " g14_invariant_violation dir=rev site=%s state=%s hold=1 f=%d n=%u\n",
+                  site, RL_STATE_NAME[s_rl_state], g_mx68k_frame_num, (unsigned)s_rp_g14_viol);
+    }
+    rl_rd_hold_drop("g14_rev");
+}
+
+/* P1139: hold 中でゲスト時刻が公開時刻に達していれば公開する */
+static void rl_rd_try_reveal(void)
+{
+    if (s_rl_state == RL_RD_WAIT && s_rl_rd_hold && g_mx68k_guest_ns >= s_rl_rd_reveal_at) rl_rd_reveal(0);
+}
+
+/* P1139: READ 待ち中の受信機会(G-10)で呼ぶ。hold なら公開判定、hold でなくゲストが送信基準の壁時計を
+ * FU_RD_PACE_SLACK_US より先行していれば、追いつくまで port2 を読みながら待つ(ペーシング)。
+ * 打切り判定はループ内の rl_poll → rl_check_timeouts がそのまま担う(状態が RD_WAIT から外れたら抜ける) */
+static void rl_rd_pace_and_reveal(int force)
+{
+    if (s_rl_in_poll) return;
+    rl_g14_rev("pace");
+    if (s_rl_state != RL_RD_WAIT) return;
+    if (s_rl_rd_hold) {
+        if (force) rl_rd_reveal(1);
+        else rl_rd_try_reveal();
+        return;
+    }
+    if (!s_rl_rdpace_on || force) return;
+    int64_t t_start = rl_now_us();
+    uint32_t slept = 0;
+    for (;;) {
+        int64_t now = rl_now_us();
+        int64_t wall_us = now - s_rl_op_t0_us;
+        int64_t guest_us = (int64_t)((g_mx68k_guest_ns - s_rl_rd_g0) / 1000u);
+        if (guest_us <= wall_us + FU_RD_PACE_SLACK_US) break;
+        if (now - t_start > (int64_t)FU_RD_PACE_GUARD_MS * 1000) break;
+        rl_sync_sleep();
+        slept++;
+        rl_poll();
+        if (s_rl_state != RL_RD_WAIT) break;
+        if (s_rl_rd_hold) { rl_rd_try_reveal(); break; }
+    }
+    if (slept) {
+        int64_t dt = rl_now_us() - t_start;
+        s_rl_rd_pace_sleeps += slept;
+        s_rl_rd_pace_us += dt;
+        s_rp_pace_sleeps_sum += slept;
+        s_rp_pace_us_sum += dt;
+    }
+}
+
+/* P1139 G-14(順方向): 同期手順内の rl_poll の入口。hold 中(RD_WAIT のまま)に入ったら不変条件の破れとして記録し、
+ * 強制公開してから進む(通常はコマンド受付時の rl_abort_op(RE_ABORTED) で hold は落ちているので発火しない) */
+static void rl_poll_g14(const char* site)
+{
+    if (s_rl_state == RL_RD_WAIT && s_rl_rd_hold) {
+        s_rp_g14_viol++;
+        if (s_rp_g14_fwd_lines < FU_G14_LOG_LIMIT) {
+            s_rp_g14_fwd_lines++;
+            debug_log(P1139_TAG " g14_invariant_violation dir=fwd site=%s state=%s hold=1 f=%d n=%u\n",
+                      site, RL_STATE_NAME[s_rl_state], g_mx68k_frame_num, (unsigned)s_rp_g14_viol);
+        }
+        rl_rd_reveal(1);
+    }
+    rl_poll();
+}
+
 /* P1051: 書込みコマンド送信の直前に、同一シリンダへの SEEK+SENSE INT を装置へ送り、装置ファームの同期フラグ
  * (app.c m_isFirstWrite)を立てる。戻り値: 1=成立(書込みを送ってよい)、0=不成立(lg->fail に理由)。
  *   (a) 83 0F 83 <US/HD> 83 <C> を送り、続けて装置MSRを1回だけ読む(msr_after_seek、DnB の挙動の観測用)
@@ -3530,7 +3951,7 @@ static int rl_wr_sync_seek(rl_sync_log_t* lg, int mode)
     for (;;) {
         int64_t tw = rl_now_us();
         while (s_rl_sync_c <= c_mark && rl_now_us() < deadline) {
-            rl_poll();
+            rl_poll_g14("rl_wr_sync_seek");
             if (s_rl_sync_c > c_mark) break;
             rl_sync_sleep();
         }
@@ -3576,7 +3997,7 @@ static int rl_wr_sync_seek(rl_sync_log_t* lg, int mode)
     {
         int64_t td = rl_now_us(), dend = td + (int64_t)FU_SYNC_DRAIN_MS * 1000;
         for (;;) {
-            rl_poll();
+            rl_poll_g14("rl_wr_sync_seek");
             if (s_rl_sync_c > 0u && s_rl_sync_cc > 0u) break;
             if (rl_now_us() >= dend) break;
             rl_sync_sleep();
@@ -3674,7 +4095,7 @@ static int rl_fr_drain_run(int do_send, const char* why)
     {
         int64_t tw = rl_now_us(), deadline = tw + (int64_t)FU_FR_DRAIN_C_MS * 1000;
         while (s_rl_sync_c == 0u && rl_now_us() < deadline) {
-            rl_poll();
+            rl_poll_g14("rl_fr_drain_run");
             if (s_rl_sync_c > 0u) break;
             rl_sync_sleep();
         }
@@ -3701,7 +4122,7 @@ static int rl_fr_drain_run(int do_send, const char* why)
     {
         int64_t td = rl_now_us(), dend = td + (int64_t)FU_SYNC_DRAIN_MS * 1000;
         for (;;) {
-            rl_poll();
+            rl_poll_g14("rl_fr_drain_run");
             if (s_rl_sync_c > 0u && s_rl_sync_cc > 0u) break;
             if (rl_now_us() >= dend) break;
             rl_sync_sleep();
@@ -3939,7 +4360,7 @@ static void rl_wr_try_send(void)
         int st_before = s_rl_state;
         if (s_rl_in_poll) ar_drained = 0;
         else {
-            rl_poll();                               /* 'D' を読めば rl_ar_disarm("ev_D") 済みになる */
+            rl_poll_g14("rl_wr_try_send");   /* 'D' を読めば rl_ar_disarm("ev_D") 済みになる */
             if (s_rl_state != st_before) ar_drained = 0;
         }
         if (s_rl_ar_armed && mx68k_floppyu_usb_generation() != s_rl_ar_arm_gen) rl_ar_disarm("gen_changed");
@@ -4397,7 +4818,7 @@ drain:
     {
         int64_t td = rl_now_us(), dend = td + (int64_t)FU_FMT_DRAIN_MS * 1000;
         for (;;) {
-            rl_poll();
+            rl_poll_g14("rl_fmt1_readid_fresh");
             if (s_rl_sync_c > 0u && s_rl_sync_cc > 0u) break;
             if (rl_now_us() >= dend) break;
             rl_sync_sleep();
@@ -4553,12 +4974,12 @@ static int rl_fmt1_verify(int at_seek)
     s_rl_sync_active = 1;
     s_rl_sync_c = 0;
     s_rl_sync_cc = 0;
-    rl_poll();
+    rl_poll_g14("rl_fmt1_verify");
     if (c_deficit > 0u) {
         int64_t dend = rl_now_us() + (int64_t)FU_FMT_DRAIN_MS * 1000;
         while (s_rl_sync_c < c_deficit && rl_now_us() < dend) {
             rl_sync_sleep();
-            rl_poll();
+            rl_poll_g14("rl_fmt1_verify");
         }
     }
     uint32_t late_c = s_rl_sync_c, late_cc = s_rl_sync_cc;
@@ -4845,7 +5266,7 @@ static void rl_fmt1_try_send(void)
      * 送出判断をここで新たに作らない。上限内に来なければ従来の非同期経路(フレーム毎の rl_tick→rl_poll)へ戻る */
     int64_t ts = rl_now_us(), wdl = ts + (int64_t)FU_FMT1_W_WAIT_MS * 1000;
     while (s_rl_state == RL_WR_WAIT_W && !s_rl_wr_data_sent && rl_now_us() < wdl) {
-        rl_poll();
+        rl_poll_g14("rl_fmt1_try_send");
         if (s_rl_state != RL_WR_WAIT_W || s_rl_wr_data_sent) break;
         rl_sync_sleep();
     }
@@ -4980,12 +5401,12 @@ static int rl_nmf_verify(int trig, int* post_relay)
     s_rl_sync_active = 1;
     s_rl_sync_c = 0;
     s_rl_sync_cc = 0;
-    rl_poll();
+    rl_poll_g14("rl_nmf_verify");
     if (c_deficit > 0u) {
         int64_t dend = rl_now_us() + (int64_t)FU_FMT_DRAIN_MS * 1000;
         while (s_rl_sync_c < c_deficit && rl_now_us() < dend) {
             rl_sync_sleep();
-            rl_poll();
+            rl_poll_g14("rl_nmf_verify");
         }
     }
     uint32_t late_c = s_rl_sync_c, late_cc = s_rl_sync_cc;
@@ -5229,7 +5650,7 @@ static int rl_nmf_drain(void)
 {
     int st_before = s_rl_state;
     if (s_rl_in_poll) return 0;
-    rl_poll();
+    rl_poll_g14("rl_nmf_drain");
     return s_rl_state == st_before;
 }
 
@@ -5635,7 +6056,7 @@ static void rl_nmf_try_send(void)
     /* 送信直後の同期'W'待ち(P1064 C-2 と同じ)。'W' は既存の 'W' ハンドラ(受理ゲート)がそのまま rl_wr_send_data() を呼ぶ */
     int64_t ts = rl_now_us(), wdl = ts + (int64_t)FU_FMT1_W_WAIT_MS * 1000;
     while (s_rl_state == RL_WR_WAIT_W && !s_rl_wr_data_sent && rl_now_us() < wdl) {
-        rl_poll();
+        rl_poll_g14("rl_nmf_try_send");
         if (s_rl_state != RL_WR_WAIT_W || s_rl_wr_data_sent) break;
         rl_sync_sleep();
     }
@@ -6406,6 +6827,8 @@ static void rl_start(uint8_t first, uint8_t second_mx)
     s_rl_cmd[1] = p955_us_mx_to_dev(second_mx);
     s_rl_cmd_n = 2;
     s_rl_us_mx = second_mx & 7u;
+    rl_rd_hold_drop("start");   /* P1139: 通常は受付時の打切りで落ちている */
+    ho_drop_int("start");       /* P1141: 同上(DMAC には書かない) */
     s_rl_state = RL_IDLE;
     s_rl_rdnum = 0;
     /* P1123: 保留中のゲスト起点 release を、このコマンドを装置へ送る前に送る。ただし assert が起き得る RECAL では送らず、
@@ -6839,7 +7262,7 @@ static void rl_p2_byte(uint8_t b)
 static void rl_check_timeouts(void)
 {
     int64_t now = rl_now_us();
-    if (s_rl_state == RL_RD_WAIT) {
+    if (s_rl_state == RL_RD_WAIT && !s_rl_rd_hold) {   /* P1139 G-8: hold 中はフレーム受信済みなので判定しない */
         if (!s_rl_seen_r && now - s_rl_op_t0_us > (int64_t)FU_READ_DEADLINE_MS * 1000) rl_abort_op(RE_TIMEOUT);
         else if (s_rl_seen_r && now - s_rl_last_rx_us > (int64_t)FU_READ_STALL_MS * 1000) rl_abort_op(RE_STALL);
     } else if (s_rl_state == RL_RID_WAIT) {
@@ -6889,11 +7312,16 @@ static void rl_poll(void)
     }
     if (conn && !mx68k_floppyu_vslice_claimed()) {
         uint8_t buf[512];
+        /* P1139: 1回の読出しは受信チャンクの境界までなので、短く返っても 0 になるまで読み続ける。
+         * 'R'フレーム完了の判定(rl_rd_decide)は、そのとき処理中のチャンクの受信時刻を使う */
         for (;;) {
-            size_t n = mx68k_floppyu_usb_port2_read(buf, sizeof(buf));
+            int64_t ts = -1;
+            size_t n = mx68k_floppyu_usb_port2_read_ts(buf, sizeof(buf), &ts);
+            if (n == 0) break;
+            s_rl_p2_chunk_ts = ts;
             for (size_t i = 0; i < n; i++) rl_p2_byte(buf[i]);
-            if (n < sizeof(buf)) break;
         }
+        s_rl_p2_chunk_ts = -1;
     }
     rl_check_timeouts();
     s_rl_in_poll = 0;
@@ -7220,6 +7648,8 @@ static void rl_tick(void)
         rl_relay_ok();
     }
     rl_poll();
+    rl_g14_rev("tick");             /* P1139 G-14(逆方向) */
+    rl_rd_try_reveal();             /* P1139 G-13: ポーリングの無いゲスト向けの保険(ペーシングはしない) */
     rl_rid_poll(0);
     rl_wr_result_poll(0, "poll");   /* P1032 */
     rl_fr_flush_pending("tick");    /* P1123: 保留中のゲスト起点 release(送信不可区間を抜けていれば送る) */
@@ -7354,6 +7784,37 @@ static void rl_fh_log_sum(const char* why)
               (unsigned)s_fh_idle_skip[FH_SKIP_NOT_DIRTY], (unsigned)s_fh_idle_skip[FH_SKIP_RECENT_SEND],
               (unsigned)s_fh_idle_skip[FH_SKIP_BUSY], (unsigned)s_fh_idle_skip[FH_SKIP_LATCHED_OR_INVALID],
               (unsigned)s_fh_lines, (unsigned)s_fh_lines_dropped, (unsigned)s_nm_v_mismatch_cached);
+}
+
+/* P1139: [P1139-RDPACE-SUM](300フレームごと、プロセス寿命の累計)。
+ * 恒等式: target = hold + immediate(オプトアウト中は target 増えず)、hold = 公開(forced 含む) + drop + 進行中 */
+static void rl_rdpace_log_sum(void)
+{
+    debug_log("[P1139-RDPACE-SUM] f=%u rdpace=%d relay_reads=%u target=%u hold=%u immediate=%u forced=%u hold_drop=%u ts_fallback=%u"
+              " clamped=%u order_bad=%u e_hist=lt50us:%u,lt200us:%u,lt1ms:%u,lt5ms:%u,ge5ms:%u pace_sleeps=%u pace_us=%lld"
+              " g14_viol=%u hold_now=%d guest_ns=%llu\n",
+              (unsigned)g_mx68k_frame_num, s_rl_rdpace_on, (unsigned)s_rp_total, (unsigned)s_rp_target, (unsigned)s_rp_hold,
+              (unsigned)s_rp_immediate, (unsigned)s_rp_forced, (unsigned)s_rp_hold_drop, (unsigned)s_rp_ts_fb,
+              (unsigned)s_rp_clamped, (unsigned)s_rp_order_bad, (unsigned)s_rp_e_hist[0], (unsigned)s_rp_e_hist[1],
+              (unsigned)s_rp_e_hist[2], (unsigned)s_rp_e_hist[3], (unsigned)s_rp_e_hist[4], (unsigned)s_rp_pace_sleeps_sum,
+              (long long)s_rp_pace_us_sum, (unsigned)s_rp_g14_viol, s_rl_rd_hold, (unsigned long long)g_mx68k_guest_ns);
+}
+
+/* P1141: HO の集計行(分母=中継READ総数、不適格の理由別・outcome 別) */
+static void rl_ho_log_sum(void)
+{
+    char wh[HOW_N * 20 + 4], oc[HOO_N * 24 + 4];
+    size_t o = 0;
+    for (int i = 0; i < HOW_N; i++)
+        o += (size_t)snprintf(wh + o, sizeof(wh) - o, "%s%s:%u", i ? "," : "", HOW_NAME[i], (unsigned)s_ho_why_n[i]);
+    o = 0;
+    for (int i = 0; i < HOO_N; i++)
+        o += (size_t)snprintf(oc + o, sizeof(oc) - o, "%s%s:%u", i ? "," : "", HOO_NAME[i], (unsigned)s_ho_out_n[i]);
+    debug_log("[P1141-DMAHO-SUM] f=%u dmaho=%d relay_reads=%u elig=%u inelig=%s outcome=%s burst_bytes=%llu cancel=%u orphan=%u"
+              " state_image=%u state_image_cancel=%u judge_dump=%u ho_now=%s\n",
+              (unsigned)g_mx68k_frame_num, s_ho_env_on, (unsigned)s_ho_reads, (unsigned)s_ho_elig_n, wh, oc,
+              s_ho_burst_bytes, (unsigned)s_ho_out_n[HOO_CANCEL], (unsigned)s_ho_orphan, (unsigned)s_ho_si_n,
+              (unsigned)s_ho_si_cancel, (unsigned)s_p1141_judge_n, HO_NAME[s_rl_ho]);
 }
 
 static void rl_log_sum(void)
@@ -7795,6 +8256,26 @@ static void rl_install_reset(void)
      * モードを再解析する前(武装中ならモードは armed のまま)に判定する */
     if (s_rl_ar_armed) rl_ar_disarm("install_reset");
     for (int pd = 0; pd < 4; pd++) s_floppyu_present[pd] = 0;   /* P1095: install/hard reset時は未確認へ戻す */
+    /* P1139: RDPACE は既定 ON。MX68K_FLOPPYU_RDPACE=0 のときだけ修正前と同じ即時公開(比較専用)。設定行は1プロセス1回 */
+    {
+        const char* rp = getenv("MX68K_FLOPPYU_RDPACE");
+        s_rl_rdpace_on = (rp != NULL && strcmp(rp, "0") == 0) ? 0 : 1;
+        if (!s_rl_rdpace_cfg_logged) {
+            s_rl_rdpace_cfg_logged = 1;
+            debug_log("[P1139-CFG] f=%d rdpace_env=%.8s rdpace=%d slack_us=%d poll_sleep_us=%d guard_ms=%d\n",
+                      g_mx68k_frame_num, rp ? rp : "unset", s_rl_rdpace_on, FU_RD_PACE_SLACK_US, FU_SYNC_POLL_SLEEP_US,
+                      FU_RD_PACE_GUARD_MS);
+        }
+    }
+    /* P1141: HO は既定 ON。MX68K_FLOPPYU_DMAHO=0 のときだけ修正前と同じ 16µs/B の払出し(比較専用)。設定行は1プロセス1回 */
+    {
+        const char* he = getenv("MX68K_FLOPPYU_DMAHO");
+        s_ho_env_on = (he != NULL && strcmp(he, "0") == 0) ? 0 : 1;
+        if (!s_ho_cfg_logged) {
+            s_ho_cfg_logged = 1;
+            debug_log("[P1141-CFG] f=%d dmaho_env=%.8s dmaho=%d\n", g_mx68k_frame_num, he ? he : "unset", s_ho_env_on);
+        }
+    }
     /* P1054: 有効判定は通信層の1箇所に集約(getenv の二重実装をしない)。ハードリセットでの遅延起動は install より前 */
     s_rl_usb_on = mx68k_floppyu_usb_is_enabled();
     /* P1054: 書込みモードは 環境変数 > 設定。環境変数が設定されていれば従来どおりその値で解析し、設定は無視する。
@@ -7923,6 +8404,8 @@ static void rl_install_reset(void)
                       (unsigned)s_rl_wrcollect_aborted, (unsigned)s_rl_wrcollect_begin);
         }
     }
+    rl_rd_hold_drop("install_reset");   /* P1139 */
+    ho_drop_int("install_reset");       /* P1141: DMAC には書かない(ハードリセットでは DMA_Init が初期化する) */
     s_rl_state = RL_IDLE;
     s_rl_rdnum = 0; s_rl_rdptr = 0; s_rl_wrnum = 0; s_rl_cmd_n = 0;
     s_rl_bringup_valid = 0;        /* XM6t がリセットごとに Init() するのと同じ */
@@ -8008,7 +8491,7 @@ static int p1087_rebringup_inline(void)
         s_rl_rebringup_pending = 0;   /* 1回だけ */
         rl_bringup();
         ok = rl_relay_ok();
-        rl_poll();                    /* rl_poll 自体が s_rl_in_poll を立てて再入を防ぐ */
+        rl_poll_g14("p1087_rebringup_inline");   /* rl_poll 自体が s_rl_in_poll を立てて再入を防ぐ */
         if (ok && !rl_relay_ok()) ok = 0;   /* poll 中に切断・故障停止等が起きた場合は中継しない */
         result = ok ? "ok" : "fail";
         if (ok) s_rl_rebringup_ok++; else s_rl_rebringup_fail++;
@@ -8171,14 +8654,15 @@ static int rl_e5_wait_read_done(int64_t* t0_us, int64_t* t1_us)
     if (s_rl_in_poll) { *t1_us = t0; return RDE5_REENTRY; }
     uint32_t done0 = s_rl_rd_frames_done;
     int64_t cap = (int64_t)FU_E5_RDWAIT_CAP_MS * 1000;
-    while (s_rl_state == RL_RD_WAIT && rl_now_us() - t0 < cap) {
+    /* P1139 G-7: hold が成立した(フレーム受信済み=装置はメインループへ戻った)時点で抜ける。hold は保ったまま(強制公開しない) */
+    while (s_rl_state == RL_RD_WAIT && !s_rl_rd_hold && rl_now_us() - t0 < cap) {
         rl_poll();
-        if (s_rl_state != RL_RD_WAIT) break;
+        if (s_rl_state != RL_RD_WAIT || s_rl_rd_hold) break;
         rl_sync_sleep();
     }
     *t1_us = rl_now_us();
     if (s_rl_rd_frames_done != done0) return RDE5_DONE;
-    if (s_rl_state == RL_RD_WAIT) return RDE5_CAP;
+    if (s_rl_state == RL_RD_WAIT && !s_rl_rd_hold) return RDE5_CAP;
     return RDE5_ABORT;
 }
 
@@ -8203,7 +8687,7 @@ static void rl_rde5_log(uint8_t dev_ctrl, int e5c_valid0, uint8_t e5c_key0, int 
 static uint8_t rl_e5_read(int* src)
 {
     if (rl_in_read_phase()) s_rl_rp_e5_rd++;
-    int in_rd = (s_rl_state == RL_RD_WAIT);
+    int in_rd = (s_rl_state == RL_RD_WAIT && !s_rl_rd_hold);   /* P1139 G-7: hold 中は READ 完了後と同じ扱い */
     if (in_rd) s_rl_rd_e5r_total++;   /* P1125: 分母(NOBIT/NORELAY の分岐より前) */
     if ((s_p955_dev_ctrl & 0x0Fu) == 0u) { if (in_rd) s_rl_rd_e5r_nobit++; *src = E5P_SRC_NOBIT; return 0; }
     if (!rl_relay_ok()) { if (in_rd) s_rl_rd_e5r_norelay++; *src = E5P_SRC_NORELAY; return 0; }
@@ -8218,7 +8702,7 @@ static uint8_t rl_e5_read(int* src)
     }
     static const uint8_t TX[] = { FU_REG_E5 };
     uint8_t v = 0;
-    if (s_rl_state == RL_RD_WAIT) {
+    if (in_rd) {   /* P1139 G-7: RL_RD_WAIT && !hold */
         /* P1125(D-146): 装置ファームは READ DATA 実行中(先読みを含む)port1 へ応答しない(TNB:app.c:2195-2217,1717-1880)。
          * 参照2実装と同じく、装置が応答できるようになる(READ 完了)まで待ってから実値を読む
          * (XM6t fdc_bridger.h:402 / XEiJ+t FUK.java:484-498)。待っている間はエミュレーションスレッドが止まる */
@@ -8368,6 +8852,7 @@ static uint8_t p955_route_read(uint32_t adr) {
             if (rl_in_read_phase()) s_rl_rp_msr_rd++;
             if (s_rl_state == RL_RD_WAIT) s_rl_msr_wait++;
             rl_poll();
+            if (s_rl_state == RL_RD_WAIT) rl_rd_pace_and_reveal(0);   /* P1139 G-10 */
             rl_rid_poll(0);
             rl_wr_result_poll(0, "poll");   /* P1032 */
             if (s_rl_dnb_mx) {
@@ -8388,7 +8873,11 @@ static uint8_t p955_route_read(uint32_t adr) {
     case 0x03u:
         if (s_p955_pending) return 0xffu;
         if (s_p955_owner == P955_OWNER_STUB) return p955_stub_read_data();
-        if (s_p955_owner == P1009_OWNER_RELAY) { rl_poll(); return rl_read_data(); }
+        if (s_p955_owner == P1009_OWNER_RELAY) {
+            rl_poll();
+            if (s_rl_state == RL_RD_WAIT) rl_rd_pace_and_reveal(0);   /* P1139 G-10 */
+            return rl_read_data();
+        }
         return FDC_Read(adr);
     case 0x05u: {
         /* スタブ寄与(Not Ready固定)は常に0。中継可能時は装置寄与 */
@@ -8426,10 +8915,100 @@ static uint8_t p955_route_read(uint32_t adr) {
 static int32_t p955_route_ready(void) {
     if (s_p955_pending || s_p955_owner == P955_OWNER_STUB) return 0;
     if (s_p955_owner == P1009_OWNER_RELAY) {
-        if (s_rl_state == RL_RD_WAIT) rl_poll();   /* DMA 有効中は毎ラインの受信機会 */
+        /* DMA 有効中の受信機会(P1102 既定では ch0 の呼出しごと=ゲスト16µsごと)。P1139 G-10: ペーシングと公開判定 */
+        if (s_rl_state == RL_RD_WAIT) { rl_poll(); rl_rd_pace_and_reveal(0); }
         return (s_rl_state == RL_RD_SUPPLY || s_rl_state == RL_WR_COLLECT) ? 1 : 0;
     }
     return FDC_IsDataReady();
+}
+
+/* P1141: 公開後の一括転送(W-3)。MTC を戻し、Core の DMA_Exec(0)(REQG=2 なので1呼出し1バイト)を連続して呼ぶ。
+ * 各バイトは従来どおり ReadyCB→$E94003→rl_supply_byte を通り、最終バイトでリザルト+FDC割込み、Core が COC を立てる */
+static void ho_burst(void)
+{
+    const char* mm = ho_sig_mismatch(&DMA[0]);
+    if (mm) {   /* ゲストが DMAC を触った。何も書かず従来の経路へ戻す */
+        char oc[32];
+        snprintf(oc, sizeof(oc), "cancel:%s", mm);
+        s_rl_ho = HO_OFF;
+        ho_log(oc, NULL);
+        return;
+    }
+    DMA[0].MTC = s_ho_mtc0;
+    uint32_t i = 0;
+    while (DMA[0].MTC && s_rl_state == RL_RD_SUPPLY && i++ <= s_ho_mtc0) DMA_Exec(0);
+    s_ho_burst_n = (uint32_t)(s_ho_mtc0 - DMA[0].MTC);
+    s_ho_burst_bytes += s_ho_burst_n;
+    const char* outcome;
+    if (DMA[0].CSR & 0x10u)                         outcome = "buserr";   /* Core の DMAERR のまま触らない */
+    else if (!DMA[0].MTC && (DMA[0].CSR & 0x80u))   outcome = "normal";
+    else {
+        outcome = (s_rl_state != RL_RD_SUPPLY) ? "short" : "stall";
+        DMA[0].MTC = 0;
+        ho_err_complete();
+    }
+    s_rl_ho = HO_OFF;
+    ho_log(outcome, NULL);
+}
+
+/* P1141: エラー完了待ち(W-3)。署名一致ならエラー完了、不一致なら何も書かない */
+static void ho_fin(void)
+{
+    const char* mm = ho_sig_mismatch(&DMA[0]);
+    char oc[48];
+    if (mm) snprintf(oc, sizeof(oc), "cancel:%s", mm);
+    else { ho_err_complete(); snprintf(oc, sizeof(oc), "%s", s_ho_outcome); }
+    s_rl_ho = HO_OFF;
+    ho_log(oc, mm ? s_ho_outcome : NULL);
+}
+
+void mx68k_floppyu_fdcpt_dma0_pre(void)
+{
+    if (s_rl_ho == HO_OFF) return;
+    if (s_rl_ho_in_pre || s_rl_in_poll) return;
+    s_rl_ho_in_pre = 1;
+    /* 孤立: HO が残ったのに中継の状態だけ先へ進んだ(配線漏れ)。ゲストは計数ループから抜けられないので HO_FIN へ */
+    if ((s_rl_ho == HO_HIDDEN && s_rl_state != RL_RD_WAIT) || (s_rl_ho == HO_BURST && s_rl_state != RL_RD_SUPPLY)) {
+        s_ho_orphan++;
+        if (s_ho_orphan_lines < FU_HO_ORPHAN_LOG_LIMIT) {
+            s_ho_orphan_lines++;
+            debug_log(P1141_TAG " orphan ho=%s state=%s f=%d n=%u\n", HO_NAME[s_rl_ho], RL_STATE_NAME[s_rl_state],
+                      g_mx68k_frame_num, (unsigned)s_ho_orphan);
+        }
+        ho_to_fin("orphan");
+    }
+    /* HO 中は Core が ReadyCB を呼ばないので、p955_route_ready と同じ受信機会(P1139 G-10)をここで代行する */
+    if (s_rl_ho == HO_HIDDEN && !s_p955_pending && s_p955_owner == P1009_OWNER_RELAY && s_rl_state == RL_RD_WAIT) {
+        rl_poll();
+        rl_rd_pace_and_reveal(0);
+    }
+    if (s_rl_ho == HO_BURST) ho_burst();
+    if (s_rl_ho == HO_FIN) ho_fin();
+    s_rl_ho_in_pre = 0;
+}
+
+int mx68k_floppyu_fdcpt_ho_state_image(dmac_ch* ch0_img)
+{
+    if (s_rl_ho == HO_OFF) return 0;
+    const char* mm = ho_sig_mismatch(ch0_img);
+    if (mm) {
+        s_ho_si_cancel++;
+        debug_log(P1141_TAG " state_image cancel why=%s ho=%s f=%d\n", mm, HO_NAME[s_rl_ho], g_mx68k_frame_num);
+        return 0;
+    }
+    /* W-3 のエラー完了と同じ見え方(SAB で INT が消え、DMAERR で STR・ACT が落ちる) */
+    ch0_img->MTC = 0;
+    ch0_img->CSR = (uint8_t)((ch0_img->CSR | 0x90u) & ~0x08u);
+    ch0_img->CER = 0x11u;
+    ch0_img->CCR &= 0x77u;
+    s_ho_si_n++;
+    debug_log(P1141_TAG " state_image ho=%s f=%d\n", HO_NAME[s_rl_ho], g_mx68k_frame_num);
+    return 1;
+}
+
+void mx68k_floppyu_fdcpt_ho_drop(const char* why)
+{
+    ho_drop_int(why);
 }
 
 static uint8_t mx68k_floppyu_fdc_pt_read(uint32_t adr)
@@ -8878,6 +9457,8 @@ void mx68k_floppyu_fdcpt_tick_frame(void)
                   (unsigned)s_p955_last_us_dev, (unsigned)s_p955_last_st0_dev,
                   (unsigned)s_p955_last_st0_mx, s_p955_last_stub_f);
         rl_log_sum();
+        rl_rdpace_log_sum();   /* P1139 */
+        rl_ho_log_sum();       /* P1141 */
     }
 }
 
@@ -9084,5 +9665,32 @@ void mx68k_floppyu_fdcpt_selftest_ft_stale_probe(void)
     rl_ft_note_issue(0x46u);
     rl_ft_clear();
     rl_ft_note_result(FT_SRC_READ);
+}
+
+/* P1139 T-1 rp-*: RDPACE の内部状態(読取りのみ)。out = { state, hold, g14_viol, forced, hold_drop }、g[] = { g0, reveal_at } */
+void mx68k_floppyu_fdcpt_selftest_rdpace_state(int out[5], uint64_t g[2])
+{
+    out[0] = s_rl_state; out[1] = s_rl_rd_hold; out[2] = (int)s_rp_g14_viol; out[3] = (int)s_rp_forced;
+    out[4] = (int)s_rp_hold_drop;
+    g[0] = s_rl_rd_g0; g[1] = s_rl_rd_reveal_at;
+}
+
+/* P1139 T-1 rp-(v) 順方向: hold を残したまま同期手順の rl_poll 入口(rl_poll_g14)へ入る */
+void mx68k_floppyu_fdcpt_selftest_g14_fwd(void)
+{
+    rl_poll_g14("selftest");
+}
+
+/* P1139 T-1 rp-(v) 逆方向: hold を残したまま状態だけを RL_IDLE に戻す(落とし忘れの模擬) */
+void mx68k_floppyu_fdcpt_selftest_idle_keep_hold(void)
+{
+    s_rl_state = RL_IDLE;
+}
+
+/* P1141 T-1 ho-*: HO の内部状態(読取りのみ)。out = { ho, orphan, judge_n, cancel, state, state_image, mtc0 } */
+void mx68k_floppyu_fdcpt_selftest_ho_state(int out[7])
+{
+    out[0] = s_rl_ho; out[1] = (int)s_ho_orphan; out[2] = (int)s_p1141_judge_n; out[3] = (int)s_ho_out_n[HOO_CANCEL];
+    out[4] = s_rl_state; out[5] = (int)s_ho_si_n; out[6] = (int)s_ho_mtc0;
 }
 #endif /* MX68K_FLOPPYU_USB_SELFTEST */
