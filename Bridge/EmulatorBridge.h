@@ -98,9 +98,10 @@ void mx68k_floppyu_get_write_unit_stop(int32_t* mx_mask);
 // 環境変数・通信状態とは無関係に動作する。設定画面の1秒周期表示用で、エミュレーションには影響しない。
 int32_t mx68k_floppyu_usb_device_present(void);
 // P488: MIDIボード(CZ-6BM1)の装着設定。既定 false。
-// Mercury Unitと割込みレベル4を共有するため、両方の同時装着はCore側で未サポート
-// (IRQH_CallBack[8]はレベルあたり1コールバックのみ、Core改変禁止のため多重化しない)。
-// 相互排他はSwift UI側(.disabled())+Bridge側(本ラッチ処理)の二重ガードで実現する。
+// P1143: 割込みレベルはinit/ハードリセットのラッチでMercury Unitの装着状態から自動導出する
+// (Mercury装着時はレベル2、未装着時はレベル4。実機CZ-6BM1のDIPSW 1-1 OFF/ON相当)。
+// Mercury UnitはIRQ4固定なのでIRQH_CallBack[]の枠が分かれ、両ボードを同時に装着できる
+// (P488の相互排他は撤廃)。レベル設定用の公開APIは設けない。
 void mx68k_set_midi_enabled(bool enabled);
 // P493: 内蔵SRAM 64KB化(実機改造相当)。既定 false = 標準16KB。
 // Mercury/MIDI と同じく「設定値」であり、配線($ED4000-$EDFFFF を Bridge 所有

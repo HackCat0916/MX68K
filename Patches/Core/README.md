@@ -63,6 +63,13 @@ P602/D-57振り返り + Fable5クロス監査 + ユーザー明示承認)に基�
 **本件限りのユーザー承認で、恒久ルールではない**——将来同種の「明白なC実装ミス」が出た場合は、その都度同じ方針質問を
 個別パッチの承認とは別に立てること。上記P968の実機計測による代替[恒久]とは扱いが異なる)。
 
+★P1143(2026-11-26、MIDIボードの割込みレベル可変化): 不具合修正ではなく「未実装の実機機能の追加」にClass Bを適用した
+(実機CZ-6BM1はDIPSW 1-1でIRQ2/IRQ4を選べる[Outside X68000 書籍p.93]が、Coreは4固定で、動作する切替を持つ参照実装が無い)。
+条件(a)「誤った値を実行時に観測する」は機能追加の性質上当てはまらないため、パッチ前の現状(レベル4)とパッチ後の
+レベル切替(Mercury有無で4/2)を実行時ログ`[P1143-MIDIIRQ]`で確認することをもって代替し、パッチを残す条件とする。
+**本件限りのユーザー承認(U-1、個別パッチの承認とは別の方針質問として取得)で、恒久ルールではない**——将来、別の
+新規機能にClass Bを適用する場合は、その都度同じ方針質問を個別パッチの承認とは別に立てること(P1080と同じ扱い)。
+
 ## 適用条件(要約、詳細はCLAUDE.md本体)
 
 1. Class Aは**実証済み修正のverbatim移植のみ**。Class Bは上記4条件
@@ -104,6 +111,7 @@ P602/D-57振り返り + Fable5クロス監査 + ユーザー明示承認)に基�
 | `p1079_fdc_writedata_fail_ephaseend.patch` | A | P1079 | **適用済み(2026-11-12、T-2b 2回合格・T-3合格、main=`875d851`)**。D-124(WRITE DATA失敗時にFDCが実行フェーズのまま固着しIPL-ROMの完了待ちループで永久ハング)の是正。`Core/px68k/x68k/fdc.c`の`FDC_WriteBuffer` case 5/9で、`FDD_Write`失敗時の`FDC_SetInt()`を`FDC_EPhaseEnd()`(リザルト7バイト構築+`bufnum=0,rdptr=0,wexec=0`+`FDC_SetInt()`)へ1行置換し、ST0 IC=01・ST1 ND(既存値のまま)の異常終了リザルトへ移る。XM6 2.06(`vm/fdc.cpp` sha256 `71bf9da8…`・`vm/fdi.cpp` `fa84af13…`)・XEiJ 0.26.10.08(`xeij/FDC.java` sha256 `7c240af5…`、P982/P1075と同一版)の独立2参照実装の**構造の移植**(逐語移植ではない、P977/P982/P1075の前例に倣うClass A)。px68k本家/px68k-libretro/MPX68Kは失敗時`FDC_SetInt()`のみで同一欠陥を共有(修正なし)。呼び出す`FDC_EPhaseEnd()`本体はpx68k本家と同一(ヘッダにdiff生出力)。移植しない点: (a)失敗判定のタイミング(両参照ともDMA転送前に判定、MXは全データ受信後のまま——失敗前に1セクタ分のDMAが走る)、(b)ST1のMAビット(XEiJ)、(c)リザルトCHRN(要求値ではなく`GetCurrentID`の値のまま)。ヘッダにXM6/XEiJ該当行の逐語抜粋を収録。環境変数なし。Bridge側の変更・依存なし |
 | `p1080_d88_writeid_oldsi_link.patch` | **B** | P1080 | **適用済み(2026-11-13、ユーザーが`git apply`、T-1 smoke gate PASS・T-2b/T-3/T-4 hands-on合格、main=`3465b14`)**。D-121(`.d88`へのFORMATで各トラックに先頭1セクタしか残らない)の是正。`Core/px68k/x68k/disk_d88.c`の`D88_WriteID`で、`oldsi`をforループ本体内の宣言(毎反復NULL)からループ直前の宣言へ移す2行の変更。条件(b)は「関数内不変条件+系統外独立参照[XM6/XEiJ]との設計一致」で代替(本件限りのユーザー承認、上記Class B欄の★P1080注記)。修正前の直接ダンプ(P1079が書き戻した`.d88`で155/155トラック実セクタ1・`sectors`=8)取得済み、修正後はT-2b(FORMAT.X完走2回)・T-3・T-4(全155トラック実セクタ8・`sectors`=8に復旧)とも2/2合格を確認。px68k本家`74ddbb3`/libretro`617574f`/MPX68K`42fc340`はいずれも同一欠陥・未修正 |
 | `p1083_xdf_writeid_fill.patch` | A | P1083 | **適用済み・解決(main=`2966a29`、2026-11-13。ユーザーが`git apply`で適用、Build & Test must-stay-green 5/5独立確認、T-1[修正前・データ領域全`0x3C`残存]/T-2[修正後・全`0xE5`充填]ともhands-on合格)**。D-123(`.xdf`へのFORMATでWRITE IDが埋め草[D]を無視しデータ領域を上書きせず、FORMAT前の旧データが残る)の是正。`Core/px68k/x68k/disk_xdf.c`の`XDF_WriteID`で、埋め草`buf[num<<2]`をID表検査ループ前に取得し、`trk==154`早期return(P1075)の後で`memset(XDFImg[drv]+(trk<<13), fill, 8192)`によりトラック全8セクタを充填する(3行追加)。XM6 2.06(`vm/fdi.cpp` sha256 `fa84af13…`、`FDITrack::WriteID`の全セクタFill)・XEiJ 0.26.10.08(`xeij/FDC.java` sha256 `7c240af5…`、ID表エントリ単位の`Arrays.fill`)の独立2参照実装の**構造の移植**(XM6方式、逐語移植ではない)。px68k本家`74ddbb3`/libretro`617574f`/MPX68K`42fc340`(GitHub`4fc9e85`も同一)は充填なしの同一欠陥・未修正。移植しない点: XEiJのエントリ単位充填(R重複ID表の異常系でのみ差)、XM6の同値時スキップ最適化、XEiJのdirtyフラグ、trk=154での充填。前提: `p1075`適用済み。ヘッダにXM6/XEiJ該当行の逐語抜粋を収録。環境変数なし。Bridge側の変更・依存なし |
+| `p1143_midi_irq_level.patch` | **B** | P1143 | **適用済み・main統合完了(main=`8806acf`、2026-11-27)**。ユーザーhands-on確認合格(MIDIボード単体IRQ4・Mercury Unit+MIDIボード同時装着IRQ2とも実機MIDI楽器で正常動作、`si.r`で両ボード同時認識も確認)。MIDIボード(CZ-6BM1)の割込みレベルを固定4から可変(`MIDI_IrqLevel`、既定4)にし、Bridgeがinit/ハードリセットのラッチでMercury Unit装着時に2を設定する(実機DIPSW 1-1 OFF相当、Outside X68000 書籍p.93)。これによりMercury Unit(IRQ4固定)との同時装着が可能になる。新規機能へのClass B適用は本件限りのユーザー承認(上記★P1143注記)。px68k本家`74ddbb3`/libretro`617574f`/MPX68K`42fc340`はIRQ4固定、XM6 2.06はGUI設定のみで切替が機能しない。環境変数なし。★本パッチを適用しないとBridgeのビルドが失敗する(`MIDI_IrqLevel`を参照するため) |
 
 ## ★台帳の状態欄の記入規律(恒久ルール、P686で成文化・ユーザー承認済み)
 

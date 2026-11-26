@@ -764,13 +764,15 @@ extern void p637_ch3_dump_summary(const char* tag);
 /* P935 (D-73): Bridge/midi_coremidi.c の MIDI 受信リング。どちらもエミュレーションスレッド専用。 */
 extern void mx68k_midi_rx_pump(void);
 extern void mx68k_midi_rx_ring_clear(void);
-/* P488: MIDI ボード(CZ-6BM1 / YM3802 / $EAE000)の装着状態。Mercury と同型に
+/* P488: MIDI ボード(CZ-6BM1 / YM3802 / ポート $EAFA01-$EAFA0F。$EAE000 は Bridge が
+ * 管理するボード窓の先頭)の装着状態。Mercury と同型に
  * 「設定値(g_midi_enabled)」と「配線確定値(g_midi_installed)」を分離する。
  * 配線は init / ハードリセットでのみ確定する。
- * ★Mercury Unit と割込みレベル 4 を共有する(midi.c:172,187,202・
- *   midi_darwin.c:59 で 4 がハードコード、IRQH_CallBack[] はレベルあたり
- *   1 コールバックのみ)ため、両方同時装着は不可 — 相互排他ラッチで
- *   Mercury 側を優先し MIDI を強制 OFF にする。 */
+ * ★P1143: 割込みレベルは Core の MIDI_IrqLevel(Core patch p1143)で、ラッチ時に
+ *   g_mercury_installed から導出する(Mercury 装着時 2、未装着時 4 — 実機 CZ-6BM1 の
+ *   DIPSW 1-1 OFF/ON 相当、Outside X68000 書籍 p.93)。Mercury Unit は IRQ4 固定なので
+ *   IRQH_CallBack[] の枠が分かれ(slot[2]=MIDI_Int、slot[4]=Mcry_IntCB)、
+ *   両ボードの同時装着が可能になった(P488 の相互排他は撤廃)。 */
 static bool g_midi_enabled   = false;
 int         g_midi_installed = 0;
 /* P490 (Stage 2): MIDI の設定値。いずれも「設定値」であり、リセット送出可否/音源種別/
@@ -1844,8 +1846,11 @@ int mx68k_init(void) {
                   "vol=%d rate=%d dir=%s\n", (int)g_mercury_enabled, p483_prev,
                   g_mercury_installed, MCRY_VOL, g_audio_sample_rate_hz, mx68k_mercury_dir());
     }
-    /* P488: MIDI 相互排他ラッチ。Mercury 側ラッチの直後に置く
-     * (g_mercury_installed が確定した後に読む必要があるため)。
+    /* P488/P1143: MIDI 装着ラッチ。Mercury 側ラッチの直後に置く
+     * (割込みレベルを確定済みの g_mercury_installed から導出するため)。
+     * MIDI_IrqLevel は MIDI_Init() より前に設定する。init 経路ではこの後に IRQH_Init() が、
+     * reset 経路ではこれより前の Step 2 で IRQH_Init() が呼ばれるので、どちらでも
+     * 旧レベルの割込み保留は残らない。
      * 呼出順序 Cleanup → Config.MIDI_SW 更新 → Init は入れ替え不可:
      *   MIDI_Cleanup() は「更新前の」Config.MIDI_SW を見てリセット送出要否を決め
      *   (midi.c:363)、MIDI_Init() は「更新後の」Config.MIDI_SW を見てデバイスを
@@ -1854,12 +1859,11 @@ int mx68k_init(void) {
      * hOut/hIn は BSS の 0 初期化グローバルなので未初期化状態での呼出も no-op。 */
     {
         int p488_prev = g_midi_installed;
-        int p488_conflict = (g_midi_enabled && g_mercury_installed);
-        g_midi_installed = (g_midi_enabled && !g_mercury_installed) ? 1 : 0;
-        if (p488_conflict) {
-            debug_log("[P488-MIDI] init: enabled=1 but mercury_installed=1 -> "
-                      "forced OFF (shared IRQ4, mutual exclusion)\n");
-        }
+        g_midi_installed = g_midi_enabled ? 1 : 0;
+        MIDI_IrqLevel = g_mercury_installed ? 2 : 4;   /* MIDI_Init() より前 */
+        debug_log("[P1143-MIDIIRQ] latch(init): mercury_installed=%d midi_enabled=%d "
+                  "midi_installed=%d irq_level=%d\n", g_mercury_installed,
+                  (int)g_midi_enabled, g_midi_installed, (int)MIDI_IrqLevel);
         MIDI_Cleanup();                          /* 常に呼ぶ(安全性確認済み)。旧 Config.MIDI_SW を見る */
         /* P490: Config.MIDI_Reset も Config.MIDI_SW と全く同じ順序制約の対象。
          * MIDI_Cleanup() のリセット送出ガードは midi.c:363 で
@@ -2897,16 +2901,15 @@ void mx68k_reset_hard(void) {
                   "vol=%d rate=%d dir=%s\n", (int)g_mercury_enabled, p483_prev,
                   g_mercury_installed, MCRY_VOL, g_audio_sample_rate_hz, mx68k_mercury_dir());
     }
-    /* P488: init 経路と同一の MIDI 相互排他ラッチ(Mercury 側ラッチの直後)。
-     * 装着設定はここで初めて配線に反映される(設定「適用」だけでは変わらない)。 */
+    /* P488/P1143: init 経路と同一の MIDI 装着ラッチ(Mercury 側ラッチの直後)。
+     * 装着設定と割込みレベルはここで初めて配線に反映される(設定「適用」だけでは変わらない)。 */
     {
         int p488_prev = g_midi_installed;
-        int p488_conflict = (g_midi_enabled && g_mercury_installed);
-        g_midi_installed = (g_midi_enabled && !g_mercury_installed) ? 1 : 0;
-        if (p488_conflict) {
-            debug_log("[P488-MIDI] reset: enabled=1 but mercury_installed=1 -> "
-                      "forced OFF (shared IRQ4, mutual exclusion)\n");
-        }
+        g_midi_installed = g_midi_enabled ? 1 : 0;
+        MIDI_IrqLevel = g_mercury_installed ? 2 : 4;   /* MIDI_Init() より前 */
+        debug_log("[P1143-MIDIIRQ] latch(reset): mercury_installed=%d midi_enabled=%d "
+                  "midi_installed=%d irq_level=%d\n", g_mercury_installed,
+                  (int)g_midi_enabled, g_midi_installed, (int)MIDI_IrqLevel);
         MIDI_Cleanup();                          /* 常に呼ぶ。旧 Config.MIDI_SW を見る */
         /* P490: init 経路と同一。Config.MIDI_Reset も MIDI_Cleanup() 側(midi.c:363)で
          * 「更新前の値」が読まれる — 撤収時のリセット送出は旧セッションの設定に従うのが

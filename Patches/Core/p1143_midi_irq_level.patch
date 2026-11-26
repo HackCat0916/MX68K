@@ -1,0 +1,151 @@
+# P1143: MIDI ボード(CZ-6BM1)の割込みレベルを固定 4 から可変(2/4)にする
+#   (Mercury Unit 装着時に Bridge が自動で 2 を設定し、両ボードの同時装着を可能にする)
+#
+# 分類: B(ハードウェア仕様準拠——参照実装に動作する既存実装なし。不具合修正ではなく未実装の実機機能の追加。
+#   「新規機能の追加への Class B 適用」はユーザー承認 U-1 による本件限りの扱いで、恒久ルールではない
+#   [P1143、2026-11-26、方針質問として個別パッチ承認とは別に取得——Patches/Core/README.md の★P1143 注記])
+# 一次資料(本パッチ作成時に Read ツールでページ画像を開いて確認、Docs/Outside X68000.pdf、PDF ページ=書籍ページ+4):
+#   書籍 p.93(PDF p.97)§4-2「割り込みレベルの設定」:
+#     「ボード上のディップスイッチ1の1側(スイッチ1-1)でボードが使用する割り込みレベルを選択できるようになっています。
+#       ON のとき割り込みレベル4が、OFF のとき割り込みレベル2が使用されます。」
+#   書籍 p.90(PDF p.94)仕様表: 「割り込み  レベル2/レベル4(ジャンパースイッチで選択)」
+#     (★Fix Plan は仕様表を書籍 p.89 と記載していたが、p.89[PDF p.93]は章扉と仕様表の冒頭[主要 LSI]のみで、
+#       「割り込み」行は p.90 にあることを本パッチ作成時に確認・訂正。仕様表は「ジャンパースイッチ」、
+#       §4-2 は「ディップスイッチ1-1」と呼び分けているが、指す設定は同じ[2/4 の二択])
+#   書籍 p.91/p.92(PDF p.95/p.96)図1・図2(SW1)は Spec Investigation(P1143_spec_inv.md)経由の引用で、本パッチ作成時には未再読
+# 実測根拠: 本パッチ作成時点では未取得(不具合修正ではないため「誤った値の観測」は存在しない——Fix Plan「Class B 自己点検」(a))。
+#   代替条件として次の 2 点を実行時ログで確認し、それをもってパッチを残す条件とする(条件 4「効果を単独で確認」を兼ねる):
+#   (1) パッチ前: MIDI 割込みが L4 の MIDI_Int 枠で受け付けられていること(T-3 前半、[P1143-MIDIIRQ] ヒストグラム)
+#   (2) パッチ後: Mercury の有無に応じて irq_level=4/2 となり、そのレベルの IACK が MIDI_Int に渡ること(T-4/T-6)
+#   (結果、2026-11-27、Build & Test commit 232f114): T-1(既定経路、Mercury OFF)で
+#     [P1143-MIDIIRQ] latch(init): mercury_installed=0 ... irq_level=4 を確認。
+#     T-5b(Mercury ON・MIDI ON)で irq_level=2 を確認、旧来の forced OFF ログ(P488 由来)は検出されず(0件)。
+#     ★上記はいずれも smoke_test.sh 経由の [runtime log] 確認であり、(1)のパッチ前 L4 ヒストグラム計測
+#     (T-3 前半)と、ユーザーが実機 MIDI 楽器/ドライバで動作を確認する T-4/T-6(hands-on)は別途実施予定
+#     (Core File Modification Policy 条件4 の hands-on confirmation はこの T-4/T-6 を指す、ログ確認のみでは満たさない)。
+# 上流欠陥同定: 欠陥ではなく機能の未実装。px68k(xkeropi 由来)の midi.c がレベル 4 をリテラルで 4 箇所に固定しており、
+#   px68k 系統全体(本家/libretro/MPX68K/MX)で共通
+# 同系先例: Bridge/scsi_spc.cpp:2611-2615(外付 SCSI ボードの割込みレベルを scsi.ilevel で 2/4 から選択)
+# 参照実装調査(修正不在の証明):
+#   px68k本家      74ddbb3  x68k/midi.c:143(irq==4)・174/189/204(IRQH_Int(4, &MIDI_Int))— IRQ4 固定
+#   px68k-libretro 617574f  x68k/midi.c:143・174/189/204 — IRQ4 固定
+#   MPX68K(ローカル) 42fc340 "X68000 Shared/px68k/x68k/midi.c":143・174/189/204 — IRQ4 固定(mercury.c は存在しない)
+#   XM6 本家 v2.06 vm/midi.cpp(sha256 下記): GUI 設定はある(Fix Plan 記載 config.h:84、mfc_cfg.cpp:313,7335,7429,7432)が、
+#     midi.ilevel への代入は :69・:131 の 4 固定の 2 箇所のみで、ApplyCfg(:316-325)は設定値を参照しない — 動作する切替なし
+#   XM6 TypeG: クローズドソースのため確認不能
+# Bridge代替検討: 却下——レベルは midi.c 内の IRQH_Int(4, …) の引数そのもので、呼出し時点で IRQH_IRQ[4]・IRQH_CallBack[4]
+#   が書かれ m68000_set_irq_line(4) まで実行される。Bridge が事後に slot[2] へ付け替える案は、(1) Mercury と共有する
+#   slot[4] が上書きされた時点で Mcry_IntCB が失われ復元できない、(2) 既に上げた IRQ 線の事後取消しにタイミング問題がある
+#   (P1136 で却下した事後取消しと同型)、の 2 点で不可
+# 対象ファイル:行範囲(適用前。両ファイルとも最終変更 6337b28 = 初期取込みから無変更):
+#   Core/px68k/x68k/midi.c:69(直後に MIDI_IrqLevel 定義を追加)・141(MIDI_Int の irq==4)・172/187/202(IRQH_Int(4, &MIDI_Int))
+#   Core/px68k/x68k/midi.h:26(直後に extern 宣言を追加)
+# 理由(1行): 実機 CZ-6BM1 は DIPSW 1-1 で IRQ2/IRQ4 を選べるが Core は 4 固定のため、Mercury Unit(IRQ4 固定)と枠が衝突し同時装着できない
+# 由来サイクル: P1143
+# 変更内容: uint8_t MIDI_IrqLevel = 4; を新設し、レベル 4 のリテラル 4 箇所をこの変数へ置き換える(既定値 4 = 適用前と同一挙動)。
+#   値は Bridge(EmulatorBridge.c の init/ハードリセットの MIDI 装着ラッチ)が MIDI_Init() より前に
+#   g_mercury_installed ? 2 : 4 で設定する。midi_darwin.c / midi_win.c はビルド対象外のため触らない。
+#   Bridge/midi_coremidi.c の受信割込み(IRQH_Int(4, …))も同じ変数へ置き換える(Bridge 側の変更で、本パッチの外)。
+# 適用方法: git apply Patches/Core/p1143_midi_irq_level.patch
+#           撤回:  git apply -R Patches/Core/p1143_midi_irq_level.patch
+#           (★ユーザー自身が実行すること。エージェントは Core/ を編集しない)
+# 環境変数: なし(既定 OFF のフラグは導入しない)。
+# 併用が必須の Bridge 側変更: あり——Bridge/EmulatorBridge.c(ラッチで MIDI_IrqLevel を設定)・Bridge/midi_coremidi.c
+#   ・Bridge/m68000_bridge.c(P1143 プローブの irq_level 表示)が MIDI_IrqLevel を参照するため、本パッチ未適用だと
+#   p1143-midi-irq-switch ブランチの Bridge はビルドできない(意図した順序)。No stacking は非該当(置き換え対象の Bridge 近似は無い。
+#   撤廃する P488 の相互排他は近似ではなく衝突回避のガード)。
+# 挙動の変化: Mercury 未装着(既定経路を含む)は MIDI_IrqLevel=4 のままで不変。Mercury 装着+MIDI 装着時のみ MIDI が
+#   レベル 2 で割込みを要求する(実機の DIPSW 1-1 OFF と同じ。SR マスク 2 以上の区間では MIDI 割込みが届かない)。
+#   MIDI_IrqLevel はステートセーブの対象外(ラッチ時の導出値になる)。
+#
+# 版固定(本パッチ作成時に実行した生出力):
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k" rev-parse HEAD
+#   | 74ddbb37b4e12b77362a4e12f28ceb5aaa593684
+#   $ grep -n -a "irq==4\|IRQH_Int(4" "/Volumes/WD 8TB HDD/Develop/px68k/x68k/midi.c"
+#   | 143:	if ( irq==4 )
+#   | 174:				IRQH_Int(4, &MIDI_Int);
+#   | 189:				IRQH_Int(4, &MIDI_Int);
+#   | 204:				IRQH_Int(4, &MIDI_Int);
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/px68k-libretro" rev-parse HEAD
+#   | 617574fc65892421dd8be92270f8241c96a1a594
+#   $ grep -n -a "irq==4\|IRQH_Int(4" "/Volumes/WD 8TB HDD/Develop/px68k-libretro/x68k/midi.c"
+#   | 143:	if ( irq==4 )
+#   | 174:				IRQH_Int(4, &MIDI_Int);
+#   | 189:				IRQH_Int(4, &MIDI_Int);
+#   | 204:				IRQH_Int(4, &MIDI_Int);
+#   $ git -C "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K" rev-parse HEAD
+#   | 42fc3401b5a3449a3b758ae67edba3c4a19682b8
+#   $ grep -n -a "irq==4\|IRQH_Int(4" "/Volumes/WD 8TB HDD/Develop/Xcode/MPX68K/X68000 Shared/px68k/x68k/midi.c"
+#   | 143:	if ( irq==4 )
+#   | 174:				IRQH_Int(4, &MIDI_Int);
+#   | 189:				IRQH_Int(4, &MIDI_Int);
+#   | 204:				IRQH_Int(4, &MIDI_Int);
+#   $ shasum -a 256 "/Volumes/WD 8TB HDD/Develop/xm6/vm/midi.cpp"
+#   | 43a652fcb835d6bed8bc0d2448e3b7611c0d50c7b37aec45c2f745f7577d7a92  /Volumes/WD 8TB HDD/Develop/xm6/vm/midi.cpp
+#   $ grep -n -a "ilevel" "/Volumes/WD 8TB HDD/Develop/xm6/vm/midi.cpp" | head -2
+#   | 69:	midi.ilevel = 4;
+#   | 131:	midi.ilevel = 4;
+#   $ git log --oneline -1 -- Core/px68k/x68k/midi.c Core/px68k/x68k/midi.h    (MX68K)
+#   | 6337b28 Add px68k core, SwiftUI app shell, and Bridge layer
+#   (各リポジトリで git が non-monotonic index ._pack-*.idx 警告を出す場合があるが、macOS の AppleDouble 残骸で HEAD 解決には影響しない)
+#
+diff --git a/Core/px68k/x68k/midi.c b/Core/px68k/x68k/midi.c
+index 9ab211b..1d6e309 100644
+--- a/Core/px68k/x68k/midi.c
++++ b/Core/px68k/x68k/midi.c
+@@ -67,6 +67,7 @@ uint8_t		MIDI_Vector = 0;
+ uint8_t		MIDI_IntEnable = 0;
+ uint8_t		MIDI_IntVect = 0;
+ uint8_t		MIDI_IntFlag = 0;
++uint8_t		MIDI_IrqLevel = 4;			// 割込みレベル(2/4、実機CZ-6BM1のDIPSW 1-1 OFF/ON相当、P1143)
+ uint32_t	MIDI_Buffered = 0;
+ int32_t		MIDI_BufTimer = 3333;
+ uint8_t		MIDI_R05 = 0;
+@@ -138,7 +139,7 @@ int32_t FASTCALL MIDI_Int(uint8_t irq)
+ {
+ 	int32_t ret;
+ 	IRQH_IRQCallBack(irq);
+-	if ( irq==4 )
++	if ( irq==MIDI_IrqLevel )
+ 	{
+ 		ret = (int32_t)(MIDI_Vector|MIDI_IntVect);
+ 	}
+@@ -169,7 +170,7 @@ void FASTCALL MIDI_Timer(int32_t clk)
+ 			{
+ 				MIDI_IntFlag |= 0x40;
+ 				MIDI_IntVect = 0x0c;
+-				IRQH_Int(4, &MIDI_Int);
++				IRQH_Int(MIDI_IrqLevel, &MIDI_Int);
+ 			}
+ 		}
+ 	}
+@@ -184,7 +185,7 @@ void FASTCALL MIDI_Timer(int32_t clk)
+ 			{
+ 				MIDI_IntFlag |= 0x02;
+ 				MIDI_IntVect = 0x02;
+-				IRQH_Int(4, &MIDI_Int);
++				IRQH_Int(MIDI_IrqLevel, &MIDI_Int);
+ 			}
+ 		}
+ 	}
+@@ -199,7 +200,7 @@ void FASTCALL MIDI_Timer(int32_t clk)
+ 			{
+ 				MIDI_IntFlag |= 0x80;
+ 				MIDI_IntVect = 0x0e;
+-				IRQH_Int(4, &MIDI_Int);
++				IRQH_Int(MIDI_IrqLevel, &MIDI_Int);
+ 			}
+ 		}
+ 	}
+diff --git a/Core/px68k/x68k/midi.h b/Core/px68k/x68k/midi.h
+index 53fb9e0..ab2a8ac 100644
+--- a/Core/px68k/x68k/midi.h
++++ b/Core/px68k/x68k/midi.h
+@@ -24,6 +24,7 @@ extern uint8_t		MIDI_R35;
+ extern uint8_t		MIDI_IntEnable;
+ extern uint8_t		MIDI_IntVect;
+ extern uint8_t		MIDI_IntFlag;
++extern uint8_t		MIDI_IrqLevel;
+ 
+ extern uint32_t midiOutPrepareHeader(HMIDIOUT hmo, LPMIDIHDR pmh, uint32_t cbmh);
+ extern uint32_t midiOutUnprepareHeader(HMIDIOUT hmo, LPMIDIHDR pmh, uint32_t cbmh);

@@ -532,7 +532,7 @@ mx68k_midi_rx_pump(void)
 	if (any && (MIDI_IntEnable & 0x20)) {	/* 割り込み許可? */
 		MIDI_IntFlag |= 0x20;		/* Rx int 発生 */
 		MIDI_IntVect  = 0x0a;		/* ベクタ設定 */
-		IRQH_Int(4, &MIDI_Int);		/* 割り込みレベル 4 */
+		IRQH_Int(MIDI_IrqLevel, &MIDI_Int);	/* 割り込みレベル(P1143: Mercury 装着時 2、未装着時 4) */
 	}
 }
 

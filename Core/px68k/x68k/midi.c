@@ -67,6 +67,7 @@ uint8_t		MIDI_Vector = 0;
 uint8_t		MIDI_IntEnable = 0;
 uint8_t		MIDI_IntVect = 0;
 uint8_t		MIDI_IntFlag = 0;
+uint8_t		MIDI_IrqLevel = 4;			// 割込みレベル(2/4、実機CZ-6BM1のDIPSW 1-1 OFF/ON相当、P1143)
 uint32_t	MIDI_Buffered = 0;
 int32_t		MIDI_BufTimer = 3333;
 uint8_t		MIDI_R05 = 0;
@@ -138,7 +139,7 @@ int32_t FASTCALL MIDI_Int(uint8_t irq)
 {
 	int32_t ret;
 	IRQH_IRQCallBack(irq);
-	if ( irq==4 )
+	if ( irq==MIDI_IrqLevel )
 	{
 		ret = (int32_t)(MIDI_Vector|MIDI_IntVect);
 	}
@@ -169,7 +170,7 @@ void FASTCALL MIDI_Timer(int32_t clk)
 			{
 				MIDI_IntFlag |= 0x40;
 				MIDI_IntVect = 0x0c;
-				IRQH_Int(4, &MIDI_Int);
+				IRQH_Int(MIDI_IrqLevel, &MIDI_Int);
 			}
 		}
 	}
@@ -184,7 +185,7 @@ void FASTCALL MIDI_Timer(int32_t clk)
 			{
 				MIDI_IntFlag |= 0x02;
 				MIDI_IntVect = 0x02;
-				IRQH_Int(4, &MIDI_Int);
+				IRQH_Int(MIDI_IrqLevel, &MIDI_Int);
 			}
 		}
 	}
@@ -199,7 +200,7 @@ void FASTCALL MIDI_Timer(int32_t clk)
 			{
 				MIDI_IntFlag |= 0x80;
 				MIDI_IntVect = 0x0e;
-				IRQH_Int(4, &MIDI_Int);
+				IRQH_Int(MIDI_IrqLevel, &MIDI_Int);
 			}
 		}
 	}

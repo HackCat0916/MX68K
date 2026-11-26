@@ -30473,8 +30473,60 @@ static struct {
 /* P865: IACK コールバック実行中フラグ(mx_cpu_set_irq の呼出し文脈判定用) */
 static int s_p864_in_iack = 0;
 #endif
+
+/* P1143: MIDI ボードの割込みレベル切替の確認用 IACK ヒストグラム。
+ * my_irqh_callback() が枠を消費する前に IRQH_CallBack[level] の持ち主を判定し、
+ * レベル 2/4 ごとに分母(total)と持ち主別(MIDI_Int / Mcry_IntCB)を数える。
+ * 「midi=0」が「ゲストが割込みを使っていない」のか「レベルの配線誤り」なのかを
+ * 区別できるよう、生の MIDI_IntEnable と両レベルの分母を同じ行に出す。
+ * 累計値を 300 フレームごと、変化があった時だけ出力する(上限 P1143_LOG_MAX 行)。 */
+#define P1143_PROBE_ENABLE 1
+#if P1143_PROBE_ENABLE
+#include "../Core/px68k/x68k/midi.h"   /* MIDI_Int / MIDI_IntEnable / MIDI_IrqLevel(Core patch p1143) */
+extern int32_t FASTCALL Mcry_IntCB(uint8_t irq);   /* Core:mercury.c、ヘッダ未宣言 */
+extern void   *IRQH_CallBack[8];                   /* Core:irqh.c、ヘッダ未宣言 */
+extern int     g_midi_installed;                   /* EmulatorBridge.c 定義 */
+#define P1143_LOG_MAX 200u
+static unsigned s_p1143_total[8], s_p1143_midi[8], s_p1143_mcry[8];
+static unsigned s_p1143_logged = 0;
+static int      s_p1143_last_frame = -1;
+static unsigned s_p1143_last_sum = 0;
+
+static void p1143_on_iack(int32_t level)
+{
+    int lv = level & 7;
+    void *owner = IRQH_CallBack[lv];
+    if (lv == 2 || lv == 4) {
+        s_p1143_total[lv]++;
+        if (owner == (void *)&MIDI_Int)   s_p1143_midi[lv]++;
+        if (owner == (void *)&Mcry_IntCB) s_p1143_mcry[lv]++;
+    }
+    if (g_mx68k_frame_num != s_p1143_last_frame) {
+        s_p1143_last_frame = g_mx68k_frame_num;
+        if (g_mx68k_frame_num % 300 == 0 && s_p1143_logged < P1143_LOG_MAX) {
+            unsigned sum = s_p1143_total[2] + s_p1143_total[4];
+            if (sum != s_p1143_last_sum) {
+                s_p1143_last_sum = sum;
+                s_p1143_logged++;
+                debug_log("[P1143-MIDIIRQ] f=%d L2 total=%u midi=%u mcry=%u | "
+                          "L4 total=%u midi=%u mcry=%u | irq_level=%d midi_inst=%d "
+                          "mcry_inst=%d MIDI_IntEnable=$%02x\n",
+                          g_mx68k_frame_num,
+                          s_p1143_total[2], s_p1143_midi[2], s_p1143_mcry[2],
+                          s_p1143_total[4], s_p1143_midi[4], s_p1143_mcry[4],
+                          (int)MIDI_IrqLevel, g_midi_installed, g_mercury_installed,
+                          (unsigned)MIDI_IntEnable);
+            }
+        }
+    }
+}
+#endif /* P1143_PROBE_ENABLE */
+
 static int32_t mx68k_diag_irqh_callback(int32_t level)
 {
+#if P1143_PROBE_ENABLE
+    p1143_on_iack(level);   /* my_irqh_callback() が枠を読む前に判定する */
+#endif
 #if P864_MUSASHI_IRQPROBE_ENABLE
     s_p864_in_iack = 1;
 #endif

@@ -117,7 +117,6 @@ struct AudioSettingsView: View {
                 // P1104: Mercury Unit も iOS 対応。トグルは両 OS 共通、案内文のみ OS 別
                 // (iOS には Sound Monitor・⌘R が無いため)。
                 Toggle("Mercury Unit (16-bit linear PCM)", isOn: $settingsViewModel.mercuryUnit)
-                    .disabled(settingsViewModel.midiEnabled)
                 // P581: 日本語リテラル直書き(英語モードでも日本語が出ていた)を
                 // 「英語ソース + xcstrings の ja 訳」という他タブと同じ方式へ揃える。
                 #if os(macOS)
@@ -129,34 +128,25 @@ struct AudioSettingsView: View {
                     .font(.subheadline).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 #endif
-                // P633: 実音出力が未検証である旨を正直に表示する(Docs/01 3-3 の
-                // 「実 PCM 音は未検証」「実 PCM 音・実 FM 音とも未検証」と同趣旨)。
-                Text("⚠ Wiring is complete, but neither real PCM nor real FM sound has been verified — no compatible software has been obtained yet.")
-                    .font(.subheadline).foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
                 #if os(iOS)
                 Text("⚠ Adds YMF288 FM (6ch) + SSG (3ch) synthesis on top of the base ADPCM audio. On some iPad models it may increase the chance of audio stutter or dropouts — if so, disable it.")
                     .font(.subheadline).foregroundColor(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 #endif
-                // P488: MIDI ボード(CZ-6BM1)。Mercury Unit と割込みレベル 4 を共有する
-                // ため相互排他(SASI/SCSI 排他(P268)と同型)。
+                // P488: MIDI ボード(CZ-6BM1)。
+                // P1143: Mercury Unit と同時に装着できる。Mercury 装着時は Bridge が
+                // ハードリセット時に割込みレベルを自動で 2 へ切り替える(実機 DIPSW 1-1 OFF 相当)。
                 Toggle("MIDI Board (CZ-6BM1)", isOn: $settingsViewModel.midiEnabled)
-                    .disabled(settingsViewModel.mercuryUnit)
-                // P581: 三項演算子で 2 つの文字列リテラルを渡すとオーバーロード解決が
-                // `Text(S: StringProtocol)`(非ローカライズ)側へ倒れる余地があるため、
-                // if/else で分けて必ず `Text(LocalizedStringKey)` になるようにする。
-                if settingsViewModel.mercuryUnit {
-                    Text("⚠ Cannot be installed together with the Mercury Unit — both use interrupt level 4. Disable the Mercury Unit first.")
+                if settingsViewModel.mercuryUnit && settingsViewModel.midiEnabled {
+                    #if os(macOS)
+                    Text("⚠ With the Mercury Unit installed, the MIDI board uses interrupt level 2 (equivalent to setting DIP switch 1-1 to OFF on the real board). Takes effect after pressing Apply and then performing a hard reset (⌘R).")
                         .font(.subheadline).foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    // P633: 「何がどこまで確認済みか」を具体的に書き分ける。
-                    // ボード検出とドライバ側の認識は hands-on 確認済み(Docs/01 3-2)、
-                    // 実 MIDI 楽器での音出力だけが未検証。
-                    Text("⚠ Both MIDI output and input are supported. Board detection and recognition by game/music drivers are confirmed, but sound output on a real MIDI instrument has not been verified.")
+                    #else
+                    Text("⚠ With the Mercury Unit installed, the MIDI board uses interrupt level 2 (equivalent to setting DIP switch 1-1 to OFF on the real board). Takes effect after pressing Apply and then tapping Hard Reset.")
                         .font(.subheadline).foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    #endif
                 }
 
                 // P490: MIDI Stage 2 の設定群。

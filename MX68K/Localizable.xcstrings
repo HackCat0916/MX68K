@@ -548,26 +548,6 @@
         }
       }
     },
-    "⚠ Both MIDI output and input are supported. Board detection and recognition by game/music drivers are confirmed, but sound output on a real MIDI instrument has not been verified.": {
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "⚠ 入出力とも対応しています。ボードの検出とゲーム/音楽ドライバからの認識は確認済みですが、実 MIDI 楽器での音出力は未検証です。"
-          }
-        }
-      }
-    },
-    "⚠ Cannot be installed together with the Mercury Unit — both use interrupt level 4. Disable the Mercury Unit first.": {
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "⚠ Mercury Unit と同じ割込みレベル(4)のため同時装着できません。先に Mercury Unit を無効にしてください。"
-          }
-        }
-      }
-    },
     "⚠ Changes take effect at next launch.": {
       "localizations": {
         "ja": {
@@ -950,12 +930,22 @@
         }
       }
     },
-    "⚠ Wiring is complete, but neither real PCM nor real FM sound has been verified — no compatible software has been obtained yet.": {
+    "⚠ With the Mercury Unit installed, the MIDI board uses interrupt level 2 (equivalent to setting DIP switch 1-1 to OFF on the real board). Takes effect after pressing Apply and then performing a hard reset (⌘R).": {
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "⚠ 配線は完了していますが、対応ソフト未入手のため実 PCM 音・実 FM 音とも未検証です。"
+            "value": "⚠ Mercury Unit 装着時は、MIDI ボードは割込みレベル 2 で動作します(実機ボードのディップスイッチ 1-1 を OFF にした状態に相当)。「適用」を押した後、ハードリセット(⌘R)で反映されます。"
+          }
+        }
+      }
+    },
+    "⚠ With the Mercury Unit installed, the MIDI board uses interrupt level 2 (equivalent to setting DIP switch 1-1 to OFF on the real board). Takes effect after pressing Apply and then tapping Hard Reset.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚠ Mercury Unit 装着時は、MIDI ボードは割込みレベル 2 で動作します(実機ボードのディップスイッチ 1-1 を OFF にした状態に相当)。「適用」を押した後、ハードリセットで反映されます。"
           }
         }
       }

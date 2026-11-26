@@ -24,6 +24,7 @@ extern uint8_t		MIDI_R35;
 extern uint8_t		MIDI_IntEnable;
 extern uint8_t		MIDI_IntVect;
 extern uint8_t		MIDI_IntFlag;
+extern uint8_t		MIDI_IrqLevel;
 
 extern uint32_t midiOutPrepareHeader(HMIDIOUT hmo, LPMIDIHDR pmh, uint32_t cbmh);
 extern uint32_t midiOutUnprepareHeader(HMIDIOUT hmo, LPMIDIHDR pmh, uint32_t cbmh);
