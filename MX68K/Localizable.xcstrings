@@ -7990,6 +7990,16 @@
         }
       }
     },
+    "XPD-1LR (Libble Rabble / Crazy Climber)": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "XPD-1LR(リブルラブル/クレイジークライマー)"
+          }
+        }
+      }
+    },
     "yes": {
       "extractionState": "stale",
       "localizations": {

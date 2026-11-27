@@ -16,6 +16,7 @@ enum GamepadButtonProfile: String, CaseIterable, Identifiable {
     case standard2Button     // 標準 2 ボタン(既存動作・回帰なし)
     case cpsfMD6Button       // ストII 等(CPSF-PC + メガドライブ 6 ボタンパッド相当)
     case magicalPad4Button   // 餓狼伝説2 等(マジカルパッド相当)
+    case xpd1lrPad           // リブルラブル/クレイジークライマー(XPD-1LR、左右 2 十字キー)
 
     var id: String { rawValue }
 
@@ -27,6 +28,7 @@ enum GamepadButtonProfile: String, CaseIterable, Identifiable {
         case .standard2Button:   return "Standard (2 buttons)"
         case .cpsfMD6Button:     return "CPSF-MD (6 buttons)"
         case .magicalPad4Button: return "Magical Pad (4 buttons)"
+        case .xpd1lrPad:         return "XPD-1LR (Libble Rabble / Crazy Climber)"
         }
     }
 
@@ -35,7 +37,7 @@ enum GamepadButtonProfile: String, CaseIterable, Identifiable {
     /// (0xFF ではない — XM6 `JoyMagical::MakeData` の `data[1]` 初期値)。
     var bank1Idle: UInt8 {
         switch self {
-        case .standard2Button, .cpsfMD6Button: return 0xFF
+        case .standard2Button, .cpsfMD6Button, .xpd1lrPad: return 0xFF
         case .magicalPad4Button:               return 0xFC
         }
     }
@@ -182,6 +184,8 @@ enum GamepadFunction: String, CaseIterable, Identifiable {
         case .standard2Button:   return [.trig1, .trig2, .run, .select]
         case .cpsfMD6Button:    return [.trig1, .trig2, .z, .y6, .x6, .mode, .c, .start]
         case .magicalPad4Button: return [.trig1, .trig2, .l4, .r4, .b4]
+        // A/B は両バンク共有の 1 組のみ(実機 XPD-1LR と同じ)。
+        case .xpd1lrPad:         return [.trig1, .trig2]
         }
     }
 
@@ -1114,6 +1118,22 @@ class InputManager: ObservableObject {
                 // P593: 入力モニタ用に bank1 の生バイトを控える(表示専用)。
                 // `joyState`(bank0)と同じく @Published のためメインスレッドへ
                 // ディスパッチする。上の mx68k_joy_set1 の呼出しタイミング・値は無変更。
+                DispatchQueue.main.async { [weak self] in
+                    self?.joyState1[Int(port)] = b1
+                }
+            case .xpd1lrPad:
+                // 右十字キー = 右スティックのみ(実機には 2 つ目の物理 d-pad が無いため、
+                // bank0 のような「d-pad OR 左スティック」の OR は行わない)。
+                var b1: UInt8 = 0xFF
+                let dz2: Float = 0.5
+                if gamepad.rightThumbstick.yAxis.value >  dz2 { b1 &= ~UInt8(0x01) }   // bit0 = Up
+                if gamepad.rightThumbstick.yAxis.value < -dz2 { b1 &= ~UInt8(0x02) }   // bit1 = Down
+                if gamepad.rightThumbstick.xAxis.value < -dz2 { b1 &= ~UInt8(0x04) }   // bit2 = Left
+                if gamepad.rightThumbstick.xAxis.value >  dz2 { b1 &= ~UInt8(0x08) }   // bit3 = Right
+                // 実機同様、A/B は bank0 と同一の物理ボタン(trig1Button/trig2Button)を共有する。
+                if trig1Button.isPressed(gamepad) { b1 &= ~UInt8(0x40) }   // bit6 = A(TRIG1 相当)
+                if trig2Button.isPressed(gamepad) { b1 &= ~UInt8(0x20) }   // bit5 = B(TRIG2 相当)
+                mx68k_joy_set1(port, b1)
                 DispatchQueue.main.async { [weak self] in
                     self?.joyState1[Int(port)] = b1
                 }
