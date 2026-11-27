@@ -175,7 +175,7 @@ TNB製作所製の「ふろっぴU君」をUSBで接続すると、実機の5イ
 **使い方と注意:**
 
 - ディスクの読み書きは、通常どおりHuman68kから行います（`DIR`、`COPY`、`FORMAT.X`など）。
-- ディスクを交換した直後は、そのドライブを一度読むまで書き込みが拒否されることがあります。「書込み禁止」エラーが出たら「中止」を選び、そのドライブで`DIR`を実行してから操作をやり直してください。それでも出る場合は、安全のため書き込みが停止しています（表示が「書込み: 再起動まで停止中」）。MX68Kを再起動してください。
+- ディスクを交換してすぐに書き込んでも、通常はMX68K側で拒否されません（Human68k自身の媒体交換処理に委ねられます）。ただし、アプリ起動後（ふろっぴU君再接続後）の最初の書き込み・FORMATの前には、一度ディスクを読んでおく必要があります。「書込み禁止」エラーが出たら「中止」を選び、そのドライブで`DIR`を実行してから操作をやり直してください。それでも出る場合は、安全のため書き込みが停止しています（表示が「書込み: 再起動まで停止中」）。MX68Kを再起動してください。
 - マルチセクタ書き込みなど一部の書き込み要求は、安全のため「書込み禁止」エラーで拒否します。
 - FORMATは、標準2HD（1024バイト×8セクタ）へのFORMATに対応します。既にフォーマット済みのディスクであれば、旧形式で記録された媒体（コピープロテクト等）も含め形式を問わず対応し、Human68k付属のFORMAT.X以外のソフトウェア（ゲームのユーザーディスク作成機能など）からのFORMATも受け付けます（未フォーマットのディスクはコード上は対応済みですが、実機での動作確認はまだ行えていません）。同じディスクへのFORMATは続けて2回まで（ディスクを入れ直すと再びFORMATできます）。物理シリンダ77はFORMATしません（XEiJ・XM6と同じ）。FORMATが途中で止まった場合、装置の状態によっては再起動不要でそのまま次のFORMATへ進めることがあります（ディスクが途中まで初期化されている可能性があります）。装置の状態が分からない場合のみ「FORMAT: 再起動まで停止中」と表示されるので、その場合はMX68Kを再起動してください。
 - 書き込み・FORMATの対象には、ゲーム原盤などのディスクも含まれ得ます。大切なディスクは書込み保護タブで保護してください。また、アクセス中にディスクを取り出さないでください。
@@ -201,7 +201,7 @@ While FloppyU is in use, the assigned drives use the FloppyU drives instead of a
 **Usage notes:**
 
 - Read and write disks from Human68k as usual (`DIR`, `COPY`, `FORMAT.X`, etc.).
-- Right after a disk swap, writes to that drive may be refused until the drive has been read once. If Human68k reports a write-protect (書込み禁止) error, choose "中止" (Abort), run `DIR` on that drive, and retry. If the error persists, writing has been stopped for safety (the status shows "Writing: Stopped until restart") — restart MX68K.
+- Writing right after a disk swap is usually not refused by MX68K (it is left to Human68k's own media-change handling). However, after launching the app (or reconnecting FloppyU), the disk must be read once before the first write or FORMAT. If Human68k reports a write-protect (書込み禁止) error, choose "中止" (Abort), run `DIR` on that drive, and retry. If the error persists, writing has been stopped for safety (the status shows "Writing: Stopped until restart") — restart MX68K.
 - Some write requests, such as multi-sector writes, are refused with a "write-protected" error for safety.
 - FORMAT supports standard 2HD (1024 bytes × 8 sectors) formatting. Any already-formatted real disk is supported regardless of its existing physical format (including copy-protected disks recorded in other formats), and FORMAT requests from software other than Human68k's own FORMAT.X (such as a game's user-disk-creation feature) are also accepted (unformatted disks are supported in code but have not yet been confirmed on real hardware). The same disk can be formatted at most twice in a row (re-inserting the disk allows formatting again). Physical cylinder 77 is not formatted (same as XEiJ and XM6). If FORMAT stops partway, depending on the drive's state it may be possible to continue with the next FORMAT without restarting (the disk may be partially formatted). Only when the drive's state is unknown does the status show "Formatting: Stopped until restart" — in that case, restart MX68K.
 - Writing and FORMAT can also reach disks such as original game disks. Protect important disks with their write-protect tab, and do not eject a disk while it is being accessed.
