@@ -310,11 +310,11 @@ The X68000 uses a JIS keyboard layout, so some macOS keys map differently to X68
 
 ### ゲームパッド / Gamepad
 
-設定画面の「Input」タブから、ポート1/ポート2へ接続するコントローラを個別に選択できます。標準2ボタンに加え、CPSF-MD（6ボタン）・マジカルパッド（4ボタン）のプロファイルにも対応しています。
+設定画面の「Input」タブから、ポート1/ポート2へ接続するコントローラを個別に選択できます。標準2ボタンに加え、CPSF-MD（6ボタン）・マジカルパッド（4ボタン）・XPD-1LR（リブルラブル・クレイジークライマー専用、左右に十字キーがあるパッド相当。左スティック＝1つ目の十字キー、右スティック＝2つ目の十字キー）のプロファイルにも対応しています。
 
 **English:**
 
-From the "Input" tab in settings, you can individually choose the controller connected to Port 1 / Port 2. In addition to the standard 2-button pad, CPSF-MD (6-button) and Magical Pad (4-button) profiles are supported.
+From the "Input" tab in settings, you can individually choose the controller connected to Port 1 / Port 2. In addition to the standard 2-button pad, CPSF-MD (6-button), Magical Pad (4-button), and XPD-1LR (for Libble Rabble and Crazy Climber, which use a pad with two separate D-pads — the left stick drives the first D-pad, the right stick drives the second) profiles are supported.
 
 ## 5. iOS版の操作 / Operating the iOS Version
 

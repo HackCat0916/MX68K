@@ -48,7 +48,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **キーボード入力** — X68000のJISキーボードレイアウトに対応、キーリマップ設定・ソフトウェアキーボード対応
 - **クロック設定** — 10〜25MHz（実機・改造機相当の8段階）と50/100/200MHz（実験的）の固定選択肢、または1〜64,000MHzの任意値（カスタム入力）。ハードリセット不要で反映
 - **ターボ / ノーウェイト** — 2x〜5x固定倍率、または上限無しの専用スレッド駆動ノーウェイトモード
-- **ゲームパッド対応** — 2ポート対応、複数ボタンプロファイル（Standard / CPSF-MD / マジカルパッド）
+- **ゲームパッド対応** — 2ポート対応、複数ボタンプロファイル（Standard / CPSF-MD / マジカルパッド / XPD-1LR[リブルラブル・クレイジークライマー用]）
 - **ステートセーブ/ロード** — `*.mxstate`形式、個数無制限。クイックセーブ（⌘⇧S、ファイル名を自動で付けて即保存）/クイックロード（⌘⇧O、直近の1件を即読込）にも対応
 - **スクリーンショット** — PNG保存（保存先変更可）
 - **動画録画** — H.264（映像）+AAC（音声）のmp4録画（保存先変更可、録画中はターボ/ノーウェイトを禁止）
@@ -78,7 +78,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **Keyboard Input** — X68000 JIS keyboard layout support, key remapping, on-screen software keyboard
 - **Clock Speed** — fixed choices of 10–25 MHz (8 steps matching real and modified machines) and 50/100/200 MHz (experimental), or any value from 1 to 64,000 MHz (custom input). Applies without a hard reset
 - **Turbo / No-Wait** — fixed 2x–5x multipliers, or an uncapped dedicated-thread no-wait mode
-- **Gamepad Support** — 2 ports, multiple button profiles (Standard / CPSF-MD / Magical Pad)
+- **Gamepad Support** — 2 ports, multiple button profiles (Standard / CPSF-MD / Magical Pad / XPD-1LR [for Libble Rabble and Crazy Climber])
 - **State Save / Load** — `*.mxstate` format, unlimited slots. Also supports Quick Save (⌘⇧S, saves instantly with an auto-generated file name) and Quick Load (⌘⇧O, instantly loads the most recent save)
 - **Screenshot** — saved as PNG (destination configurable)
 - **Video Recording** — H.264 video + AAC audio, saved as mp4 (destination configurable; Turbo/No-Wait are disabled while recording)
