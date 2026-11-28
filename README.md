@@ -38,7 +38,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **ネイティブmacOSアプリ** — SwiftUI + Metal で構築されたモダンなmacOSアプリ
 - **px68kコア** — 実績のあるpx68kエミュレーションコアをベースに実機ソフトの動作を目指す
 - **Apple Silicon ネイティブ** — arm64アーキテクチャに最適化（M1/M2/M3/M4シリーズ対応）
-- **X68030対応** — 機種選択でX68000（SASI/SCSI世代）に加えX68030（MC68EC030、Musashi CPUコア）を選択可能。ハイメモリ（TS-6BE16相当／060turbo相当、16〜768MB）にも対応。さらにX68030のCPU換装相当として040turbo（MC68040）・060turbo（MC68060相当）も選択可能（実験的機能）
+- **X68030対応** — 機種選択でX68000（SASI/SCSI世代）に加えX68030（MC68EC030、Musashi CPUコア）を選択可能。ハイメモリ（TS-6BE16相当／060turbo相当、16〜768MB）にも対応。さらにX68030のCPU換装相当として040turbo（MC68040）・060turbo（MC68060相当）も選択可能
 - **FPU 68881/68882**（X68030選択時のみ）— 設定画面からFPU有効化・チップ選択（68881/68882）が可能
 - **FPUボード CZ-6BP1相当**（X68000の SASI/SCSI 機種、MC68881）— 設定画面「Hardware」タブの「FPU Board」トグルで装着（FLOAT3.X 等の浮動小数点ドライバから使用、CZ-6BP2 は未対応）
 - **多様なディスクフォーマット対応** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP**（FD、単一/複数イメージ対応）に対応
@@ -58,7 +58,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **CD-ROM（ISO・Mode1）マウント** — SCSI ID6固定スロット（CD-DA・CDブートは非対応）
 - **Windrv** — Macのフォルダを共有ドライブとしてゲストからファイル読み書き
 - **走査線エフェクト** — CRTディスプレイ風の表示効果をオン/オフ切替
-- **拡張ボード** — MIDI（CZ-6BM1相当、外部MIDI出力）・Mercury Unit（MK-MU1相当）
+- **拡張ボード** — MIDI（CZ-6BM1相当、外部MIDI出力）・Mercury Unit（MK-MU1相当）。両方を同時に装着可能
 - **内蔵MIDI音源** — Roland MT-32（mt32emu）・Roland SC-55（Nuked-SC55）のソフトウェアエミュレーション内蔵。外部MIDI機器不要（ROMファイルは別途ご用意ください）
 - **28種のモニタパネル** — CPU/CRTC/ビデオコントローラ/BG/サウンド/パレット/入力/ストレージ/MIDI/RTC/スプライト/OPMキーボード/OPMオペレータ/MIDIキーボード/逆アセンブル/DMAC/割込みレジスタ/デバッガ/ログビューワー等（System/Processor/Device/Sound/Peripherals/Video/Rendererの7グループに整理）
 - **多言語対応** — 日本語/英語切り替え対応
@@ -68,7 +68,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **Native macOS App** — a modern macOS app built with SwiftUI + Metal
 - **px68k Core** — based on the proven px68k emulation core, aiming for compatibility with real X68000 software
 - **Apple Silicon Native** — optimized for arm64 (M1/M2/M3/M4 series)
-- **X68030 Support** — in addition to X68000 (SASI/SCSI-era machines), select X68030 (MC68EC030, via the Musashi CPU core). High memory support included (TS-6BE16-equivalent / 060turbo-equivalent, 16–768 MB). 040turbo (MC68040) and 060turbo (MC68060-equivalent), the X68030 CPU-upgrade configurations, can also be selected (experimental)
+- **X68030 Support** — in addition to X68000 (SASI/SCSI-era machines), select X68030 (MC68EC030, via the Musashi CPU core). High memory support included (TS-6BE16-equivalent / 060turbo-equivalent, 16–768 MB). 040turbo (MC68040) and 060turbo (MC68060-equivalent), the X68030 CPU-upgrade configurations, can also be selected
 - **FPU 68881/68882** (X68030 only) — enable the FPU and select the chip (68881/68882) from the settings screen
 - **FPU board, CZ-6BP1-equivalent** (X68000 SASI/SCSI models, MC68881) — install it with the "FPU Board" toggle in the Hardware settings tab (used through a floating-point driver such as FLOAT3.X; CZ-6BP2 is not supported)
 - **Multiple Disk Formats** — XDF, DIM, D88, HDM, 2HD, IMG, HDF, HDS, MOS, ISO, **ZIP** (FD, single/multi-image archives)
@@ -88,7 +88,7 @@ See [USAGE.md](USAGE.md) for build instructions. Pre-built macOS binaries
 - **CD-ROM (ISO / Mode1) Mount** — dedicated SCSI ID6 slot (CD-DA and CD-boot are not supported)
 - **Windrv** — share a Mac folder as a guest-accessible drive for file read/write
 - **Scanline Effect** — toggleable CRT-style display effect
-- **Extension Boards** — MIDI (CZ-6BM1 equivalent, external MIDI output), Mercury Unit (MK-MU1 equivalent)
+- **Extension Boards** — MIDI (CZ-6BM1 equivalent, external MIDI output), Mercury Unit (MK-MU1 equivalent). Both can be installed at the same time
 - **Internal MIDI Synthesizers** — built-in software emulation of the Roland MT-32 (via mt32emu) and Roland SC-55 (via Nuked-SC55). No external MIDI device required (you must supply your own ROM files)
 - **28 Monitor Panels** — CPU/CRTC/video controller/BG/sound/palette/input/storage/MIDI/RTC/sprite/OPM keyboard/OPM operator/MIDI keyboard/disassembly/DMAC/interrupt registers/debugger/log viewer, etc. (organized into 7 groups: System/Processor/Device/Sound/Peripherals/Video/Renderer)
 - **Localization** — switchable Japanese/English UI
@@ -351,6 +351,12 @@ permission.
 - [px68k](https://github.com/hissorii/px68k) by hissorii — X68000エミュレータコア / X68000 emulator core
 - [c68k](https://github.com/kenyahiro/px68k/tree/master/m68000/c68k) by Stephane Dallongeville（Yabause同梱版、kenyahiro氏のpx68kフォーク経由） — MC68000 CPUエミュレータ（ARM64対応） / MC68000 CPU emulator (via kenyahiro's px68k fork, ARM64-compatible)
 - [fmgen](http://retropc.net/cisc/m88/) by cisc — FM音源生成ライブラリ / FM sound generator library
+- [Musashi](https://github.com/kstenerud/Musashi) by Karl Stenerud — X68030/040turbo/060turbo用CPUエミュレータ / CPU emulator for X68030/040turbo/060turbo
+- [mt32emu](https://github.com/munt/munt)（munt） — 内蔵Roland MT-32エミュレーション / built-in Roland MT-32 emulation
+- [Nuked-SC55](https://github.com/nukeykt/Nuked-SC55) by nukeykt — 内蔵Roland SC-55エミュレーション / built-in Roland SC-55 emulation
+- SoftFloat 2a / M68040 FPSP由来の浮動小数点演算（[Hatari](https://github.com/hatari/hatari)経由） — FPU（68881/68882/68040/060turbo）の浮動小数点処理 / floating-point support for the FPU (68881/68882/68040/060turbo), via Hatari
+- [ZIPFoundation](https://github.com/weichsel/ZIPFoundation) — iOS版のZIP展開 / ZIP extraction for the iOS version
+- XM6 SASI/SCSI/MO/CD-ROM移植コード（原作者ＰＩ氏の許諾、詳細は[NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md)） — SASI/SCSI/MO/CD-ROM実装の一部 / part of the SASI/SCSI/MO/CD-ROM implementation (ported from XM6, by permission of the original author ＰＩ — see [NOTICE-THIRD-PARTY.md](NOTICE-THIRD-PARTY.md))
 
 ---
 
