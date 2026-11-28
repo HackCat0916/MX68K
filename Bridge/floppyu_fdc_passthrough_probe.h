@@ -17,6 +17,18 @@
 #include <stdint.h>
 #include "dmac.h"   /* P1141: dmac_ch(ステートセーブ用の写しの型) */
 
+/* P1147(D-152): 読込みタイミング近似の判定1回分の入出力(振り分け器の内部と単体テストで共有する) */
+typedef struct {
+    int      us, c, h, r, n, multi, koei_follow, cmd5, diag, nd, ts_bad;
+    uint32_t n_sup, d_ev, gen;
+    uint8_t  st0;
+    int64_t  g0, d_wall_us;
+} mx68k_rw_in_t;
+typedef struct {
+    int      reason, act, dom_model, clamped, v_valid, anchor_valid;
+    int64_t  base, reveal_at, add, vc, k, excess, lag_in, lag, gap, qv, idx_g, v_last, t_last, mc;
+} mx68k_rw_out_t;
+
 /* DMA_Init() の直後ごと(init / hardreset)に呼ぶ。設定値から毎回再計算し、有効時は
  * テーブル 0x4A と DMA ch0 の ReadyCB を振り分け器へ差し替え、無効時は元値へ戻す(冪等)。
  * assigned_base は 0(ドライブ0/1)または 2(ドライブ2/3、ext_fdd_wired 時のみ有効)。 */
@@ -37,6 +49,10 @@ void mx68k_floppyu_fdcpt_set_format_config(int enabled);
 
 /* P1089: 設定「書込みモード」(0=安全優先 / 1=高速)の値を渡す。install 直前に呼ぶ(反映は install、normal かつ設定由来のときだけ有効)。 */
 void mx68k_floppyu_fdcpt_set_write_fast_config(int fast);
+
+/* P1147(D-152): 設定「実機X68000のドライブの読込みタイミングに近づける」(0=OFF / 1=ON)。install 直前に呼ぶ
+ * (反映は install、環境変数 MX68K_FLOPPYU_ROTWAIT が設定されていればそちらが優先)。 */
+void mx68k_floppyu_fdcpt_set_rotwait_config(int enabled);
 
 /* P1054: mx68k_shutdown から呼ぶ。開いている [P1054-E5P] 観測窓を閉じ、累積要約を出す(冪等)。 */
 void mx68k_floppyu_fdcpt_shutdown(void);
@@ -101,6 +117,15 @@ void mx68k_floppyu_fdcpt_selftest_fr_force_send_ret(int r);
 void mx68k_floppyu_fdcpt_selftest_fr_inject(int status, int notified, int dev_high, int pending);
 /* P1123 改訂2: 単体テスト専用。0=書込み経路入口 / 1=保留 release の flush / 2=解除送信本体 を直接呼ぶ(G-B の確認用) */
 int mx68k_floppyu_fdcpt_selftest_fr_call(int which);
+/* P1147: 単体テスト専用。読込みタイミング近似の判定・角度モデル・光栄形の追跡・集計を直接呼ぶ(装置へは何も送らない) */
+void mx68k_floppyu_fdcpt_selftest_rw_reset(int mode);
+void mx68k_floppyu_fdcpt_selftest_rw_feed(const mx68k_rw_in_t* in, mx68k_rw_out_t* out);
+int64_t mx68k_floppyu_fdcpt_selftest_rw_model(int64_t idx_g, int r, int64_t q, int64_t* k);
+int mx68k_floppyu_fdcpt_selftest_rw_note_begin(const uint8_t p[9], int multi, int diag);
+void mx68k_floppyu_fdcpt_selftest_rw_note_refused(const uint8_t p[9]);
+void mx68k_floppyu_fdcpt_selftest_rw_stats(int64_t out[10]);
+const char* mx68k_floppyu_fdcpt_selftest_rw_reason_name(int reason);
+void mx68k_floppyu_fdcpt_selftest_rw_log_sum(void);
 #endif
 
 #endif /* MX68K_FLOPPYU_FDC_PASSTHROUGH_PROBE_H */

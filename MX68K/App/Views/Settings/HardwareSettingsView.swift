@@ -478,6 +478,13 @@ struct HardwareSettingsView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                // P1147(D-152) — 読込みタイミングの近似(既定 OFF)。書込み許可とは独立。反映は節末尾の ⚠(Apply→⌘R)。
+                // 環境変数 MX68K_FLOPPYU_ROTWAIT が設定されていればそちらが優先する。
+                Toggle("Approximate real X68000 drive read timing", isOn: $settingsViewModel.floppyuRotationWait)
+                Text("FloppyU answers most sectors from its read cache, so loading is faster than on a real X68000. When on, MX68K estimates when a real X68000 drive would finish reading each sector (including waiting for the disk to rotate) and does not report the read as finished before then. It approximates the total load time; most sectors still answer at FloppyU's own speed. Off (default) passes FloppyU's own timing through, like XEiJ+t and XM6t.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 // P1054 — 実ディスクへの書込み許可(既定 OFF)。Use FloppyU OFF 時も操作可能(P958 と同じ)。
                 // 環境変数 MX68K_FLOPPYU_WRITE が設定されていればそちらが優先する(下の状態行に表示)。
                 Toggle("Allow writing to FloppyU disks", isOn: $settingsViewModel.floppyuWriteEnabled)

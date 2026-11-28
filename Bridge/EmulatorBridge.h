@@ -84,6 +84,10 @@ void mx68k_floppyu_get_format_status(int32_t* on, int32_t* halted, int32_t* trac
 // 装置の遅延書込みを使い書込み結果を確認しない)。設定値のみ保持し、反映は init / ハードリセット。書込み許可が有効な
 // 通常利用モード(設定由来)のときだけ意味を持つ。環境変数 MX68K_FLOPPYU_WRITE が設定されていれば無視する。iOS では呼ばない。
 void mx68k_set_floppyu_write_fast(bool fast);
+// P1147(D-152): ふろっぴU君経由の READ DATA で、実機X68000のドライブが読み終える時刻(回転待ちを含む)より前に完了を
+// 見せない近似を有効にする。false=無効(既定、装置の応答時刻のまま)。設定値のみ保持し、反映は init / ハードリセット。
+// 環境変数 MX68K_FLOPPYU_ROTWAIT(0/1/vt/anchor)が設定されていればそちらが優先する。iOS では呼ばない。
+void mx68k_set_floppyu_rotation_wait(bool enabled);
 // P1089: 書込みモードの状態取得(設定画面の1秒周期表示用、読取りのみ)。実装は Bridge/floppyu_fdc_passthrough_probe.c。
 // fast: 1=高速モードが有効 / src: 0=off 1=設定 3=設定は高速だが環境変数 MX68K_FLOPPYU_WRITE が優先されて無視 /
 // dirty: 1=ふろっぴU君に未書込みのデータが残っている可能性 / cached_unverified: 高速で受理し読み戻しで未照合のセクタ数 /

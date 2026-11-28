@@ -743,6 +743,9 @@ static bool    g_floppyu_format_enabled = false;
 /* P1089: ふろっぴU君の書込みモード(false=安全優先 / true=高速、設定値のみ)。install 直前に振り分け器へ渡す
  * (normal・設定由来のときだけ有効)。 */
 static bool    g_floppyu_write_fast = false;
+/* P1147(D-152): ふろっぴU君経由READの読込みタイミング近似(設定値のみ、既定 false)。install 直前に振り分け器へ渡す
+ * (環境変数 MX68K_FLOPPYU_ROTWAIT が設定されていればそちらが優先)。 */
+static bool    g_floppyu_rotation_wait = false;
 /* P634 (D-43): Mercury の LR クロックを観測経路のみ自走化する機構
  * (実体・状態変数はすべて m68000_bridge.c 側 — 読出フックと同一翻訳単位に
  *  まとめ、状態定義を分散させない。feedback_instrumentation_layout_adjacency_corruption
@@ -1811,6 +1814,7 @@ int mx68k_init(void) {
     mx68k_floppyu_fdcpt_set_write_config(g_floppyu_write_enabled ? 1 : 0);   /* P1054: install で解析する設定値 */
     mx68k_floppyu_fdcpt_set_format_config(g_floppyu_format_enabled ? 1 : 0); /* P1067 */
     mx68k_floppyu_fdcpt_set_write_fast_config(g_floppyu_write_fast ? 1 : 0); /* P1089 */
+    mx68k_floppyu_fdcpt_set_rotwait_config(g_floppyu_rotation_wait ? 1 : 0);  /* P1147 */
     mx68k_floppyu_fdcpt_install("init", g_floppyu_enabled ? 1 : 0, g_floppyu_assigned_base, g_ext_fdd_wired);
     ADPCM_Init(g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
     ADPCM_SetVolume(15);   /* P210: 移植時にこの呼出しが漏れていた。ADPCM_VolumeShift が
@@ -2851,6 +2855,7 @@ void mx68k_reset_hard(void) {
     mx68k_floppyu_fdcpt_set_write_config(g_floppyu_write_enabled ? 1 : 0);   /* P1054 */
     mx68k_floppyu_fdcpt_set_format_config(g_floppyu_format_enabled ? 1 : 0); /* P1067 */
     mx68k_floppyu_fdcpt_set_write_fast_config(g_floppyu_write_fast ? 1 : 0); /* P1089 */
+    mx68k_floppyu_fdcpt_set_rotwait_config(g_floppyu_rotation_wait ? 1 : 0);  /* P1147 */
     mx68k_floppyu_fdcpt_install("hardreset", g_floppyu_enabled ? 1 : 0, g_floppyu_assigned_base, g_ext_fdd_wired);
     debug_log("[MX68K] Step 17: ADPCM_Init(%d)\n", g_audio_sample_rate_hz);
     ADPCM_Init(g_audio_sample_rate_hz);   /* P626: 設定サンプルレート(既定 44100) */
@@ -8414,6 +8419,11 @@ void mx68k_set_floppyu_format_enabled(bool enabled) {
  * 状態の取得は mx68k_floppyu_get_write_fast()(Bridge/floppyu_fdc_passthrough_probe.c)。 */
 void mx68k_set_floppyu_write_fast(bool fast) {
     g_floppyu_write_fast = fast;
+}
+
+/* P1147(D-152): ふろっぴU君経由READの読込みタイミング近似。設定値のみを更新し、反映は init / ハードリセットの install で確定する。 */
+void mx68k_set_floppyu_rotation_wait(bool enabled) {
+    g_floppyu_rotation_wait = enabled;
 }
 
 /* P488: MIDI ボード(CZ-6BM1)の装着設定。設定値のみを更新し、配線は init /

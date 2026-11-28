@@ -1585,6 +1585,16 @@
         }
       }
     },
+    "Approximate real X68000 drive read timing": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実機X68000のドライブの読込みタイミングに近づける"
+          }
+        }
+      }
+    },
     "armed: no": {
       "localizations": {
         "ja": {
@@ -3323,6 +3333,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "フロッピーディスクイメージ…"
+          }
+        }
+      }
+    },
+    "FloppyU answers most sectors from its read cache, so loading is faster than on a real X68000. When on, MX68K estimates when a real X68000 drive would finish reading each sector (including waiting for the disk to rotate) and does not report the read as finished before then. It approximates the total load time; most sectors still answer at FloppyU's own speed. Off (default) passes FloppyU's own timing through, like XEiJ+t and XM6t.": {
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ふろっぴU君はほとんどのセクタを読込みキャッシュから返すため、実機X68000より読込みが速く終わります。オンにすると、実機X68000のドライブが各セクタを読み終える時刻(ディスクの回転待ちを含む)をMX68Kが見積もり、その時刻より前には読込み完了を返しません。ロード全体の合計時間を実機に近づける近似で、ほとんどのセクタは引き続きふろっぴU君自身の速さで応答します。オフ(既定)では、XEiJ+tやXM6tと同じく、ふろっぴU君自身のタイミングをそのまま使います。"
           }
         }
       }

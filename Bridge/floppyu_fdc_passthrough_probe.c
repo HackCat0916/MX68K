@@ -423,6 +423,56 @@ static uint32_t s_rp_e_hist[5];            /* |e| <50µs / <200µs / <1ms / <5ms
 static uint32_t s_rp_g14_viol, s_rp_g14_fwd_lines, s_rp_g14_rev_lines, s_rp_hold_drop;
 static int64_t  s_rp_pace_us_sum = 0;
 static uint32_t s_rp_pace_sleeps_sum = 0;
+/* P1147(D-152): 中継 READ DATA の公開時刻を、実機X68000のドライブが読み終える時刻(回転待ちを含む)より前にしない近似。
+ * 既定 OFF(装置の応答時刻のまま=XEiJ+t/XM6t と同じ)。VT=ユニットごとに実機の仮想時間軸を並走させ、
+ * 公開=max(装置時間, 仮想完了)。ANCHOR=校正比較用(物理読取りを基準に以後の即答READへ待ちを足す)。
+ * 定数はすべて時間計算用で、装置への送信条件には使わない */
+#define P1147_TAG          "[P1147-ROTWAIT]"
+#define FU_RW_REV_NS       166666667LL                       /* 1回転(360rpm) */
+#define FU_RW_BYTE_NS      16000LL                           /* MFM 2HD の1バイト時間(500kbit/s) */
+#define FU_RW_SPT          8u                                /* 対象形式 2HD 1024B×8 */
+#define FU_RW_N            3u
+#define FU_RW_GAP3_B       116LL
+#define FU_RW_PRE_B        146LL                             /* トラック先頭 Gap4a80+SYNC12+IAM4+Gap1 50(二次資料) */
+#define FU_RW_SEC_B        1202LL                            /* 1セクタの枠 ID22+Gap2 22+データ1042+Gap3 116 */
+#define FU_RW_DONE_B       (FU_RW_SEC_B - FU_RW_GAP3_B)      /* 枠の先頭からデータ部 CRC 終端まで=1086 */
+#define FU_RW_DL_B         15LL                              /* 枠の先頭から ID を捕まえられる締切まで(SYNC12+A1×3) */
+#define FU_RW_ADD_CAP_NS   (FU_RW_REV_NS + FU_RW_SEC_B * FU_RW_BYTE_NS)   /* 1件あたりの注入の安全上限 */
+#define FU_RW_CACHE_US     2000LL                            /* 装置のキャッシュ即答とみなす d_wall の上限(実測のみ、ANCHOR と集計だけに使う) */
+#define FU_RW_REV_CLASS_NS 30000000LL                        /* 集計 rev_class_n の閾値(1回転級の待ち) */
+#define FU_RW_GAP_H0_NS    2096000LL                         /* gap_h の境界=ギャップ余裕 */
+#define FU_RW_GAP_H1_NS    30000000LL
+enum { RW_OFF = 0, RW_VT, RW_ANCHOR };
+enum { RWS_OFF = 0, RWS_CFG, RWS_ENV };
+enum { RWR_OFF = 0, RWR_RDPACE_OFF, RWR_MULTI, RWR_KOEI_FOLLOW, RWR_CMD, RWR_FMT, RWR_ND, RWR_TS_BAD, RWR_RESULT,
+       RWR_ANCHOR_FUTURE, RWR_INIT, RWR_INJECTED, RWR_DEV_DOMINANT, RWR_NOT_CACHE_ANCHORED, RWR_NO_ANCHOR, RWR_NO_WAIT, RWR_N };
+static const char* const RWR_NAME[RWR_N] = {
+    "off", "rdpace_off", "multi", "koei_follow", "cmd", "fmt", "nd", "ts_bad", "result",
+    "anchor_future", "init", "injected", "dev_dominant", "not_cache_anchored", "no_anchor", "no_wait" };
+enum { RWA_NONE = 0, RWA_RESYNC, RWA_INIT, RWA_MODEL, RWA_ANCHOR, RWA_INVALIDATE };
+static const char* const RWA_NAME[] = { "none", "resync", "init", "model", "anchor", "invalidate" };
+typedef struct { int valid; int64_t idx_g, v_last, t_last; uint32_t d_ev, gen; } rw_vt_t;
+typedef struct { int valid; int64_t idx_g; uint32_t d_ev, gen; } rw_anc_t;
+static int      s_rw_cfg = 0;                /* 設定値(install 直前に受け取る) */
+static int      s_rw_mode = RW_OFF;          /* 実効値(install で確定) */
+static int      s_rw_src = RWS_OFF;
+static int      s_rw_env_rejected = 0;
+static rw_vt_t  s_rw_vt[4];
+static rw_anc_t s_rw_anc[4];
+/* 光栄形の追跡。5番目は直前の multi の EOT(p[6])であって R ではない(R を入れると R8 の判定が成立しない) */
+static int      s_rw_koei_pend = 0;
+static uint8_t  s_rw_koei_us = 0, s_rw_koei_c = 0, s_rw_koei_h = 0, s_rw_koei_eot = 0;
+/* 読込みごとの値(rl_read_begin で確定。kp.. は判定する前の pend の生値) */
+static int64_t  s_rl_rd_rw_add_ns = 0;
+static int      s_rw_rd_koei_follow = 0;
+static int      s_rw_rd_kp = 0;
+static uint8_t  s_rw_rd_kus = 0, s_rw_rd_kc = 0, s_rw_rd_kh = 0, s_rw_rd_keot = 0;
+static int      s_rw_lr_valid[4];            /* gap_h 用: ユニットごとの直前の公開時刻(全モード) */
+static int64_t  s_rw_lr[4];
+/* 集計(プロセス寿命)。恒等式 total = Σreason_n */
+static uint32_t s_rw_total, s_rw_reason_n[RWR_N], s_rw_rev_class_n, s_rw_clamp, s_rw_phys_n, s_rw_lag_gt_rev, s_rw_gap_h[3];
+static int64_t  s_rw_add_sum_ns, s_rw_add_max_ns, s_rw_phys_exc_sum_ns, s_rw_phys_exc_max_ns, s_rw_lag_max_ns;
+static void rw_reset_all(void);   /* 定義は rl_read_begin の前 */
 /* 接続・ブリングアップ・故障停止・モード表示 */
 static int      s_rl_bringup_valid = 0;
 static uint32_t s_rl_bringup_gen = 0;
@@ -2612,6 +2662,7 @@ static void rl_reset_link_state(void)
 {
     /* P1139: 世代変化時の hold は即座に公開する(フレームは受信済み。従来の RD_SUPPLY も世代変化で打ち切らない) */
     if (s_rl_state == RL_RD_WAIT && s_rl_rd_hold) rl_rd_reveal(2);
+    rw_reset_all();   /* P1147: 仮想時間軸・アンカー・光栄の追跡を無効化(強制公開の後) */
     e5p_close("gen");   /* P1054: 観測窓の強制終端(観測のみ) */
     rl_fr_reset_state("gen");   /* P1123(S-3) */
     /* P1053: 世代変化で柵は閉じる(fo_gen 不一致に加え、P1055 では ue[全]++)。呼出し元が s_rl_gen_seen を更新する前に呼ぶので、
@@ -2800,7 +2851,7 @@ static void rl_ar_after_unknown(const char* why, const uint8_t* res)
  * e_ns = (g_rev − g0) − d_wall×1000 は派生値で、生値は同じ行に全て出す */
 static void rl_rdpace_log(const char* outcome, int forced, uint64_t g_rev)
 {
-    int64_t e_ns = (int64_t)(g_rev - s_rl_rd_g0) - s_rl_rd_d_wall * 1000;
+    int64_t e_ns = (int64_t)(g_rev - s_rl_rd_g0) - s_rl_rd_d_wall * 1000 - s_rl_rd_rw_add_ns;   /* P1147: 注入分を除く */
     debug_log(P1139_TAG " f=%d C=%u H=%u R=%u outcome=%s g0=%llu t0=%lld t_rx=%lld t_det=%lld g_det=%llu d_wall=%lld hold=%d"
               " g_rev=%llu e_ns=%lld pace_sleeps=%u pace_us=%lld ts_src=%s clamped=%d order_bad=%d forced=%d\n",
               g_mx68k_frame_num, s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2], outcome,
@@ -3154,6 +3205,245 @@ static void rl_log_multi_refused(uint8_t r, uint8_t eot, uint8_t n, const char* 
               (unsigned)DMA[0].CCR, (unsigned)DMA[0].DCR, (unsigned)DMA[0].CSR, s_rl_spec_nd);
 }
 
+/* P1147: 角度モデル(純関数)。idx_g=インデックス(トラック先頭)のゲスト時刻、q=要求時刻。
+ * 締切(枠先頭+DL)が q 以上になる最小の周回 k(負も許す)で読み終える時刻を返す。シーク時間は足さない
+ * (シリンダ移動はゲストの SEEK として装置へ中継され、その実時間はゲストの間隔に入る) */
+static int64_t rw_model_complete(int64_t idx_g, unsigned r, int64_t q, int64_t* k_out)
+{
+    int64_t s_r0 = idx_g + (FU_RW_PRE_B + (int64_t)(r - 1u) * FU_RW_SEC_B) * FU_RW_BYTE_NS;
+    int64_t x = q - (s_r0 + FU_RW_DL_B * FU_RW_BYTE_NS);
+    int64_t k = x > 0 ? (x + FU_RW_REV_NS - 1) / FU_RW_REV_NS : -((-x) / FU_RW_REV_NS);
+    if (k_out) *k_out = k;
+    return s_r0 + k * FU_RW_REV_NS + FU_RW_DONE_B * FU_RW_BYTE_NS;
+}
+
+/* P1147: R のセクタを base に読み終えたとみなしたときのインデックス時刻 */
+static int64_t rw_idx_from_complete(int64_t base, unsigned r)
+{
+    return base - (FU_RW_PRE_B + (int64_t)(r - 1u) * FU_RW_SEC_B + FU_RW_DONE_B) * FU_RW_BYTE_NS;
+}
+
+static void rw_reset_all(void)
+{
+    memset(s_rw_vt, 0, sizeof(s_rw_vt));
+    memset(s_rw_anc, 0, sizeof(s_rw_anc));
+    memset(s_rw_lr_valid, 0, sizeof(s_rw_lr_valid));
+    s_rw_koei_pend = 0;
+}
+
+/* P1147: READ DATA/DIAG/DELETED の受付ごとに1回(rl_read_begin、装置へ送る前)。今回の koei_follow を判定してから pend を更新する。
+ * koei_follow = 直前の multi(光栄 R7 形)と us/C/H が一致し、今回の R が直前の EOT と等しい通常 READ DATA(光栄 R8) */
+static int rw_note_begin(const uint8_t* p, int multi, int diag)
+{
+    s_rw_rd_kp = s_rw_koei_pend; s_rw_rd_kus = s_rw_koei_us; s_rw_rd_kc = s_rw_koei_c;
+    s_rw_rd_kh = s_rw_koei_h; s_rw_rd_keot = s_rw_koei_eot;
+    int follow = s_rw_koei_pend && (p[0] & 0x1Fu) == 0x06u && !diag && (uint8_t)(p[1] & 3u) == s_rw_koei_us &&
+                 p[2] == s_rw_koei_c && p[3] == s_rw_koei_h && p[4] == s_rw_koei_eot;
+    s_rw_rd_koei_follow = follow;
+    if (multi) {
+        s_rw_koei_pend = 1;
+        s_rw_koei_us = (uint8_t)(p[1] & 3u); s_rw_koei_c = p[2]; s_rw_koei_h = p[3]; s_rw_koei_eot = p[6];
+    } else {
+        s_rw_koei_pend = 0;
+    }
+    return follow;
+}
+
+/* P1147(S-2): R<EOT を multi_sector_mtc で受付拒否する直前にも pend を立てる(拒否された R7 の直後の R8 も除外する) */
+static void rw_note_refused_multi(const uint8_t* p)
+{
+    s_rw_koei_pend = 1;
+    s_rw_koei_us = (uint8_t)(p[1] & 3u); s_rw_koei_c = p[2]; s_rw_koei_h = p[3]; s_rw_koei_eot = p[6];
+}
+
+/* P1147: 全ユニットのうち最大の現在の遅れ(実際の時間軸 − 仮想実機の時間軸) */
+static int64_t rw_lag_now_ns(void)
+{
+    int64_t m = 0;
+    for (int u = 0; u < 4; u++)
+        if (s_rw_vt[u].valid && s_rw_vt[u].t_last - s_rw_vt[u].v_last > m) m = s_rw_vt[u].t_last - s_rw_vt[u].v_last;
+    return m;
+}
+
+/* P1147: 判定1回(純粋に入力と内部状態だけで決まる。単体テストからも直接呼ぶ)。公開時刻 = base + add */
+static void rw_apply_in(const mx68k_rw_in_t* in, mx68k_rw_out_t* o)
+{
+    memset(o, 0, sizeof(*o));
+    int64_t base = in->g0 + in->d_wall_us * 1000;
+    unsigned u = (unsigned)in->us & 3u, r = (unsigned)in->r;
+    rw_vt_t* v = &s_rw_vt[u];
+    rw_anc_t* a = &s_rw_anc[u];
+    o->base = base;
+    s_rw_total++;
+    if (s_rw_lr_valid[u]) {
+        int64_t gp = in->g0 - s_rw_lr[u];
+        s_rw_gap_h[gp < FU_RW_GAP_H0_NS ? 0 : gp < FU_RW_GAP_H1_NS ? 1 : 2]++;
+    }
+    int phys = in->d_wall_us >= FU_RW_CACHE_US;
+    if (phys) s_rw_phys_n++;
+    /* 記録した d_ev(媒体交換)/gen(再接続)が今と違えば無効 */
+    if (v->valid && (v->d_ev != in->d_ev || v->gen != in->gen)) v->valid = 0;
+    if (a->valid && (a->d_ev != in->d_ev || a->gen != in->gen)) a->valid = 0;
+    int reason;
+    if (s_rw_mode == RW_OFF)                                                 reason = RWR_OFF;
+    else if (in->multi)                                                      reason = RWR_MULTI;
+    else if (in->koei_follow)                                                reason = RWR_KOEI_FOLLOW;
+    else if (in->cmd5 != 0x06 || in->diag)                                   reason = RWR_CMD;
+    else if ((unsigned)in->n != FU_RW_N || r < 1u || r > FU_RW_SPT)          reason = RWR_FMT;
+    else if (in->nd)                                                         reason = RWR_ND;
+    else if (in->ts_bad)                                                     reason = RWR_TS_BAD;
+    else if (in->n_sup == 0u || in->n_sup != (128u << FU_RW_N) || (in->st0 & 0xC0u) != 0u) reason = RWR_RESULT;
+    else if ((s_rw_mode == RW_VT && v->valid && v->t_last > in->g0) ||
+             (s_rw_mode == RW_ANCHOR && a->valid && a->idx_g > in->g0))      reason = RWR_ANCHOR_FUTURE;
+    else                                                                     reason = -1;
+    int64_t add = 0;
+    o->v_valid = v->valid; o->anchor_valid = a->valid;
+    o->idx_g = s_rw_mode == RW_ANCHOR ? a->idx_g : v->idx_g;
+    o->v_last = v->v_last; o->t_last = v->t_last;
+    if (s_rw_mode == RW_VT) {
+        if (v->valid) o->lag_in = v->t_last - v->v_last;
+        if (reason == RWR_ANCHOR_FUTURE) {
+            v->valid = 0; o->act = RWA_INVALIDATE;
+        } else if (reason >= 0) {
+            if (v->valid) { v->v_last = base; v->t_last = base; o->act = RWA_RESYNC; }   /* V は T を追い越さない */
+        } else if (!v->valid) {
+            v->valid = 1; v->idx_g = rw_idx_from_complete(base, r); v->v_last = base; v->t_last = base;
+            v->d_ev = in->d_ev; v->gen = in->gen;
+            reason = RWR_INIT; o->act = RWA_INIT; o->idx_g = v->idx_g;
+        } else {
+            int64_t gap = in->g0 - v->t_last;
+            if (gap < 0) gap = 0;
+            int64_t qv = v->v_last + gap;
+            int64_t vc = rw_model_complete(v->idx_g, r, qv, &o->k);
+            add = vc - base;
+            if (add < 0) add = 0;
+            if (add > FU_RW_ADD_CAP_NS) { add = FU_RW_ADD_CAP_NS; o->clamped = 1; s_rw_clamp++; }
+            o->gap = gap; o->qv = qv; o->vc = vc; o->excess = base - vc; o->dom_model = add > 0;
+            reason = add > 0 ? RWR_INJECTED : RWR_DEV_DOMINANT;
+            o->act = RWA_MODEL;
+            v->t_last = base + add;
+            v->v_last = o->clamped ? v->t_last : vc;   /* 上限で切った場合も V<=T を保つ */
+            if (phys) {
+                int64_t ex = o->excess > 0 ? o->excess : 0;
+                s_rw_phys_exc_sum_ns += ex;
+                if (ex > s_rw_phys_exc_max_ns) s_rw_phys_exc_max_ns = ex;
+            }
+        }
+        if (v->valid) {
+            o->lag = v->t_last - v->v_last;
+            if (o->lag > s_rw_lag_max_ns) s_rw_lag_max_ns = o->lag;
+            if (o->act == RWA_MODEL && o->lag > FU_RW_REV_NS) s_rw_lag_gt_rev++;
+        }
+    } else if (s_rw_mode == RW_ANCHOR) {
+        if (reason == RWR_ANCHOR_FUTURE) {
+            a->valid = 0; o->act = RWA_INVALIDATE;
+        } else if (reason < 0) {
+            if (phys) {
+                if (a->valid) {
+                    o->mc = rw_model_complete(a->idx_g, r, in->g0, &o->k);
+                    o->excess = base - o->mc;
+                    int64_t ex = o->excess > 0 ? o->excess : 0;
+                    s_rw_phys_exc_sum_ns += ex;
+                    if (ex > s_rw_phys_exc_max_ns) s_rw_phys_exc_max_ns = ex;
+                }
+                a->valid = 1; a->idx_g = rw_idx_from_complete(base, r); a->d_ev = in->d_ev; a->gen = in->gen;
+                o->idx_g = a->idx_g;
+                reason = RWR_NOT_CACHE_ANCHORED; o->act = RWA_ANCHOR;
+            } else if (!a->valid) {
+                reason = RWR_NO_ANCHOR;
+            } else {
+                o->mc = rw_model_complete(a->idx_g, r, in->g0, &o->k);
+                add = o->mc - base;
+                if (add < 0) add = 0;
+                if (add > FU_RW_ADD_CAP_NS) { add = FU_RW_ADD_CAP_NS; o->clamped = 1; s_rw_clamp++; }
+                o->excess = base - o->mc; o->dom_model = add > 0;
+                reason = add > 0 ? RWR_INJECTED : RWR_NO_WAIT;
+                o->act = RWA_MODEL;
+            }
+        }
+    }
+    o->reason = reason;
+    o->add = add;
+    o->reveal_at = base + add;
+    s_rw_reason_n[reason]++;
+    if (reason == RWR_INJECTED) {
+        s_rw_add_sum_ns += add;
+        if (add > s_rw_add_max_ns) s_rw_add_max_ns = add;
+        if (add > FU_RW_REV_CLASS_NS) s_rw_rev_class_n++;
+    }
+    s_rw_lr_valid[u] = 1;
+    s_rw_lr[u] = o->reveal_at;
+}
+
+/* P1147: 判定1回分のログ(ON のときだけ、件数の上限なし)。派生値は生値と同じ行に出す */
+static void rw_log_line(const mx68k_rw_in_t* in, const mx68k_rw_out_t* o)
+{
+    if (s_rw_mode == RW_OFF) return;
+    debug_log(P1147_TAG " f=%d mode=%s C=%u H=%u R=%u N=%u EOT=%u us_dev=%d multi=%d cmd5=0x%02x diag=%d nd=%d st0_ic=%u n_sup=%u"
+              " g0=%lld d_wall_us=%lld ts_fb=%d clamped_ts=%d order_bad=%d kp=%d kus=%u kc=%u kh=%u keot=%u"
+              " v_valid=%d t_last=%lld gap=%lld v_last=%lld qv=%lld anchor_valid=%d idx_g=%lld k=%lld vc=%lld model_complete=%lld"
+              " base=%lld add_ns=%lld dom=%s excess_ns=%lld lag_in_ns=%lld lag_ns=%lld clamp=%d reason=%s act=%s\n",
+              g_mx68k_frame_num, s_rw_mode == RW_VT ? "vt" : "anchor", (unsigned)in->c, (unsigned)in->h, (unsigned)in->r,
+              (unsigned)in->n, (unsigned)s_p1140_eot, in->us, in->multi, (unsigned)in->cmd5, in->diag, in->nd,
+              (unsigned)(in->st0 >> 6), (unsigned)in->n_sup, (long long)in->g0, (long long)in->d_wall_us,
+              s_rl_rd_ts_fb, s_rl_rd_clamped, s_rl_rd_order_bad, s_rw_rd_kp, (unsigned)s_rw_rd_kus, (unsigned)s_rw_rd_kc,
+              (unsigned)s_rw_rd_kh, (unsigned)s_rw_rd_keot, o->v_valid, (long long)o->t_last, (long long)o->gap,
+              (long long)o->v_last, (long long)o->qv, o->anchor_valid, (long long)o->idx_g, (long long)o->k, (long long)o->vc,
+              (long long)o->mc, (long long)o->base, (long long)o->add, o->dom_model ? "model" : "dev", (long long)o->excess,
+              (long long)o->lag_in, (long long)o->lag, o->clamped, RWR_NAME[o->reason], RWA_NAME[o->act]);
+}
+
+/* P1147: RDPACE がオプトアウト中の READ も分母に数える(注入はしない) */
+static void rw_note_rdpace_off(void)
+{
+    s_rw_total++;
+    s_rw_reason_n[RWR_RDPACE_OFF]++;
+    if (s_rw_mode != RW_OFF)
+        debug_log(P1147_TAG " f=%d mode=%s C=%u H=%u R=%u reason=rdpace_off act=none add_ns=0\n", g_mx68k_frame_num,
+                  s_rw_mode == RW_VT ? "vt" : "anchor", s_rl_rd_chrn[0], s_rl_rd_chrn[1], s_rl_rd_chrn[2]);
+}
+
+/* P1147: rl_rd_decide の注入点。受信時に確定した値から入力を組み立て、公開してよいゲスト時刻を返す */
+static uint64_t rw_apply(uint64_t base)
+{
+    mx68k_rw_in_t in;
+    mx68k_rw_out_t o;
+    memset(&in, 0, sizeof(in));
+    in.us = s_rl_rd_us & 3u; in.c = s_rl_rd_chrn[0]; in.h = s_rl_rd_chrn[1]; in.r = s_rl_rd_chrn[2]; in.n = s_rl_rd_chrn[3];
+    in.multi = s_rl_rd_multi; in.koei_follow = s_rw_rd_koei_follow; in.cmd5 = s_rl_rd_cmd5; in.diag = s_rl_rd_is_diag;
+    in.nd = s_rl_rd_nd; in.ts_bad = (s_rl_rd_ts_fb || s_rl_rd_clamped || s_rl_rd_order_bad);
+    in.n_sup = s_rl_rd_n_sup; in.st0 = s_rl_dev_result[0];
+    in.g0 = (int64_t)s_rl_rd_g0; in.d_wall_us = s_rl_rd_d_wall;
+    in.d_ev = s_rl_d_events; in.gen = mx68k_floppyu_usb_generation();
+    rw_apply_in(&in, &o);
+    rw_log_line(&in, &o);
+    s_rl_rd_rw_add_ns = o.add;
+    return base + (uint64_t)o.add;
+}
+
+/* P1147: [P1147-ROTWAIT-SUM](300フレームごと、ON/OFF とも、プロセス寿命の累計)。ident_ok = (total == Σ理由別件数) */
+static void rl_rw_log_sum(void)
+{
+    char rs[RWR_N * 28 + 4];
+    size_t o = 0;
+    uint32_t sum = 0;
+    for (int i = 0; i < RWR_N; i++) {
+        o += (size_t)snprintf(rs + o, sizeof(rs) - o, "%s%s:%u", i ? "," : "", RWR_NAME[i], (unsigned)s_rw_reason_n[i]);
+        sum += s_rw_reason_n[i];
+    }
+    int64_t lag_now = rw_lag_now_ns();
+    debug_log("[P1147-ROTWAIT-SUM] f=%u mode=%s src=%s total=%u injected=%u add_sum_us=%lld add_max_us=%lld rev_class_n=%u"
+              " dev_dominant=%u reasons=%s phys_n=%u phys_excess_sum_us=%lld phys_excess_max_us=%lld clamp=%u ident_ok=%d"
+              " lag_now_us=%lld lag_max_us=%lld lag_gt_rev=%u gap_h=%u/%u/%u\n",
+              (unsigned)g_mx68k_frame_num, s_rw_mode == RW_VT ? "vt" : s_rw_mode == RW_ANCHOR ? "anchor" : "off",
+              s_rw_src == RWS_ENV ? "env" : s_rw_src == RWS_CFG ? "cfg" : "off", (unsigned)s_rw_total,
+              (unsigned)s_rw_reason_n[RWR_INJECTED], (long long)(s_rw_add_sum_ns / 1000), (long long)(s_rw_add_max_ns / 1000),
+              (unsigned)s_rw_rev_class_n, (unsigned)s_rw_reason_n[RWR_DEV_DOMINANT], rs, (unsigned)s_rw_phys_n,
+              (long long)(s_rw_phys_exc_sum_ns / 1000), (long long)(s_rw_phys_exc_max_ns / 1000), (unsigned)s_rw_clamp,
+              sum == s_rw_total ? 1 : 0, (long long)(lag_now / 1000), (long long)(s_rw_lag_max_ns / 1000),
+              (unsigned)s_rw_lag_gt_rev, (unsigned)s_rw_gap_h[0], (unsigned)s_rw_gap_h[1], (unsigned)s_rw_gap_h[2]);
+}
+
 static void rl_read_begin(void)
 {
     const uint8_t* p = s_rl_cmd;   /* [0]cmd [1]US/HD [2]C [3]H [4]R [5]N [6]EOT [7]GPL [8]DTL */
@@ -3179,6 +3469,7 @@ static void rl_read_begin(void)
     s_rl_prev_chr_valid = 1;
     memcpy(s_rl_rd_chrn, p + 2, 4);   /* P1035: read end ログ・読み戻し照合用(後続コマンドで s_rl_cmd が上書きされるため保存) */
     s_rl_rd_us = p[1] & 3u;
+    (void)rw_note_begin(p, s_rl_rd_multi, s_rl_rd_is_diag);   /* P1147: 光栄形の追跡(全モード。装置へ送る前、受付ごとに必ず1回) */
     s_rl_read_begin++;
     s_rl_rp_total++;
     debug_log(P1009_TAG " read begin f=%d gen=%u C=%u H=%u R=%u N=%u EOT=%u GPL=0x%02x DTL=0x%02x MT=%u cmd=0x%02x us_mx=0x%02x us_dev=0x%02x"
@@ -3225,6 +3516,7 @@ static void rl_read_begin(void)
     rl_rd_hold_drop("new_read");   /* 通常は 0(:7091 の打切りで落ちている)。残っていれば逆方向の破れと同じく落とす */
     s_rl_rd_g0 = g_mx68k_guest_ns;
     s_rl_rd_reveal_at = 0;
+    s_rl_rd_rw_add_ns = 0;   /* P1147 */
     s_rl_rd_g_det = 0;
     s_rl_rd_t_rx = 0; s_rl_rd_t_det = 0; s_rl_rd_d_wall = 0;
     s_rl_rd_ts_fb = 0; s_rl_rd_clamped = 0; s_rl_rd_order_bad = 0;
@@ -3513,7 +3805,7 @@ static void rl_rd_reveal(int forced)
     }
     p1140_dump("reveal", forced ? "forced" : "-");   /* P1140: ゲストへ完了が見え始める遷移(1READにつき1回) */
     if (!was_target) return;   /* オプトアウト中は RDPACE の計測対象外 */
-    int64_t e_ns = (int64_t)(g_rev - s_rl_rd_g0) - s_rl_rd_d_wall * 1000;
+    int64_t e_ns = (int64_t)(g_rev - s_rl_rd_g0) - s_rl_rd_d_wall * 1000 - s_rl_rd_rw_add_ns;   /* P1147: 注入分を除く */
     int64_t ae = e_ns < 0 ? -e_ns : e_ns;
     s_rp_e_hist[ae < 50000 ? 0 : ae < 200000 ? 1 : ae < 1000000 ? 2 : ae < 5000000 ? 3 : 4]++;
     rl_rdpace_log("reveal", forced, g_rev);
@@ -3525,7 +3817,8 @@ static void rl_rd_decide(void)
 {
     s_rl_rd_t_det = rl_now_us();
     s_rl_rd_g_det = g_mx68k_guest_ns;
-    if (!s_rl_rdpace_on) { rl_rd_reveal(0); return; }
+    s_rl_rd_rw_add_ns = 0;
+    if (!s_rl_rdpace_on) { rw_note_rdpace_off(); rl_rd_reveal(0); return; }
     s_rp_target++;
     int64_t t0 = s_rl_op_t0_us, t_rx = s_rl_p2_chunk_ts;
     s_rl_rd_ts_fb = (t_rx < 0);
@@ -3541,6 +3834,7 @@ static void rl_rd_decide(void)
     if (s_rl_rd_clamped) s_rp_clamped++;
     s_rl_rd_d_wall = d;
     s_rl_rd_reveal_at = s_rl_rd_g0 + (uint64_t)d * 1000u;
+    s_rl_rd_reveal_at = rw_apply(s_rl_rd_reveal_at);   /* P1147: OFF なら base のまま */
     if (s_rl_rd_g_det >= s_rl_rd_reveal_at) {
         s_rp_immediate++;
         rl_rd_reveal(0);
@@ -6752,6 +7046,7 @@ static void rl_exec(void)
             if (why) {
                 s_rl_rd_multi_ref_mtc++;
                 rl_log_multi_refused(r, eot, n, why);
+                rw_note_refused_multi(s_rl_cmd);   /* P1147(S-2): 拒否された R7 の直後の R8 も koei_follow で除外する */
                 rl_refuse(0, "multi_sector_mtc");
                 return;
             }
@@ -8267,6 +8562,21 @@ static void rl_install_reset(void)
                       FU_RD_PACE_GUARD_MS);
         }
     }
+    /* P1147(D-152): 読込みタイミング近似は 環境変数 > 設定。未設定=設定値(1 なら VT)、0=強制 OFF、1/vt=強制 VT、
+     * anchor=校正比較用、それ以外=OFF(rejected)。install のたびに確定し、追跡状態はすべて初期化する */
+    {
+        const char* rw = getenv("MX68K_FLOPPYU_ROTWAIT");
+        s_rw_env_rejected = 0;
+        if (rw == NULL)                                          { s_rw_mode = s_rw_cfg ? RW_VT : RW_OFF; s_rw_src = s_rw_cfg ? RWS_CFG : RWS_OFF; }
+        else if (strcmp(rw, "0") == 0)                           { s_rw_mode = RW_OFF; s_rw_src = RWS_ENV; }
+        else if (strcmp(rw, "1") == 0 || strcmp(rw, "vt") == 0)  { s_rw_mode = RW_VT; s_rw_src = RWS_ENV; }
+        else if (strcmp(rw, "anchor") == 0)                      { s_rw_mode = RW_ANCHOR; s_rw_src = RWS_ENV; }
+        else                                                     { s_rw_mode = RW_OFF; s_rw_src = RWS_ENV; s_rw_env_rejected = 1; }
+        rw_reset_all();
+        debug_log("[P1147-CFG] f=%d rotwait_env=%.16s cfg=%d mode=%s src=%s rejected=%d\n", g_mx68k_frame_num, rw ? rw : "unset",
+                  s_rw_cfg, s_rw_mode == RW_VT ? "vt" : s_rw_mode == RW_ANCHOR ? "anchor" : "off",
+                  s_rw_src == RWS_ENV ? "env" : s_rw_src == RWS_CFG ? "cfg" : "off", s_rw_env_rejected);
+    }
     /* P1141: HO は既定 ON。MX68K_FLOPPYU_DMAHO=0 のときだけ修正前と同じ 16µs/B の払出し(比較専用)。設定行は1プロセス1回 */
     {
         const char* he = getenv("MX68K_FLOPPYU_DMAHO");
@@ -9265,6 +9575,13 @@ void mx68k_floppyu_fdcpt_set_write_fast_config(int fast)
     s_rl_write_fast_cfg = fast ? 1 : 0;
 }
 
+/* P1147(D-152): 設定「Approximate real X68000 drive read timing」。install 直前に EmulatorBridge.c から渡され、
+ * rl_install_reset で確定する(環境変数 MX68K_FLOPPYU_ROTWAIT が設定されていればそちらが優先) */
+void mx68k_floppyu_fdcpt_set_rotwait_config(int enabled)
+{
+    s_rw_cfg = enabled ? 1 : 0;
+}
+
 /* P1089: 設定画面の1秒周期表示用(メインスレッドから読むだけ)。宣言は EmulatorBridge.h。
  * fast: 1=高速モードが有効 / src: 0=off 1=設定 3=設定は高速だが MX68K_FLOPPYU_WRITE 優先で無視 /
  * dirty: 1=ふろっぴU君に未書込みのデータが残っている可能性 / cached_unverified: 高速で受理し未照合のセクタ数 /
@@ -9458,6 +9775,7 @@ void mx68k_floppyu_fdcpt_tick_frame(void)
                   (unsigned)s_p955_last_st0_mx, s_p955_last_stub_f);
         rl_log_sum();
         rl_rdpace_log_sum();   /* P1139 */
+        rl_rw_log_sum();       /* P1147 */
         rl_ho_log_sum();       /* P1141 */
     }
 }
@@ -9692,5 +10010,64 @@ void mx68k_floppyu_fdcpt_selftest_ho_state(int out[7])
 {
     out[0] = s_rl_ho; out[1] = (int)s_ho_orphan; out[2] = (int)s_p1141_judge_n; out[3] = (int)s_ho_out_n[HOO_CANCEL];
     out[4] = s_rl_state; out[5] = (int)s_ho_si_n; out[6] = (int)s_ho_mtc0;
+}
+
+/* P1147 T-1 rw-*: モードを設定し、追跡状態と集計をすべて初期化する(0=OFF 1=VT 2=ANCHOR) */
+void mx68k_floppyu_fdcpt_selftest_rw_reset(int mode)
+{
+    s_rw_mode = mode == 1 ? RW_VT : mode == 2 ? RW_ANCHOR : RW_OFF;
+    rw_reset_all();
+    s_rw_total = 0; memset(s_rw_reason_n, 0, sizeof(s_rw_reason_n));
+    s_rw_rev_class_n = 0; s_rw_clamp = 0; s_rw_phys_n = 0; s_rw_lag_gt_rev = 0; memset(s_rw_gap_h, 0, sizeof(s_rw_gap_h));
+    s_rw_add_sum_ns = 0; s_rw_add_max_ns = 0; s_rw_phys_exc_sum_ns = 0; s_rw_phys_exc_max_ns = 0; s_rw_lag_max_ns = 0;
+}
+
+/* P1147 T-1 rw-*: 判定1回(rl_rd_decide の注入点と同じ関数) */
+void mx68k_floppyu_fdcpt_selftest_rw_feed(const mx68k_rw_in_t* in, mx68k_rw_out_t* out)
+{
+    rw_apply_in(in, out);
+}
+
+/* P1147 T-1 rw-model: 角度モデル(純関数) */
+int64_t mx68k_floppyu_fdcpt_selftest_rw_model(int64_t idx_g, int r, int64_t q, int64_t* k)
+{
+    return rw_model_complete(idx_g, (unsigned)r, q, k);
+}
+
+/* P1147 T-1 rw-koei: 受付時の光栄形の追跡(rl_read_begin と同じ関数)。戻り値=koei_follow */
+int mx68k_floppyu_fdcpt_selftest_rw_note_begin(const uint8_t p[9], int multi, int diag)
+{
+    return rw_note_begin(p, multi, diag);
+}
+
+/* P1147 T-1 rw-koei ⑤-f: multi_sector_mtc 拒否時の pend 設定(rl_exec と同じ関数) */
+void mx68k_floppyu_fdcpt_selftest_rw_note_refused(const uint8_t p[9])
+{
+    rw_note_refused_multi(p);
+}
+
+/* P1147 T-1 rw-*: 集計(読取りのみ)。out = { total, ident_ok, injected, lag_now_ns, lag_max_ns, lag_gt_rev, clamp, v_le_t,
+ * dev_dominant, reason_sum } */
+void mx68k_floppyu_fdcpt_selftest_rw_stats(int64_t out[10])
+{
+    uint32_t sum = 0;
+    for (int i = 0; i < RWR_N; i++) sum += s_rw_reason_n[i];
+    int vle = 1;
+    for (int u = 0; u < 4; u++) if (s_rw_vt[u].valid && s_rw_vt[u].v_last > s_rw_vt[u].t_last) vle = 0;
+    out[0] = s_rw_total; out[1] = sum == s_rw_total; out[2] = s_rw_reason_n[RWR_INJECTED]; out[3] = rw_lag_now_ns();
+    out[4] = s_rw_lag_max_ns; out[5] = s_rw_lag_gt_rev; out[6] = s_rw_clamp; out[7] = vle;
+    out[8] = s_rw_reason_n[RWR_DEV_DOMINANT]; out[9] = sum;
+}
+
+/* P1147 T-1 rw-*: 理由名(ログ照合用) */
+const char* mx68k_floppyu_fdcpt_selftest_rw_reason_name(int reason)
+{
+    return (reason >= 0 && reason < RWR_N) ? RWR_NAME[reason] : "?";
+}
+
+/* P1147 T-1 rw-*: 集計行を1回出す */
+void mx68k_floppyu_fdcpt_selftest_rw_log_sum(void)
+{
+    rl_rw_log_sum();
 }
 #endif /* MX68K_FLOPPYU_USB_SELFTEST */

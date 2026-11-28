@@ -39,6 +39,7 @@ class SettingsViewModel: ObservableObject {
     @Published var floppyuWriteEnabled: Bool = false   // P1054: ふろっぴU君の実ディスクへの書込み許可
     @Published var floppyuFormatEnabled: Bool = false  // P1067: ふろっぴU君の実ディスクへの FORMAT 許可
     @Published var floppyuWriteFast: Bool = false      // P1089: ふろっぴU君の書込みモード(false=安全優先 / true=高速)
+    @Published var floppyuRotationWait: Bool = false   // P1147: ふろっぴU君経由の読込みタイミングを実機に近づける
     // P490 (MIDI Stage 2)
     @Published var midiResetOnInit: Bool = true
     @Published var midiResetType: Int = 0      // 0=LA, 1=GM, 2=GS, 3=XG
@@ -147,6 +148,7 @@ class SettingsViewModel: ObservableObject {
         config.extensions.floppyuFormatEnabled = floppyuWriteEnabled && floppyuFormatEnabled
         // P1089: 書込みモードも同じ連動。書込み許可が OFF なら安全優先(false)で保存する(画面上の選択は保持)
         config.extensions.floppyuWriteFast = floppyuWriteEnabled && floppyuWriteFast
+        config.extensions.floppyuRotationWait = floppyuRotationWait     // P1147(書込み許可とは連動しない)
         config.extensions.midiResetOnInit = midiResetOnInit
         config.extensions.midiResetType = midiResetType
         config.extensions.midiDelayMs = midiDelayMs
@@ -213,6 +215,7 @@ class SettingsViewModel: ObservableObject {
         floppyuWriteEnabled = config.extensions.floppyuWriteEnabled     // P1054
         floppyuFormatEnabled = config.extensions.floppyuFormatEnabled   // P1067
         floppyuWriteFast = config.extensions.floppyuWriteFast           // P1089
+        floppyuRotationWait = config.extensions.floppyuRotationWait     // P1147
         midiResetOnInit = config.extensions.midiResetOnInit
         midiResetType = config.extensions.midiResetType
         midiDelayMs = config.extensions.midiDelayMs
