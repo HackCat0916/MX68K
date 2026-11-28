@@ -451,11 +451,3 @@ Check that the BIOS files (`IPLROM.DAT`/`CGROM.DAT`) are correctly placed and co
 **English:**
 
 Check that a bootable system disk (such as `human302.xdf`) is mounted in FDD0. For HDD/SCSI boot, check that a bootable image is set to the correct ID in the corresponding tab.
-
-### 一部のタイトルでBGMの音程・音色がおかしい / BGM pitch or timbre sounds wrong in certain titles
-
-一部のタイトル（「スーパーハングオン」等）はRoland MT-32対応ソフトです。内蔵MIDI音源の既定設定（Roland SC-55）のままプレイすると、MT-32向けに作られたBGMデータをSC-55（GS音源）で再生することになり、音程・音色が正しく再生されません。該当タイトルをプレイする際は、設定画面で内蔵MIDI音源をMT-32に切り替えてください（MX68K自体の不具合ではありません）。
-
-**English:**
-
-Some titles (such as "Super Hang-On") are software written for the Roland MT-32. If you play them with the internal MIDI synth left at its default setting (Roland SC-55), the MT-32-targeted BGM data is played back on the SC-55 (a GS-type synth) instead, so the pitch and timbre come out wrong. For these titles, switch the internal MIDI synth to MT-32 in the settings screen (this is not a bug in MX68K itself).
