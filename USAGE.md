@@ -177,6 +177,10 @@ TNB製作所製の「ふろっぴU君」をUSBで接続すると、実機の5イ
 - ディスクの読み書きは、通常どおりHuman68kから行います（`DIR`、`COPY`、`FORMAT.X`など）。
 - ディスクを交換してすぐに書き込んでも、通常はMX68K側で拒否されません（Human68k自身の媒体交換処理に委ねられます）。ただし、アプリ起動後（ふろっぴU君再接続後）の最初の書き込み・FORMATの前には、一度ディスクを読んでおく必要があります。「書込み禁止」エラーが出たら「中止」を選び、そのドライブで`DIR`を実行してから操作をやり直してください。それでも出る場合は、安全のため書き込みが停止しています（表示が「書込み: 再起動まで停止中」）。MX68Kを再起動してください。
 - マルチセクタ書き込みなど一部の書き込み要求は、安全のため「書込み禁止」エラーで拒否します。
+- **読込みの速さについて:** ふろっぴU君は読込みキャッシュを持っており、ほとんどのセクタをキャッシュからすぐに返します。そのため、ふろっぴU君経由の読込みは既定で実機X68000より速く終わります(ある場面の計測では、実機148秒に対して約118秒)。「実機X68000のドライブの読込みタイミングに近づける」をオンにすると(既定オフ。「適用」→ハードリセット⌘Rで反映)、ディスクの回転待ちを見積もって読込みの完了を遅らせ、**ロード全体の合計時間**を実機に近づけます。
+  - これは**近似**です。セクタ1つ1つのタイミングを実機どおりにするものではなく、オンにしても大半のセクタはふろっぴU君の速さのまま返ります。
+  - 計測した場面では、合計時間は実機より平均で約9%短く、回ごとに±5%程度のばらつきがありました(原因は未解明)。
+  - 現時点では**部分的な対策(調整中)**です。今後のバージョンで挙動が変わる可能性があります。オフにすると、従来どおりの動作(XEiJ+t・XM6tと同じ)になります。
 - FORMATは、標準2HD（1024バイト×8セクタ）へのFORMATに対応します。既にフォーマット済みのディスクであれば、旧形式で記録された媒体（コピープロテクト等）も含め形式を問わず対応し、Human68k付属のFORMAT.X以外のソフトウェア（ゲームのユーザーディスク作成機能など）からのFORMATも受け付けます（未フォーマットのディスクはコード上は対応済みですが、実機での動作確認はまだ行えていません）。同じディスクへのFORMATは続けて2回まで（ディスクを入れ直すと再びFORMATできます）。物理シリンダ77はFORMATしません（XEiJ・XM6と同じ）。FORMATが途中で止まった場合、装置の状態によっては再起動不要でそのまま次のFORMATへ進めることがあります（ディスクが途中まで初期化されている可能性があります）。装置の状態が分からない場合のみ「FORMAT: 再起動まで停止中」と表示されるので、その場合はMX68Kを再起動してください。
 - 書き込み・FORMATの対象には、ゲーム原盤などのディスクも含まれ得ます。大切なディスクは書込み保護タブで保護してください。また、アクセス中にディスクを取り出さないでください。
 
@@ -203,6 +207,10 @@ While FloppyU is in use, the assigned drives use the FloppyU drives instead of a
 - Read and write disks from Human68k as usual (`DIR`, `COPY`, `FORMAT.X`, etc.).
 - Writing right after a disk swap is usually not refused by MX68K (it is left to Human68k's own media-change handling). However, after launching the app (or reconnecting FloppyU), the disk must be read once before the first write or FORMAT. If Human68k reports a write-protect (書込み禁止) error, choose "中止" (Abort), run `DIR` on that drive, and retry. If the error persists, writing has been stopped for safety (the status shows "Writing: Stopped until restart") — restart MX68K.
 - Some write requests, such as multi-sector writes, are refused with a "write-protected" error for safety.
+- **About read speed:** FloppyU has a read cache and returns most sectors from it immediately, so reading through FloppyU finishes faster than on a real X68000 by default (in one measured scene, about 118 seconds versus 148 seconds on a real machine). Turning on "Approximate real X68000 drive read timing" (off by default; takes effect after "Apply" and a hard reset ⌘R) estimates the disk's rotation delays and holds back read completion, bringing the **total load time** closer to a real X68000.
+  - This is an **approximation**. It does not reproduce the timing of each individual sector, and even when it is on, most sectors are still returned at FloppyU's own speed.
+  - In the measured scene, the total time was on average about 9% shorter than on real hardware, and varied by about ±5% from run to run (the cause is not yet understood).
+  - This is currently a **partial fix that is still being tuned**, and its behavior may change in future versions. When it is off, MX68K behaves as before (the same as XEiJ+t and XM6t).
 - FORMAT supports standard 2HD (1024 bytes × 8 sectors) formatting. Any already-formatted real disk is supported regardless of its existing physical format (including copy-protected disks recorded in other formats), and FORMAT requests from software other than Human68k's own FORMAT.X (such as a game's user-disk-creation feature) are also accepted (unformatted disks are supported in code but have not yet been confirmed on real hardware). The same disk can be formatted at most twice in a row (re-inserting the disk allows formatting again). Physical cylinder 77 is not formatted (same as XEiJ and XM6). If FORMAT stops partway, depending on the drive's state it may be possible to continue with the next FORMAT without restarting (the disk may be partially formatted). Only when the drive's state is unknown does the status show "Formatting: Stopped until restart" — in that case, restart MX68K.
 - Writing and FORMAT can also reach disks such as original game disks. Protect important disks with their write-protect tab, and do not eject a disk while it is being accessed.
 
@@ -443,3 +451,11 @@ Check that the BIOS files (`IPLROM.DAT`/`CGROM.DAT`) are correctly placed and co
 **English:**
 
 Check that a bootable system disk (such as `human302.xdf`) is mounted in FDD0. For HDD/SCSI boot, check that a bootable image is set to the correct ID in the corresponding tab.
+
+### 一部のタイトルでBGMの音程・音色がおかしい / BGM pitch or timbre sounds wrong in certain titles
+
+一部のタイトル（「スーパーハングオン」等）はRoland MT-32対応ソフトです。内蔵MIDI音源の既定設定（Roland SC-55）のままプレイすると、MT-32向けに作られたBGMデータをSC-55（GS音源）で再生することになり、音程・音色が正しく再生されません。該当タイトルをプレイする際は、設定画面で内蔵MIDI音源をMT-32に切り替えてください（MX68K自体の不具合ではありません）。
+
+**English:**
+
+Some titles (such as "Super Hang-On") are software written for the Roland MT-32. If you play them with the internal MIDI synth left at its default setting (Roland SC-55), the MT-32-targeted BGM data is played back on the SC-55 (a GS-type synth) instead, so the pitch and timbre come out wrong. For these titles, switch the internal MIDI synth to MT-32 in the settings screen (this is not a bug in MX68K itself).
